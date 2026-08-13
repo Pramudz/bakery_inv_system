@@ -11,6 +11,9 @@ import { priceListItemsApi } from '../../price-list-items/api/price-list-itemsAp
 import { priceListsApi } from '../../price-lists/api/price-listsApi';
 import { locationsApi } from '../../locations/api/locationsApi';
 import { productLocationsApi } from '../../product-locations/api/product-locationsApi';
+import { suppliersApi } from '../../suppliers/api/suppliersApi';
+import { productSuppliersApi } from '../../product-suppliers/api/product-suppliersApi';
+import { productCostingApi } from '../../product-costing/api/product-costingApi';
 import { Modal } from '../../../components/ui/Modal';
 import { Field } from '../../../components/ui/Field';
 import { Section } from '../../../components/ui/Section';
@@ -25,6 +28,7 @@ type Identifier = { identifierTypeId: string; identifierValue: string; isPrimary
 type PUnit = { unitId: string; conversionFactor: string; isBaseUnit: boolean; isPurchaseUnit: boolean; isSalesUnit: boolean };
 type Price = { priceListId: string; unitId: string; sellingPrice: string; minimumQuantity: string; effectiveFrom: string };
 type Location = { locationId: string; isSellable: boolean; isPurchasable: boolean };
+type SupplierPrice = { supplierId: string; unitId: string; purchasePrice: string; currencyCode: string; minimumQuantity: string; effectiveFrom: string };
 
 const id = (r: any, key: string) => r?.[key] ?? r?.id;
 const emptyProduct = (): ProductForm => ({
@@ -42,6 +46,7 @@ export function ProductsPage() {
   const [identifiers, setIdentifiers] = useState<Identifier[]>([]);
   const [productUnits, setProductUnits] = useState<PUnit[]>([]);
   const [prices, setPrices] = useState<Price[]>([]);
+  const [supplierPrices, setSupplierPrices] = useState<SupplierPrice[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -54,6 +59,7 @@ export function ProductsPage() {
   const identifierTypes = useQuery({ queryKey: ['identifier-types'], queryFn: identifierTypesApi.list });
   const priceLists = useQuery({ queryKey: ['price-lists'], queryFn: priceListsApi.list });
   const locationsQ = useQuery({ queryKey: ['locations'], queryFn: locationsApi.list });
+  const suppliers = useQuery({ queryKey: ['suppliers'], queryFn: suppliersApi.list });
 
   const rows = useMemo(
     () => (products.data ?? []).filter((r: any) => `${r.sku ?? ''} ${r.productName ?? ''}`.toLowerCase().includes(search.toLowerCase())),
@@ -72,15 +78,18 @@ export function ProductsPage() {
     .map((r: any) => ({ value: id(r, 'priceListId'), label: r.name ?? r.code }));
   const locationOptions = (locationsQ.data ?? []).filter((r: any) => r.isActive !== false)
     .map((r: any) => ({ value: id(r, 'locationId'), label: r.name ?? r.code }));
+  const supplierOptions = (suppliers.data ?? []).filter((r: any) => r.isActive !== false)
+    .map((r: any) => ({ value: id(r, 'supplierId'), label: `${r.supplierName ?? r.name} (${r.supplierCode ?? r.code ?? ''})` }));
 
   const reset = () => {
-    setForm(emptyProduct()); setIdentifiers([]); setProductUnits([]); setPrices([]); setLocations([]);
+    setForm(emptyProduct()); setIdentifiers([]); setProductUnits([]); setPrices([]); setSupplierPrices([]); setLocations([]);
     setStep(0); setError(''); setOpen(true);
   };
 
   const addIdentifier = () => setIdentifiers([...identifiers, { identifierTypeId: '', identifierValue: '', isPrimary: identifiers.length === 0 }]);
   const addUnit = () => setProductUnits([...productUnits, { unitId: '', conversionFactor: '1', isBaseUnit: false, isPurchaseUnit: false, isSalesUnit: true }]);
   const addPrice = () => setPrices([...prices, { priceListId: '', unitId: '', sellingPrice: '', minimumQuantity: '1', effectiveFrom: new Date().toISOString().slice(0, 16) }]);
+  const addSupplierPrice = () => setSupplierPrices([...supplierPrices, { supplierId: '', unitId: '', purchasePrice: '', currencyCode: 'LKR', minimumQuantity: '1', effectiveFrom: new Date().toISOString().slice(0, 16) }]);
   const addLocation = () => setLocations([...locations, { locationId: '', isSellable: true, isPurchasable: true }]);
 
   const submit = async () => {
@@ -92,15 +101,23 @@ export function ProductsPage() {
         brandId: form.brandId ? Number(form.brandId) : undefined,
         baseUnitId: Number(form.baseUnitId),
       });
-      const productId = id(product, 'productId');
+      const productId = Number(id(product, 'productId'));
       for (const x of identifiers) {
         await productIdentifiersApi.create({ productId, identifierTypeId: Number(x.identifierTypeId), identifierValue: x.identifierValue, isPrimary: x.isPrimary });
       }
+      const createdProductUnits = new Map<number, number>();
       for (const x of productUnits) {
-        await productUnitsApi.create({ productId, unitId: Number(x.unitId), conversionFactor: Number(x.conversionFactor), isBaseUnit: x.isBaseUnit, isPurchaseUnit: x.isPurchaseUnit, isSalesUnit: x.isSalesUnit });
+        const created: any = await productUnitsApi.create({ productId, unitId: Number(x.unitId), conversionFactor: Number(x.conversionFactor), isBaseUnit: x.isBaseUnit, isPurchaseUnit: x.isPurchaseUnit, isSalesUnit: x.isSalesUnit });
+        createdProductUnits.set(Number(x.unitId), Number(id(created, 'productUnitId')));
       }
       for (const x of prices) {
         await priceListItemsApi.create({ priceListId: Number(x.priceListId), productId, unitId: Number(x.unitId), sellingPrice: Number(x.sellingPrice), minimumQuantity: Number(x.minimumQuantity || 1), effectiveFrom: x.effectiveFrom });
+      }
+      for (const x of supplierPrices) {
+        const productUnitId = createdProductUnits.get(Number(x.unitId));
+        if (!productUnitId) throw new Error('Add the selected purchase-price unit in the Packaging / units step first.');
+        const productSupplier: any = await productSuppliersApi.create({ productId, supplierId: Number(x.supplierId), purchaseUnitId: productUnitId, isPrimarySupplier: false });
+        await productCostingApi.create({ productSupplierId: Number(id(productSupplier, 'productSupplierId')), productUnitId, purchasePrice: Number(x.purchasePrice), currencyCode: x.currencyCode || 'LKR', minimumQuantity: Number(x.minimumQuantity || 1), effectiveFrom: x.effectiveFrom });
       }
       for (const x of locations) {
         await productLocationsApi.create({ productId, locationId: Number(x.locationId), isSellable: x.isSellable, isPurchasable: x.isPurchasable });
@@ -191,7 +208,7 @@ export function ProductsPage() {
           <button type="button" className="btn btn-secondary" onClick={addUnit}>＋ Add unit</button>
         </Section>}
 
-        {step === 3 && <Section title="Pricing" description="Attach selling prices to the tenant's price lists and units.">
+        {step === 3 && <Section title="Pricing" description="Attach selling and supplier purchase prices to product units.">
           <div className="mini-table"><div className="mini-head pricing"><span>Price list</span><span>Unit</span><span>Selling price</span><span>Minimum qty</span><span /></div>
             {prices.map((x, i) => <div className="mini-row pricing" key={i}>
               <select className="control" value={x.priceListId} onChange={e => { const a = [...prices]; a[i] = { ...x, priceListId: e.target.value }; setPrices(a); }}><option value="">Select...</option>{priceListOptions.map(o => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}</select>
@@ -202,6 +219,17 @@ export function ProductsPage() {
             </div>)}
           </div>
           <button type="button" className="btn btn-secondary" onClick={addPrice}>＋ Add price</button>
+          <div style={{ marginTop: 24 }}><h3>Supplier purchase prices</h3><p className="section-desc">Record what each supplier charges for a product unit.</p></div>
+          <div className="mini-table"><div className="mini-head pricing"><span>Supplier</span><span>Purchase unit</span><span>Purchase price</span><span>Minimum qty</span><span /></div>
+            {supplierPrices.map((x, i) => <div className="mini-row pricing" key={i}>
+              <select className="control" value={x.supplierId} onChange={e => { const a = [...supplierPrices]; a[i] = { ...x, supplierId: e.target.value }; setSupplierPrices(a); }}><option value="">Select...</option>{supplierOptions.map(o => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}</select>
+              <select className="control" value={x.unitId} onChange={e => { const a = [...supplierPrices]; a[i] = { ...x, unitId: e.target.value }; setSupplierPrices(a); }}><option value="">Select...</option>{unitOptions.map(o => <option key={String(o.value)} value={String(o.value)}>{o.label}</option>)}</select>
+              <input className="control" type="number" min="0" step="0.01" value={x.purchasePrice} placeholder="200.00" onChange={e => { const a = [...supplierPrices]; a[i] = { ...x, purchasePrice: e.target.value }; setSupplierPrices(a); }} />
+              <input className="control" type="number" min="1" value={x.minimumQuantity} onChange={e => { const a = [...supplierPrices]; a[i] = { ...x, minimumQuantity: e.target.value }; setSupplierPrices(a); }} />
+              <button type="button" className="icon-btn" onClick={() => setSupplierPrices(supplierPrices.filter((_, j) => j !== i))}>×</button>
+            </div>)}
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={addSupplierPrice}>＋ Add supplier price</button>
         </Section>}
 
         {step === 4 && <Section title="Locations" description="Control where the product can be sold or purchased.">

@@ -10,39 +10,58 @@ import { UpdateUserDto } from './dto/update-user.dto';
 export class UsersService {
   constructor(@InjectRepository(User) private readonly repo: Repository<User>) {}
 
-  findAll() {
+  findAll(tenantId: number) {
     return this.repo.find({
+      where: { tenantId },
       relations: { tenant: true, userRoles: { role: true } },
       order: { userId: 'ASC' },
     });
   }
 
-  async findOne(id: number) {
-    const row = await this.repo.findOne({ where: { userId: id }, relations: { tenant: true, userRoles: { role: true } } });
+  async findOne(id: number, tenantId: number) {
+    const row = await this.repo.findOne({
+      where: { userId: id, tenantId },
+      relations: { tenant: true, userRoles: { role: true } },
+    });
     if (!row) throw new NotFoundException('User not found');
     return row;
   }
 
-  async create(dto: CreateUserDto) {
-    const existing = await this.repo.findOneBy({ tenantId: dto.tenantId, username: dto.username });
+  async create(dto: CreateUserDto, tenantId: number) {
+    const existing = await this.repo.findOneBy({
+      tenantId,
+      username: dto.username,
+    });
     if (existing) throw new ConflictException('Username already exists for this tenant');
+
     const passwordHash = await bcrypt.hash(dto.password, 12);
-    const entity = this.repo.create({ ...dto, passwordHash } as any);
-    delete (entity as any).password;
-    return this.repo.save(entity);
+    const payload: any = { ...dto, tenantId, passwordHash };
+    delete payload.password;
+    delete payload.tenantId;
+
+    return this.repo.save(this.repo.create({
+      ...payload,
+      tenantId,
+    } as any));
   }
 
-  async update(id: number, dto: UpdateUserDto) {
-    await this.findOne(id);
+  async update(id: number, dto: UpdateUserDto, tenantId: number) {
+    await this.findOne(id, tenantId);
     const update: any = { ...dto };
-    if (dto.password) { update.passwordHash = await bcrypt.hash(dto.password, 12); delete update.password; }
-    await this.repo.update(id, update);
-    return this.findOne(id);
+    delete update.tenantId;
+
+    if (dto.password) {
+      update.passwordHash = await bcrypt.hash(dto.password, 12);
+      delete update.password;
+    }
+
+    await this.repo.update({ userId: id, tenantId }, update);
+    return this.findOne(id, tenantId);
   }
 
-  async deactivate(id: number) {
-    await this.findOne(id);
-    await this.repo.update(id, { isActive: false });
-    return this.findOne(id);
+  async deactivate(id: number, tenantId: number) {
+    await this.findOne(id, tenantId);
+    await this.repo.update({ userId: id, tenantId }, { isActive: false });
+    return this.findOne(id, tenantId);
   }
 }

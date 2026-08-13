@@ -15,13 +15,44 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthPrincipal } from '../auth/auth.types';
 
 @Controller('platform-users')
-@UseGuards(AuthGuard)
 export class PlatformUsersController {
   constructor(
     private readonly platformUsersService: PlatformUsersService,
   ) {}
 
+
+  @Post('bootstrap')
+  async bootstrap(
+    @Body()
+    body: {
+      username: string;
+      email?: string;
+      password: string;
+      firstName?: string;
+      lastName?: string;
+      mobile?: string;
+    },
+  ) {
+    const platformUser =
+      await this.platformUsersService.bootstrap(body);
+
+    return {
+      platformUserId: platformUser.platformUserId,
+      username: platformUser.username,
+      email: platformUser.email,
+      firstName: platformUser.firstName,
+      lastName: platformUser.lastName,
+      mobile: platformUser.mobile,
+      isActive: platformUser.isActive,
+      createdAt: platformUser.createdAt,
+      updatedAt: platformUser.updatedAt,
+    };
+  }
+
+
+
   @Post()
+  @UseGuards(AuthGuard)
   async create(
     @Body()
     body: {
@@ -53,6 +84,7 @@ export class PlatformUsersController {
   }
 
   @Get(':id')
+  @UseGuards(AuthGuard)
   async findById(
     @Param('id', ParseIntPipe) id: number,
   ) {

@@ -1,6 +1,5 @@
 import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 export class CreateProductDto {
-  @IsInt() tenantId!: number;
   @IsString() @IsNotEmpty() @MaxLength(100) sku!: string;
   @IsString() @IsNotEmpty() @MaxLength(255) productName!: string;
   @IsOptional() @IsString() description?: string;
@@ -15,4 +14,3 @@ export class CreateProductDto {
   @IsOptional() @IsBoolean() trackExpiry?: boolean;
   @IsOptional() @IsBoolean() trackSerial?: boolean;
 }
-

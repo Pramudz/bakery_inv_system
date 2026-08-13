@@ -30,6 +30,7 @@ import { ProductSupplierPricesModule } from './features/product-supplier-prices/
 import { PlatformUsersModule } from './features/platform-users/platform-users.module';
 import { AuthModule } from './features/auth/auth.module';
 import { PlatformSessionsModule } from './features/platform-sessions/platform-sessions.module';
+import { SecurityModule } from './features/auth/security.module';
 
 
 @Module({
@@ -53,6 +54,7 @@ import { PlatformSessionsModule } from './features/platform-sessions/platform-se
 
     PlatformUsersModule,
     PlatformSessionsModule,
+    SecurityModule,
     AuthModule,
     TenantsModule,
     UsersModule,

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -62,4 +62,25 @@ export class PlatformUsersService {
       where: { platformUserId },
     });
   }
+
+
+async bootstrap(body: {
+  username: string;
+  email?: string;
+  password: string;
+  firstName?: string;
+  lastName?: string;
+  mobile?: string;
+}) {
+  const count = await this.platformUserRepository.count();
+
+  if (count > 0) {
+    throw new ConflictException(
+      'Platform user already exists. Bootstrap is disabled.',
+    );
+  }
+
+  return this.create(body);
+}
+
 }

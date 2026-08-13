@@ -12,6 +12,9 @@ import * as bcrypt from 'bcrypt';
 import { PlatformUser } from '../platform-users/platform-users.entity';
 import { PlatformUsersService } from '../platform-users/platform-users.service';
 import { PlatformSession } from '../platform-sessions/platform-sessions.entity';
+import { User } from '../users/user.entity';
+import { UserSession } from '../user-sessions/user-sessions.entity';
+import { TenantLoginDto } from './dto/tenant-login.dto';
 
 import { BootstrapDto } from './dto/bootstrap.dto';
 import { LoginDto } from './dto/login.dto';
@@ -24,6 +27,12 @@ export class AuthService {
 
   @InjectRepository(PlatformSession)
   private readonly platformSessionRepository: Repository<PlatformSession>,
+
+  @InjectRepository(User)
+  private readonly userRepository: Repository<User>,
+
+  @InjectRepository(UserSession)
+  private readonly userSessionRepository: Repository<UserSession>,
 
   private readonly platformUsersService: PlatformUsersService,
 ) {}
@@ -141,5 +150,92 @@ export class AuthService {
 
     expiresAt,
   };
-}
+  }
+
+  async tenantLogin(dto: TenantLoginDto) {
+    const user = await this.userRepository.findOne({
+      where: {
+        username: dto.username,
+        tenant: { tenantCode: dto.tenantCode },
+      },
+      select: {
+        userId: true,
+        tenantId: true,
+        username: true,
+        email: true,
+        passwordHash: true,
+        firstName: true,
+        lastName: true,
+        mobile: true,
+        isActive: true,
+        lastLoginAt: true,
+      },
+      relations: { tenant: true, userRoles: { role: true } },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid tenant, username or password.');
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedException('User is inactive.');
+    }
+
+    if (!user.tenant?.tenantIsActive) {
+      throw new UnauthorizedException('Tenant is inactive.');
+    }
+
+    const passwordMatches = await bcrypt.compare(
+      dto.password,
+      user.passwordHash,
+    );
+
+    if (!passwordMatches) {
+      throw new UnauthorizedException('Invalid tenant, username or password.');
+    }
+
+    const sessionToken = randomBytes(32).toString('hex');
+    const sessionTokenHash = createHash('sha256')
+      .update(sessionToken)
+      .digest('hex');
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+
+    const session = this.userSessionRepository.create({
+      userId: user.userId,
+      sessionTokenHash,
+      expiresAt,
+      lastActivityAt: now,
+      revokedAt: null,
+    });
+
+    await this.userSessionRepository.save(session);
+    await this.userRepository.update(user.userId, { lastLoginAt: now });
+
+    return {
+      accessToken: sessionToken,
+      scope: 'TENANT',
+      tenant: {
+        tenantId: user.tenant.tenantId,
+        tenantCode: user.tenant.tenantCode,
+        tenantName: user.tenant.tenantName,
+      },
+      user: {
+        userId: user.userId,
+        username: user.username,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        mobile: user.mobile,
+      },
+      roles: user.userRoles
+        .filter((userRole) => userRole.role?.isActive)
+        .map((userRole) => ({
+          roleId: userRole.role.roleId,
+          code: userRole.role.code,
+          name: userRole.role.name,
+        })),
+      expiresAt,
+    };
+  }
 }
