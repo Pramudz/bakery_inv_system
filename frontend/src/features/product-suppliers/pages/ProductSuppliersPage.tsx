@@ -1,0 +1,5 @@
+import { CrudPage } from '../../../components/ui/CrudPage';
+import { productSuppliersApi } from '../api/product-suppliersApi';
+export function ProductSuppliersPage(){
+  return <CrudPage title="Product Suppliers" subtitle="Link products to suppliers." queryKey="product-suppliers" api={productSuppliersApi} columns={[{key:'id',label:'ID'},{key:'productId',label:'Product'},{key:'supplierId',label:'Supplier'},{key:'supplierProductCode',label:'Supplier Code'},{key:'leadTimeDays',label:'Lead time'},{key:'isPrimarySupplier',label:'Primary'}]} fields={[{name:'productId',label:'Product ID',type:'number',required:true},{name:'supplierId',label:'Supplier ID',type:'number',required:true},{name:'supplierProductCode',label:'Supplier product code',type:'text',required:false},{name:'purchaseUnitId',label:'Purchase Unit ID',type:'number',required:false},{name:'minimumOrderQty',label:'Minimum order qty',type:'number',required:false},{name:'leadTimeDays',label:'Lead time days',type:'number',required:false}]}/>;
+}

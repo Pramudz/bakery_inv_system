@@ -1,0 +1,307 @@
+// ERP MASTER DATABASE
+// Based on the uploaded dbdiagram design.
+// Foundation + Authentication/RBAC + Product Master + Supplier + Location + Costing.
+
+Table Tenant {
+  tenant_id bigint [pk, increment]
+  code varchar(50) [not null, unique]
+  name varchar(150) [not null]
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+}
+
+Table User {
+  user_id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+  username varchar(100) [not null]
+  email varchar(150)
+  password_hash varchar(255) [not null]
+  first_name varchar(100)
+  last_name varchar(100)
+  mobile varchar(30)
+  is_active boolean [not null, default: true]
+  last_login_at datetime
+  created_at datetime [not null]
+  updated_at datetime
+  created_by bigint [ref: > User.user_id]
+  updated_by bigint [ref: > User.user_id]
+  indexes {
+    (tenant_id, username) [unique]
+    (tenant_id, email) [unique]
+  }
+}
+
+Table UserSession {
+  user_session_id bigint [pk, increment]
+  user_id bigint [not null, ref: > User.user_id]
+  session_token_hash varchar(255) [not null, unique]
+  ip_address varchar(45)
+  user_agent varchar(500)
+  created_at datetime [not null]
+  expires_at datetime [not null]
+  last_activity_at datetime
+  revoked_at datetime
+}
+
+Table Role {
+  role_id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+  code varchar(50) [not null]
+  name varchar(100) [not null]
+  description varchar(255)
+  is_system_role boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+  indexes { (tenant_id, code) [unique] }
+}
+
+Table UserRole {
+  user_role_id bigint [pk, increment]
+  user_id bigint [not null, ref: > User.user_id]
+  role_id bigint [not null, ref: > Role.role_id]
+  assigned_at datetime [not null]
+  indexes { (user_id, role_id) [unique] }
+}
+
+Table Module {
+  module_id bigint [pk, increment]
+  code varchar(50) [not null, unique]
+  name varchar(100) [not null]
+  description varchar(255)
+  display_order int
+  is_active boolean [not null, default: true]
+}
+
+Table Permission {
+  permission_id bigint [pk, increment]
+  module_id bigint [not null, ref: > Module.module_id]
+  code varchar(100) [not null, unique]
+  name varchar(150) [not null]
+  description varchar(255)
+  is_active boolean [not null, default: true]
+}
+
+Table RolePermission {
+  role_permission_id bigint [pk, increment]
+  role_id bigint [not null, ref: > Role.role_id]
+  permission_id bigint [not null, ref: > Permission.permission_id]
+  assigned_at datetime [not null]
+  indexes { (role_id, permission_id) [unique] }
+}
+
+Table Category {
+  category_id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+  parent_category_id bigint [ref: > Category.category_id]
+  category_code varchar(50) [not null]
+  category_name varchar(150) [not null]
+  description varchar(255)
+  sort_order int
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+  indexes {
+    (tenant_id, category_code) [unique]
+    (tenant_id, category_name)
+  }
+}
+
+Table Brand {
+  brand_id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+  brand_code varchar(50) [not null]
+  brand_name varchar(150) [not null]
+  description varchar(255)
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+  indexes { (tenant_id, brand_code) [unique] }
+}
+
+Table UnitOfMeasure {
+  unit_id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+  code varchar(30) [not null]
+  name varchar(100) [not null]
+  symbol varchar(20)
+  unit_type varchar(50) [not null]
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+  indexes { (tenant_id, code) [unique] }
+}
+
+Table Product {
+  product_id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+  sku varchar(100) [not null]
+  product_name varchar(255) [not null]
+  description text
+  product_type varchar(50) [not null, default: 'STOCK']
+  category_id bigint [not null, ref: > Category.category_id]
+  brand_id bigint [ref: > Brand.brand_id]
+  base_unit_id bigint [not null, ref: > UnitOfMeasure.unit_id]
+  is_active boolean [not null, default: true]
+  is_sellable boolean [not null, default: true]
+  is_purchasable boolean [not null, default: true]
+  is_stock_item boolean [not null, default: true]
+  track_batch boolean [not null, default: false]
+  track_expiry boolean [not null, default: false]
+  track_serial boolean [not null, default: false]
+  created_at datetime [not null]
+  updated_at datetime
+  indexes { (tenant_id, sku) [unique] }
+}
+
+Table ProductIdentifier {
+  product_identifier_id bigint [pk, increment]
+  product_id bigint [not null, ref: > Product.product_id]
+  identifier_type_id bigint [not null, ref: > IdentifierType.identifier_type_id]
+  identifier_value varchar(100) [not null]
+  is_primary boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  valid_from datetime
+  valid_to datetime
+  created_at datetime [not null]
+  updated_at datetime
+}
+
+Table IdentifierType {
+  identifier_type_id bigint [pk, increment]
+  code varchar(50) [not null, unique]
+  name varchar(100) [not null]
+  description varchar(255)
+  is_active boolean [not null, default: true]
+}
+
+Table ProductUnit {
+  product_unit_id bigint [pk, increment]
+  product_id bigint [not null, ref: > Product.product_id]
+  unit_id bigint [not null, ref: > UnitOfMeasure.unit_id]
+  conversion_factor decimal(18,6) [not null, default: 1]
+  is_base_unit boolean [not null, default: false]
+  is_purchase_unit boolean [not null, default: false]
+  is_sales_unit boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+  indexes { (product_id, unit_id) [unique] }
+}
+
+Table Supplier {
+  supplier_id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+  supplier_code varchar(50) [not null]
+  supplier_name varchar(200) [not null]
+  contact_name varchar(150)
+  phone varchar(30)
+  email varchar(150)
+  address_line_1 varchar(255)
+  address_line_2 varchar(255)
+  city varchar(100)
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+  indexes { (tenant_id, supplier_code) [unique] }
+}
+
+Table ProductSupplier {
+  product_supplier_id bigint [pk, increment]
+  product_id bigint [not null, ref: > Product.product_id]
+  supplier_id bigint [not null, ref: > Supplier.supplier_id]
+  supplier_product_code varchar(100)
+  purchase_unit_id bigint [ref: > ProductUnit.product_unit_id]
+  minimum_order_qty decimal(18,6)
+  lead_time_days int
+  is_primary_supplier boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+  indexes { (product_id, supplier_id) [unique] }
+}
+
+Table ProductSupplierPrice {
+  product_supplier_price_id bigint [pk, increment]
+  product_supplier_id bigint [not null, ref: > ProductSupplier.product_supplier_id]
+  product_unit_id bigint [not null, ref: > ProductUnit.product_unit_id]
+  purchase_price decimal(18,4) [not null]
+  currency_code char(3) [not null, default: 'LKR']
+  minimum_quantity decimal(18,6) [not null, default: 1]
+  effective_from datetime [not null]
+  effective_to datetime
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+}
+
+Table PriceList {
+  price_list_id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+  code varchar(50) [not null]
+  name varchar(150) [not null]
+  price_list_type varchar(50) [not null]
+  currency_code char(3) [not null, default: 'LKR']
+  is_default boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+}
+
+Table PriceListItem {
+  price_list_item_id bigint [pk, increment]
+  price_list_id bigint [not null, ref: > PriceList.price_list_id]
+  product_id bigint [not null, ref: > Product.product_id]
+  unit_id bigint [not null, ref: > UnitOfMeasure.unit_id]
+  selling_price decimal(18,4) [not null]
+  minimum_quantity decimal(18,6) [not null, default: 1]
+  effective_from datetime [not null]
+  effective_to datetime
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+}
+
+Table Location {
+  location_id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+  code varchar(50) [not null]
+  name varchar(150) [not null]
+  location_type varchar(50) [not null]
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+  indexes { (tenant_id, code) [unique] }
+}
+
+Table ProductLocation {
+  product_location_id bigint [pk, increment]
+  product_id bigint [not null, ref: > Product.product_id]
+  location_id bigint [not null, ref: > Location.location_id]
+  is_active boolean [not null, default: true]
+  is_sellable boolean [not null, default: true]
+  is_purchasable boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+}
+
+Table Attribute {
+  attribute_id bigint [pk, increment]
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+  code varchar(50) [not null]
+  name varchar(100) [not null]
+  data_type varchar(30) [not null]
+  is_active boolean [not null, default: true]
+  created_at datetime [not null]
+  updated_at datetime
+}
+
+Table ProductAttributes {
+  product_attribute_id bigint [pk, increment]
+  product_id bigint [not null, ref: > Product.product_id]
+  attribute_id bigint [not null, ref: > Attribute.attribute_id]
+  value varchar(500) [not null]
+  created_at datetime [not null]
+  updated_at datetime
+}

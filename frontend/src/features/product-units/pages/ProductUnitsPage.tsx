@@ -1,0 +1,3 @@
+import { CrudPage } from '../../../components/ui/CrudPage';
+import { productUnitsApi } from '../api/product-unitsApi';
+export function ProductUnitsPage(){return <CrudPage title="Product Units" subtitle="Product-specific unit conversions." queryKey="product-units" api={productUnitsApi} columns={[{key:'id',label:'ID'},{key:'productId',label:'Product'},{key:'unitId',label:'Unit'},{key:'conversionFactor',label:'Conversion'},{key:'isBaseUnit',label:'Base'},{key:'isActive',label:'Status'}]} fields={[{name:'productId',label:'Product ID',type:'number',required:true},{name:'unitId',label:'Unit ID',type:'number',required:true},{name:'conversionFactor',label:'Conversion factor',type:'number',required:true}]}/>;}

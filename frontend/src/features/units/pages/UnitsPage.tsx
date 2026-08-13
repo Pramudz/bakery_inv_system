@@ -1,0 +1,3 @@
+import { CrudPage } from '../../../components/ui/CrudPage';
+import { unitsApi } from '../api/unitsApi';
+export function UnitsPage(){return <CrudPage title="Units of Measure" subtitle="Base and transactional units." queryKey="units" api={unitsApi} columns={[{key:'id',label:'ID'},{key:'tenantId',label:'Tenant'},{key:'code',label:'Code'},{key:'name',label:'Name'},{key:'unitType',label:'Type'},{key:'isActive',label:'Status'}]} fields={[{name:'tenantId',label:'Tenant ID',type:'number',required:true},{name:'code',label:'Code',required:true},{name:'name',label:'Name',required:true},{name:'symbol',label:'Symbol'},{name:'unitType',label:'Unit Type',required:true}]}/>;}

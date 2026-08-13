@@ -1,0 +1,749 @@
+// ============================================================
+// ERP MASTER DATABASE
+// FOUNDATION + AUTHENTICATION + RBAC + PRODUCT MASTER
+// ============================================================
+//
+// Current version:
+// - Multi-tenant foundation
+// - Authentication
+// - Role Based Access Control
+// - Product Master
+// - Supplier Master
+// - Location Master
+// - Product Units
+// - Product Identifiers
+// - Supplier Purchasing Prices
+// - Selling Price Lists
+// - Product Attributes
+//
+// Next phase:
+// Inventory + Batch/Expiry + Purchasing Transactions + POS
+// ============================================================
+
+
+// ============================================================
+//                    AUTHENTICATION & RBAC
+// ============================================================
+
+
+// ============================================================
+// 1. TENANT
+// One independent business/customer
+// ============================================================
+
+Table Tenant {
+  tenant_id bigint [pk, increment]
+
+  code varchar(50) [not null, unique]
+  name varchar(150) [not null]
+
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+}
+
+
+// ============================================================
+// 2. USER
+// Login account belonging to a tenant
+// ============================================================
+
+Table User {
+  user_id bigint [pk, increment]
+
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+
+  username varchar(100) [not null]
+  email varchar(150)
+  password_hash varchar(255) [not null]
+
+  first_name varchar(100)
+  last_name varchar(100)
+  mobile varchar(30)
+
+  is_active boolean [not null, default: true]
+
+  last_login_at datetime
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (tenant_id, username) [unique]
+    (tenant_id, email) [unique]
+  }
+}
+
+
+// ============================================================
+// 3. USER SESSION
+// Authentication/session management
+// ============================================================
+
+Table UserSession {
+  user_session_id bigint [pk, increment]
+
+  user_id bigint [not null, ref: > User.user_id]
+
+  session_token_hash varchar(255) [not null, unique]
+
+  ip_address varchar(45)
+  user_agent varchar(500)
+
+  created_at datetime [not null]
+  expires_at datetime [not null]
+  last_activity_at datetime
+  revoked_at datetime
+
+  indexes {
+    user_id
+    expires_at
+  }
+}
+
+
+// ============================================================
+// 4. ROLE
+// Tenant-specific roles
+//
+// Examples:
+// ADMIN
+// MANAGER
+// CASHIER
+// PURCHASING_OFFICER
+// INVENTORY_CONTROLLER
+// ============================================================
+
+Table Role {
+  role_id bigint [pk, increment]
+
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+
+  code varchar(50) [not null]
+  name varchar(100) [not null]
+  description varchar(255)
+
+  is_system_role boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (tenant_id, code) [unique]
+  }
+}
+
+
+// ============================================================
+// 5. USER ROLE
+// User ↔ Role
+// ============================================================
+
+Table UserRole {
+  user_role_id bigint [pk, increment]
+
+  user_id bigint [not null, ref: > User.user_id]
+  role_id bigint [not null, ref: > Role.role_id]
+
+  assigned_at datetime [not null]
+
+  indexes {
+    (user_id, role_id) [unique]
+  }
+}
+
+
+// ============================================================
+// 6. MODULE
+// System-level ERP modules
+//
+// Examples:
+// PRODUCT
+// PURCHASING
+// INVENTORY
+// POS
+// PRICING
+// REPORTING
+// FORECASTING
+// REPLENISHMENT
+// ============================================================
+
+Table Module {
+  module_id bigint [pk, increment]
+
+  code varchar(50) [not null, unique]
+  name varchar(100) [not null]
+  description varchar(255)
+
+  display_order int
+
+  is_active boolean [not null, default: true]
+}
+
+
+// ============================================================
+// 7. PERMISSION
+// Individual action that a user may perform
+// ============================================================
+
+Table Permission {
+  permission_id bigint [pk, increment]
+
+  module_id bigint [not null, ref: > Module.module_id]
+
+  code varchar(100) [not null, unique]
+  name varchar(150) [not null]
+  description varchar(255)
+
+  is_active boolean [not null, default: true]
+
+  indexes {
+    module_id
+  }
+}
+
+
+// ============================================================
+// 8. ROLE PERMISSION
+// Role ↔ Permission
+// ============================================================
+
+Table RolePermission {
+  role_permission_id bigint [pk, increment]
+
+  role_id bigint [not null, ref: > Role.role_id]
+  permission_id bigint [not null, ref: > Permission.permission_id]
+
+  assigned_at datetime [not null]
+
+  indexes {
+    (role_id, permission_id) [unique]
+  }
+}
+
+
+// ============================================================
+//                    PRODUCT MASTER
+// ============================================================
+
+
+// ============================================================
+// 9. CATEGORY
+// Self-referencing hierarchy
+// ============================================================
+
+Table Category {
+  category_id bigint [pk, increment]
+
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+
+  parent_category_id bigint [ref: > Category.category_id]
+
+  category_code varchar(50) [not null]
+  category_name varchar(150) [not null]
+  description varchar(255)
+
+  sort_order int
+
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (tenant_id, category_code) [unique]
+    (tenant_id, category_name)
+    parent_category_id
+  }
+}
+
+
+// ============================================================
+// 10. BRAND
+// ============================================================
+
+Table Brand {
+  brand_id bigint [pk, increment]
+
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+
+  brand_code varchar(50) [not null]
+  brand_name varchar(150) [not null]
+  description varchar(255)
+
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (tenant_id, brand_code) [unique]
+    (tenant_id, brand_name)
+  }
+}
+
+
+// ============================================================
+// 11. UNIT OF MEASURE
+// ============================================================
+
+Table UnitOfMeasure {
+  unit_id bigint [pk, increment]
+
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+
+  code varchar(30) [not null]
+  name varchar(100) [not null]
+  symbol varchar(20)
+
+  // COUNT
+  // WEIGHT
+  // VOLUME
+  // LENGTH
+  // PACKAGING
+  unit_type varchar(50) [not null]
+
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (tenant_id, code) [unique]
+  }
+}
+
+
+// ============================================================
+// 12. PRODUCT
+// Core product master
+// ============================================================
+
+Table Product {
+  product_id bigint [pk, increment]
+
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+
+  sku varchar(100) [not null]
+  product_name varchar(255) [not null]
+  description text
+
+  // STOCK
+  // SERVICE
+  // RAW_MATERIAL
+  // FINISHED_GOOD
+  // BUNDLE
+  product_type varchar(50) [not null, default: 'STOCK']
+
+  category_id bigint [not null, ref: > Category.category_id]
+  brand_id bigint [ref: > Brand.brand_id]
+
+  // Standard/base inventory unit
+  base_unit_id bigint [not null, ref: > UnitOfMeasure.unit_id]
+
+  is_active boolean [not null, default: true]
+  is_sellable boolean [not null, default: true]
+  is_purchasable boolean [not null, default: true]
+  is_stock_item boolean [not null, default: true]
+
+  // Future inventory controls
+  track_batch boolean [not null, default: false]
+  track_expiry boolean [not null, default: false]
+  track_serial boolean [not null, default: false]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (tenant_id, sku) [unique]
+    (tenant_id, product_name)
+    category_id
+    brand_id
+    base_unit_id
+  }
+}
+
+
+// ============================================================
+// 13. IDENTIFIER TYPE
+// ============================================================
+
+Table IdentifierType {
+  identifier_type_id bigint [pk, increment]
+
+  code varchar(50) [not null, unique]
+  name varchar(100) [not null]
+  description varchar(255)
+
+  is_active boolean [not null, default: true]
+}
+
+
+// ============================================================
+// 14. PRODUCT IDENTIFIER
+//
+// Supports:
+// Barcode
+// UPC
+// EAN
+// Prime Item Number
+// All-Link Item Number
+// Supplier Item Number
+// etc.
+//
+// Optional for MVP
+// ============================================================
+
+Table ProductIdentifier {
+  product_identifier_id bigint [pk, increment]
+
+  product_id bigint [not null, ref: > Product.product_id]
+  identifier_type_id bigint [not null, ref: > IdentifierType.identifier_type_id]
+
+  identifier_value varchar(100) [not null]
+
+  is_primary boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+
+  valid_from datetime
+  valid_to datetime
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    identifier_value
+    (product_id, identifier_type_id)
+    (identifier_type_id, identifier_value) [unique]
+  }
+}
+
+
+// ============================================================
+// 15. PRODUCT UNIT
+// Product-specific packaging/conversion
+// ============================================================
+
+Table ProductUnit {
+  product_unit_id bigint [pk, increment]
+
+  product_id bigint [not null, ref: > Product.product_id]
+  unit_id bigint [not null, ref: > UnitOfMeasure.unit_id]
+
+  // Examples:
+  // EA   = 1
+  // VNPK = 6
+  // WHPK = 12
+  // CASE = 24
+
+  conversion_factor decimal(18,6) [not null, default: 1]
+
+  is_base_unit boolean [not null, default: false]
+  is_purchase_unit boolean [not null, default: false]
+  is_sales_unit boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (product_id, unit_id) [unique]
+  }
+}
+
+
+// ============================================================
+//                    SUPPLIER MASTER
+// ============================================================
+
+
+// ============================================================
+// 16. SUPPLIER
+// ============================================================
+
+Table Supplier {
+  supplier_id bigint [pk, increment]
+
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+
+  supplier_code varchar(50) [not null]
+  supplier_name varchar(200) [not null]
+
+  contact_name varchar(150)
+  phone varchar(30)
+  email varchar(150)
+
+  address_line_1 varchar(255)
+  address_line_2 varchar(255)
+  city varchar(100)
+
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (tenant_id, supplier_code) [unique]
+    (tenant_id, supplier_name)
+  }
+}
+
+
+// ============================================================
+// 17. PRODUCT SUPPLIER
+// Product ↔ Supplier
+// ============================================================
+
+Table ProductSupplier {
+  product_supplier_id bigint [pk, increment]
+
+  product_id bigint [not null, ref: > Product.product_id]
+  supplier_id bigint [not null, ref: > Supplier.supplier_id]
+
+  supplier_product_code varchar(100)
+
+  // Supplier's normal purchasing unit
+  purchase_unit_id bigint [ref: > ProductUnit.product_unit_id]
+
+  minimum_order_qty decimal(18,6)
+  lead_time_days int
+
+  is_primary_supplier boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (product_id, supplier_id) [unique]
+    supplier_id
+  }
+}
+
+
+// ============================================================
+// 18. PRODUCT SUPPLIER PRICE
+// Purchasing cost
+// ============================================================
+
+Table ProductSupplierPrice {
+  product_supplier_price_id bigint [pk, increment]
+
+  product_supplier_id bigint [not null, ref: > ProductSupplier.product_supplier_id]
+
+  product_unit_id bigint [not null, ref: > ProductUnit.product_unit_id]
+
+  purchase_price decimal(18,4) [not null]
+
+  currency_code char(3) [not null, default: 'LKR']
+
+  // Quantity-based supplier pricing
+  minimum_quantity decimal(18,6) [not null, default: 1]
+
+  effective_from datetime [not null]
+  effective_to datetime
+
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    product_supplier_id
+    product_unit_id
+    (product_supplier_id, product_unit_id, minimum_quantity, effective_from)
+  }
+}
+
+
+// ============================================================
+//                    SELLING PRICE
+// ============================================================
+
+
+// ============================================================
+// 19. PRICE LIST
+// ============================================================
+
+Table PriceList {
+  price_list_id bigint [pk, increment]
+
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+
+  code varchar(50) [not null]
+  name varchar(150) [not null]
+
+  // RETAIL
+  // WHOLESALE
+  // DISTRIBUTOR
+  // STAFF
+  // ONLINE
+  price_list_type varchar(50) [not null]
+
+  currency_code char(3) [not null, default: 'LKR']
+
+  is_default boolean [not null, default: false]
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (tenant_id, code) [unique]
+  }
+}
+
+
+// ============================================================
+// 20. PRICE LIST ITEM
+// ============================================================
+
+Table PriceListItem {
+  price_list_item_id bigint [pk, increment]
+
+  price_list_id bigint [not null, ref: > PriceList.price_list_id]
+  product_id bigint [not null, ref: > Product.product_id]
+
+  unit_id bigint [not null, ref: > UnitOfMeasure.unit_id]
+
+  selling_price decimal(18,4) [not null]
+
+  // Quantity-based selling price
+  minimum_quantity decimal(18,6) [not null, default: 1]
+
+  effective_from datetime [not null]
+  effective_to datetime
+
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (price_list_id, product_id, unit_id, effective_from)
+    product_id
+  }
+}
+
+
+// ============================================================
+//                    LOCATION
+// ============================================================
+
+
+// ============================================================
+// 21. LOCATION
+// Store / Warehouse / Distribution Center
+// ============================================================
+
+Table Location {
+  location_id bigint [pk, increment]
+
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+
+  code varchar(50) [not null]
+  name varchar(150) [not null]
+
+  // STORE
+  // WAREHOUSE
+  // DISTRIBUTION_CENTER
+  // OTHER
+  location_type varchar(50) [not null]
+
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (tenant_id, code) [unique]
+    (tenant_id, name)
+  }
+}
+
+
+// ============================================================
+// 22. PRODUCT LOCATION
+//
+// IMPORTANT:
+// This does NOT store stock quantity.
+// Inventory tables will handle actual stock.
+// ============================================================
+
+Table ProductLocation {
+  product_location_id bigint [pk, increment]
+
+  product_id bigint [not null, ref: > Product.product_id]
+  location_id bigint [not null, ref: > Location.location_id]
+
+  is_active boolean [not null, default: true]
+  is_sellable boolean [not null, default: true]
+  is_purchasable boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (product_id, location_id) [unique]
+    location_id
+  }
+}
+
+
+// ============================================================
+//                    PRODUCT ATTRIBUTES
+// ============================================================
+
+
+// ============================================================
+// 23. ATTRIBUTE
+// Flexible product attribute definitions
+// ============================================================
+
+Table Attribute {
+  attribute_id bigint [pk, increment]
+
+  tenant_id bigint [not null, ref: > Tenant.tenant_id]
+
+  code varchar(50) [not null]
+  name varchar(100) [not null]
+
+  // TEXT
+  // NUMBER
+  // BOOLEAN
+  // DATE
+  data_type varchar(30) [not null]
+
+  is_active boolean [not null, default: true]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (tenant_id, code) [unique]
+  }
+}
+
+
+// ============================================================
+// 24. PRODUCT ATTRIBUTES
+// ============================================================
+
+Table ProductAttributes {
+  product_attribute_id bigint [pk, increment]
+
+  product_id bigint [not null, ref: > Product.product_id]
+  attribute_id bigint [not null, ref: > Attribute.attribute_id]
+
+  value varchar(500) [not null]
+
+  created_at datetime [not null]
+  updated_at datetime
+
+  indexes {
+    (product_id, attribute_id) [unique]
+    attribute_id
+  }
+}
