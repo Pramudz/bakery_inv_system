@@ -3,6 +3,8 @@ import { AuditEntity } from '../../common/audit.entity';
 import { Tenant } from '../tenants/tenant.entity';
 import { UserRole } from '../user-roles/user-roles.entity';
 import { UserSession } from '../user-sessions/user-sessions.entity';
+import { UserLocation } from '../user-locations/user-locations.entity';
+import { GoodsReceipt, InventoryLedger, PurchaseOrder } from '../purchasing/purchasing.entities';
 
 @Entity('tbl_user')
 export class User extends AuditEntity {
@@ -20,4 +22,12 @@ export class User extends AuditEntity {
   @Column({ name:'last_login_at', type:'datetime', nullable:true }) lastLoginAt!: Date|null;
   @OneToMany(() => UserRole, (userRole) => userRole.user) userRoles!: UserRole[];
   @OneToMany(() => UserSession, (session) => session.user) sessions!: UserSession[];
+  @OneToMany(() => UserLocation, (userLocation) => userLocation.user) userLocations!: UserLocation[];
+  @OneToMany(() => PurchaseOrder, (purchaseOrder) => purchaseOrder.createdByUser) createdPurchaseOrders!: PurchaseOrder[];
+  @OneToMany(() => PurchaseOrder, (purchaseOrder) => purchaseOrder.approvedByUser) approvedPurchaseOrders!: PurchaseOrder[];
+  @OneToMany(() => PurchaseOrder, (purchaseOrder) => purchaseOrder.cancelledByUser) cancelledPurchaseOrders!: PurchaseOrder[];
+  @OneToMany(() => GoodsReceipt, (goodsReceipt) => goodsReceipt.createdByUser) createdGoodsReceipts!: GoodsReceipt[];
+  @OneToMany(() => GoodsReceipt, (goodsReceipt) => goodsReceipt.postedByUser) postedGoodsReceipts!: GoodsReceipt[];
+  @OneToMany(() => GoodsReceipt, (goodsReceipt) => goodsReceipt.cancelledByUser) cancelledGoodsReceipts!: GoodsReceipt[];
+  @OneToMany(() => InventoryLedger, (ledger) => ledger.createdByUser) inventoryLedgers!: InventoryLedger[];
 }

@@ -6,6 +6,7 @@ import { Role } from '../roles/roles.entity';
 import { Permission } from '../permissions/permissions.entity';
 import { CreateRolePermissionDto } from './dto/create-role-permissions.dto';
 import { UpdateRolePermissionDto } from './dto/update-role-permissions.dto';
+import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 
 @Injectable()
 export class RolePermissionService {
@@ -29,6 +30,8 @@ export class RolePermissionService {
     if(!parent) throw new NotFoundException('Role not found for this tenant.');
     const second=await this.dataSource.getRepository(Permission).findOne({ where: { permissionId:(dto as any).permissionId } as any });
     if(!second) throw new NotFoundException('Permission not found.');
+    const enabled = await this.dataSource.getRepository(TenantModule).findOneBy({ tenantId, moduleId: second.moduleId, isEnabled: true });
+    if (!enabled) throw new NotFoundException('Permission module is not enabled for this tenant.');
     const duplicate=await this.repo.findOne({ where: { roleId:(dto as any).roleId, permissionId:(dto as any).permissionId } as any });
     if(duplicate) throw new ConflictException('Relationship already exists.');
     return this.repo.save(this.repo.create(dto as any));

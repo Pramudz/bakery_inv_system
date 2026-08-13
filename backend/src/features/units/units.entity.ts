@@ -4,6 +4,7 @@ import { Tenant } from '../tenants/tenant.entity';
 import { Product } from '../products/products.entity';
 import { ProductUnit } from '../product-units/product-units.entity';
 import { PriceListItem } from '../price-list-items/price-list-items.entity';
+import { GoodsReceiptLine, PurchaseOrderLine } from '../purchasing/purchasing.entities';
 @Entity('tbl_unit_of_measure')
 export class UnitOfMeasure extends AuditEntity {
   @PrimaryGeneratedColumn({name:'unit_id',type:'bigint'}) unitId!: number;
@@ -17,4 +18,6 @@ export class UnitOfMeasure extends AuditEntity {
   @OneToMany(() => Product, (product) => product.baseUnit) baseProducts!: Product[];
   @OneToMany(() => ProductUnit, (productUnit) => productUnit.unit) productUnits!: ProductUnit[];
   @OneToMany(() => PriceListItem, (item) => item.unit) priceListItems!: PriceListItem[];
+  @OneToMany(() => PurchaseOrderLine, (line) => line.unit) purchaseOrderLines!: PurchaseOrderLine[];
+  @OneToMany(() => GoodsReceiptLine, (line) => line.unit) goodsReceiptLines!: GoodsReceiptLine[];
 }

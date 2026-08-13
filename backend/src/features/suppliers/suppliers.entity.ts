@@ -2,6 +2,7 @@ import { Column, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColum
 import { AuditEntity } from '../../common/audit.entity';
 import { Tenant } from '../tenants/tenant.entity';
 import { ProductSupplier } from '../product-suppliers/product-suppliers.entity';
+import { GoodsReceipt, PurchaseOrder } from '../purchasing/purchasing.entities';
 @Entity('tbl_supplier')
 export class Supplier extends AuditEntity {
   @PrimaryGeneratedColumn({name:'supplier_id',type:'bigint'}) supplierId!: number;
@@ -17,4 +18,6 @@ export class Supplier extends AuditEntity {
   @Column({name:'city',type:'varchar',length:100,nullable:true}) city!: string|null;
   @Column({name:'is_active',default:true}) isActive!: boolean;
   @OneToMany(() => ProductSupplier, (productSupplier) => productSupplier.supplier) productSuppliers!: ProductSupplier[];
+  @OneToMany(() => PurchaseOrder, (purchaseOrder) => purchaseOrder.supplier) purchaseOrders!: PurchaseOrder[];
+  @OneToMany(() => GoodsReceipt, (goodsReceipt) => goodsReceipt.supplier) goodsReceipts!: GoodsReceipt[];
 }

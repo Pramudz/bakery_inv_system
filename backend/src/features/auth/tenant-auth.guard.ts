@@ -38,7 +38,7 @@ export class TenantAuthGuard implements CanActivate {
 
     const session = await this.userSessionRepository.findOne({
       where: { sessionTokenHash: tokenHash },
-      relations: { user: { tenant: true } },
+      relations: { user: { tenant: true, userRoles: { role: true }, userLocations: { location: true } } },
     });
 
     if (!session) {
@@ -64,11 +64,19 @@ export class TenantAuthGuard implements CanActivate {
     session.lastActivityAt = new Date();
     await this.userSessionRepository.save(session);
 
+    const role = session.user.userRoles.find((userRole) => userRole.role?.isActive)?.role;
+    if (!role) throw new UnauthorizedException('User has no active role.');
+    const assignedLocationIds = session.user.userLocations.filter((assignment) => assignment.isActive && assignment.location?.isActive).map((assignment) => assignment.locationId);
+    if (role.accessScope === 'LOCATION' && !assignedLocationIds.length) throw new UnauthorizedException('Location-based user has no active location assignment.');
     request.user = {
       scope: 'TENANT',
       userId: session.user.userId,
       tenantId: session.user.tenantId,
       username: session.user.username,
+      roleId: role.roleId,
+      roleCode: role.code,
+      accessScope: role.accessScope,
+      assignedLocationIds,
     };
 
     return true;

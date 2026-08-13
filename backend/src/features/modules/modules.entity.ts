@@ -1,6 +1,7 @@
 import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { AuditEntity } from '../../common/audit.entity';
 import { Permission } from '../permissions/permissions.entity';
+import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 @Entity('tbl_module')
 export class ModuleEntity extends AuditEntity {
   @PrimaryGeneratedColumn({ name:'module_id', type:'bigint' }) moduleId!: number;
@@ -10,4 +11,5 @@ export class ModuleEntity extends AuditEntity {
   @Column({name:'display_order',type:'int',nullable:true}) displayOrder!: number|null;
   @Column({name:'is_active',default:true}) isActive!: boolean;
   @OneToMany(() => Permission, (permission) => permission.module) permissions!: Permission[];
+  @OneToMany(() => TenantModule, (tenantModule) => tenantModule.module) tenantModules!: TenantModule[];
 }

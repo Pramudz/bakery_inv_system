@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -21,6 +22,10 @@ export class CreateRoleDto {
   @IsString()
   @MaxLength(255)
   description?: string;
+
+  @IsOptional()
+  @IsIn(['TENANT', 'LOCATION'])
+  accessScope?: 'TENANT' | 'LOCATION';
 
   @IsOptional()
   @IsBoolean()

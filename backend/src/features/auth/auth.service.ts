@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { createHash, randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 
@@ -14,6 +14,10 @@ import { PlatformUsersService } from '../platform-users/platform-users.service';
 import { PlatformSession } from '../platform-sessions/platform-sessions.entity';
 import { User } from '../users/user.entity';
 import { UserSession } from '../user-sessions/user-sessions.entity';
+import { UserLocation } from '../user-locations/user-locations.entity';
+import { Permission } from '../permissions/permissions.entity';
+import { TenantModule } from '../tenant-modules/tenant-modules.entity';
+import { RolePermission } from '../role-permissions/role-permissions.entity';
 import { TenantLoginDto } from './dto/tenant-login.dto';
 
 import { BootstrapDto } from './dto/bootstrap.dto';
@@ -33,6 +37,15 @@ export class AuthService {
 
   @InjectRepository(UserSession)
   private readonly userSessionRepository: Repository<UserSession>,
+
+  @InjectRepository(UserLocation)
+  private readonly userLocationRepository: Repository<UserLocation>,
+
+  @InjectRepository(Permission)
+  private readonly permissionRepository: Repository<Permission>,
+
+  @InjectRepository(TenantModule)
+  private readonly tenantModuleRepository: Repository<TenantModule>,
 
   private readonly platformUsersService: PlatformUsersService,
 ) {}
@@ -212,6 +225,23 @@ export class AuthService {
     await this.userSessionRepository.save(session);
     await this.userRepository.update(user.userId, { lastLoginAt: now });
 
+    const primaryRole = user.userRoles.find((userRole) => userRole.role?.isActive)?.role;
+    if (!primaryRole) throw new UnauthorizedException('User has no active role.');
+    const assignedLocations = await this.userLocationRepository.find({
+      where: { userId: user.userId, tenantId: user.tenantId, isActive: true },
+      relations: { location: true },
+      order: { isDefault: 'DESC', userLocationId: 'ASC' },
+    });
+    if (primaryRole.accessScope === 'LOCATION' && !assignedLocations.length) {
+      throw new UnauthorizedException('Location-based user has no active location assignment.');
+    }
+    const enabledModules = await this.tenantModuleRepository.find({ where: { tenantId: user.tenantId, isEnabled: true }, relations: { module: true } });
+    const enabledModuleIds = enabledModules.map((tenantModule) => tenantModule.moduleId);
+    const availablePermissions = enabledModuleIds.length ? await this.permissionRepository.find({ where: { moduleId: In(enabledModuleIds), isActive: true } }) : [];
+    const rolePermissionCodes = primaryRole.code === 'TENANT_ADMIN'
+      ? availablePermissions.map((permission) => permission.code)
+      : (await this.userLocationRepository.manager.getRepository(RolePermission).find({ where: { roleId: primaryRole.roleId }, relations: { permission: true } })).map((assignment) => assignment.permission.code).filter((code) => availablePermissions.some((permission) => permission.code === code));
+
     return {
       accessToken: sessionToken,
       scope: 'TENANT',
@@ -234,7 +264,13 @@ export class AuthService {
           roleId: userRole.role.roleId,
           code: userRole.role.code,
           name: userRole.role.name,
+          accessScope: userRole.role.accessScope,
         })),
+      role: { roleId: primaryRole.roleId, code: primaryRole.code, name: primaryRole.name, accessScope: primaryRole.accessScope },
+      accessScope: primaryRole.accessScope,
+      assignedLocations: assignedLocations.map((assignment) => ({ locationId: assignment.locationId, name: assignment.location.name, code: assignment.location.code, isDefault: assignment.isDefault })),
+      modules: enabledModules.map((tenantModule) => ({ code: tenantModule.module.code, name: tenantModule.module.name })),
+      permissions: rolePermissionCodes,
       expiresAt,
     };
   }

@@ -37,14 +37,17 @@ export class RoleService {
   }
 
   async update(id: number, dto: UpdateRoleDto, tenantId: number) {
-    await this.findOne(id, tenantId);
+    const role = await this.findOne(id, tenantId);
     const payload: any = { ...dto };
     delete payload.tenantId;
+    if (role.isSystemRole && role.code === 'TENANT_ADMIN' && payload.accessScope && payload.accessScope !== 'TENANT') {
+      throw new ConflictException('The TENANT_ADMIN system role must keep tenant-wide access.');
+    }
     if (payload.code) {
       const same = await this.repo.findOne({
         where: { tenantId, code: payload.code } as any,
       });
-      if (same && (same as any).roleId !== id) {
+      if (same && Number((same as any).roleId) !== Number(id)) {
         throw new ConflictException('Code already exists for this tenant.');
       }
     }

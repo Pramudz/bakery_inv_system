@@ -57,4 +57,11 @@ export class TenantsController {
   ) {
     return this.service.deactivate(id);
   }
+
+  @Patch(':id/activate')
+  activate(
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.service.activate(id);
+  }
 }

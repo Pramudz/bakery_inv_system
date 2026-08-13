@@ -31,6 +31,9 @@ import { PlatformUsersModule } from './features/platform-users/platform-users.mo
 import { AuthModule } from './features/auth/auth.module';
 import { PlatformSessionsModule } from './features/platform-sessions/platform-sessions.module';
 import { SecurityModule } from './features/auth/security.module';
+import { UserLocationModule } from './features/user-locations/user-locations.module';
+import { TenantModulesModule } from './features/tenant-modules/tenant-modules.module';
+import { PurchasingModule } from './features/purchasing/purchasing.module';
 
 
 @Module({
@@ -55,6 +58,9 @@ import { SecurityModule } from './features/auth/security.module';
     PlatformUsersModule,
     PlatformSessionsModule,
     SecurityModule,
+    UserLocationModule,
+    TenantModulesModule,
+    PurchasingModule,
     AuthModule,
     TenantsModule,
     UsersModule,

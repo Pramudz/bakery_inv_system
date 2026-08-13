@@ -12,6 +12,10 @@ export interface TenantPrincipal {
   userId: number;
   tenantId: number;
   username: string;
+  roleId: number;
+  roleCode: string;
+  accessScope: 'TENANT' | 'LOCATION';
+  assignedLocationIds: number[];
 }
 
 export type AuthPrincipal =

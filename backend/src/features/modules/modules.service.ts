@@ -4,10 +4,19 @@ import { Repository } from 'typeorm';
 import { ModuleEntity } from './modules.entity';
 import { CreateModuleEntityDto } from './dto/create-modules.dto';
 import { UpdateModuleEntityDto } from './dto/update-modules.dto';
+import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 @Injectable()
 export class ModuleEntityService {
   constructor(@InjectRepository(ModuleEntity) private readonly repo:Repository<ModuleEntity> ) {}
   findAll() { return this.repo.find({order:{moduleId:'ASC'}}); }
+  findEnabledForTenant(tenantId: number) {
+    return this.repo.createQueryBuilder('module')
+      .innerJoin(TenantModule, 'tenantModule', 'tenantModule.moduleId = module.moduleId')
+      .where('tenantModule.tenantId = :tenantId', { tenantId })
+      .andWhere('tenantModule.isEnabled = :enabled', { enabled: true })
+      .andWhere('module.isActive = :active', { active: true })
+      .orderBy('module.displayOrder', 'ASC').addOrderBy('module.moduleId', 'ASC').getMany();
+  }
   async findOne(id:number) {
     const row=await this.repo.findOneBy({moduleId:id} as any);
     if(!row) throw new NotFoundException('ModuleEntity not found');

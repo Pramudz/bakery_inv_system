@@ -11,6 +11,8 @@ import { Tenant } from './tenant.entity';
 import { User } from '../users/user.entity';
 import { Role } from '../roles/roles.entity';
 import { UserRole } from '../user-roles/user-roles.entity';
+import { ModuleEntity } from '../modules/modules.entity';
+import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
@@ -56,6 +58,8 @@ export class TenantsService {
       const userRepository = manager.getRepository(User);
       const roleRepository = manager.getRepository(Role);
       const userRoleRepository = manager.getRepository(UserRole);
+      const moduleRepository = manager.getRepository(ModuleEntity);
+      const tenantModuleRepository = manager.getRepository(TenantModule);
 
       // Re-check inside the transaction.
       const existingInsideTransaction =
@@ -75,6 +79,15 @@ export class TenantsService {
       });
 
       const savedTenant = await tenantRepository.save(tenant);
+      const defaultModules = [
+        ['MASTER_DATA', 'Master Data'], ['PRODUCT', 'Products'], ['SUPPLIER', 'Suppliers'],
+        ['LOCATION', 'Locations'], ['PRICING', 'Pricing'], ['USER_MANAGEMENT', 'User Management'],
+      ];
+      for (const [code, name] of defaultModules) {
+        let module = await moduleRepository.findOneBy({ code });
+        if (!module) module = await moduleRepository.save(moduleRepository.create({ code, name, isActive: true }));
+        await tenantModuleRepository.save(tenantModuleRepository.create({ tenantId: savedTenant.tenantId, moduleId: module.moduleId, isEnabled: true }));
+      }
 
       // 2. First system role
       const adminRole = roleRepository.create({
@@ -83,6 +96,7 @@ export class TenantsService {
         name: DEFAULT_ADMIN_ROLE_NAME,
         description:
           'Default administrator role created during tenant bootstrap.',
+        accessScope: 'TENANT',
         isSystemRole: true,
         isActive: true,
       });
@@ -168,6 +182,12 @@ export class TenantsService {
   async deactivate(id: number) {
     await this.findOne(id);
     await this.repo.update(id, { tenantIsActive: false });
+    return this.findOne(id);
+  }
+
+  async activate(id: number) {
+    await this.findOne(id);
+    await this.repo.update(id, { tenantIsActive: true });
     return this.findOne(id);
   }
 }

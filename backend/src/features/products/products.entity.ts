@@ -10,6 +10,7 @@ import { ProductSupplier } from '../product-suppliers/product-suppliers.entity';
 import { PriceListItem } from '../price-list-items/price-list-items.entity';
 import { ProductLocation } from '../product-locations/product-locations.entity';
 import { ProductAttributes } from '../product-attributes/product-attributes.entity';
+import { GoodsReceiptLine, InventoryAgeLayer, InventoryBalance, InventoryLedger, PurchaseOrderLine } from '../purchasing/purchasing.entities';
 @Entity('tbl_product')
 export class Product extends AuditEntity {
   @PrimaryGeneratedColumn({name:'product_id',type:'bigint'}) productId!: number;
@@ -38,4 +39,9 @@ export class Product extends AuditEntity {
   @OneToMany(() => PriceListItem, (item) => item.product) priceListItems!: PriceListItem[];
   @OneToMany(() => ProductLocation, (location) => location.product) productLocations!: ProductLocation[];
   @OneToMany(() => ProductAttributes, (attribute) => attribute.product) productAttributes!: ProductAttributes[];
+  @OneToMany(() => PurchaseOrderLine, (line) => line.product) purchaseOrderLines!: PurchaseOrderLine[];
+  @OneToMany(() => GoodsReceiptLine, (line) => line.product) goodsReceiptLines!: GoodsReceiptLine[];
+  @OneToMany(() => InventoryBalance, (balance) => balance.product) inventoryBalances!: InventoryBalance[];
+  @OneToMany(() => InventoryLedger, (ledger) => ledger.product) inventoryLedgers!: InventoryLedger[];
+  @OneToMany(() => InventoryAgeLayer, (layer) => layer.product) inventoryAgeLayers!: InventoryAgeLayer[];
 }

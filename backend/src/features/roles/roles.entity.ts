@@ -11,6 +11,7 @@ export class Role extends AuditEntity {
   @Column({name:'code',type:'varchar',length:50}) code!: string;
   @Column({name:'name',type:'varchar',length:100}) name!: string;
   @Column({name:'description',type:'varchar',length:255,nullable:true}) description!: string|null;
+  @Column({ name: 'access_scope', type: 'varchar', length: 20, default: 'TENANT' }) accessScope!: 'TENANT' | 'LOCATION';
   @Column({name:'is_system_role',default:false}) isSystemRole!: boolean;
   @Column({name:'is_active',default:true}) isActive!: boolean;
   @OneToMany(() => UserRole, (userRole) => userRole.role) userRoles!: UserRole[];

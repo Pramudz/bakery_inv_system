@@ -4,10 +4,19 @@ import { Repository } from 'typeorm';
 import { Permission } from './permissions.entity';
 import { CreatePermissionDto } from './dto/create-permissions.dto';
 import { UpdatePermissionDto } from './dto/update-permissions.dto';
+import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 @Injectable()
 export class PermissionService {
   constructor(@InjectRepository(Permission) private readonly repo:Repository<Permission> ) {}
   findAll() { return this.repo.find({order:{permissionId:'ASC'}}); }
+  findEnabledForTenant(tenantId: number) {
+    return this.repo.createQueryBuilder('permission')
+      .innerJoinAndSelect('permission.module', 'module')
+      .innerJoin(TenantModule, 'tenantModule', 'tenantModule.moduleId = permission.moduleId')
+      .where('tenantModule.tenantId = :tenantId', { tenantId }).andWhere('tenantModule.isEnabled = true')
+      .andWhere('permission.isActive = true').andWhere('module.isActive = true')
+      .orderBy('module.displayOrder', 'ASC').addOrderBy('permission.code', 'ASC').getMany();
+  }
   async findOne(id:number) {
     const row=await this.repo.findOneBy({permissionId:id} as any);
     if(!row) throw new NotFoundException('Permission not found');
