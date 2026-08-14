@@ -13,7 +13,7 @@ import { User } from "../users/user.entity";
 import { Supplier } from "../suppliers/suppliers.entity";
 import { Location } from "../locations/locations.entity";
 import { PurchaseOrderLine } from "./purchase-order-line.entity";
-import { GoodsReceipt } from "./goods-receipt.entity";
+import { GoodsReceipt } from "../goods-receipts/goods-receipt.entity";
 @Entity("tbl_purchase_order")
 @Unique(["tenantId", "poNumber"])
 export class PurchaseOrder extends AuditEntity {

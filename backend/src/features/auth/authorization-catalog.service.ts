@@ -8,7 +8,7 @@ import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 const MODULES = [
   ['MASTER_DATA', 'Master Data'], ['PRODUCT', 'Products'], ['SUPPLIER', 'Suppliers'],
   ['LOCATION', 'Locations'], ['PRICING', 'Pricing'], ['USER_MANAGEMENT', 'User Management'],
-  ['PURCHASING', 'Purchasing'],
+  ['PURCHASING', 'Purchasing' ],['CUSTOMER', 'Customer' ]
 ] as const;
 const PERMISSIONS = [
   ['MASTER_DATA', 'CATEGORY'], ['MASTER_DATA', 'BRAND'], ['MASTER_DATA', 'UNIT'], ['MASTER_DATA', 'ATTRIBUTE'], ['MASTER_DATA', 'IDENTIFIER_TYPE'],
@@ -16,7 +16,8 @@ const PERMISSIONS = [
   ['SUPPLIER', 'SUPPLIER'], ['SUPPLIER', 'PRODUCT_SUPPLIER'],
   ['LOCATION', 'LOCATION'], ['LOCATION', 'PRODUCT_LOCATION'],
   ['PRICING', 'PRICE_LIST'], ['PRICING', 'PRICE_LIST_ITEM'], ['PRICING', 'PRODUCT_SUPPLIER_PRICE'],
-  ['USER_MANAGEMENT', 'USER'], ['USER_MANAGEMENT', 'ROLE'], ['USER_MANAGEMENT', 'ROLE_PERMISSION'], ['USER_MANAGEMENT', 'PERMISSION'],
+  ['CUSTOMER', 'CUSTOMER']
+
 ] as const;
 
 @Injectable()

@@ -1,7 +1,7 @@
 # ERP Architecture Decision Record
 
-## Frontend
-
+## Frontend hhhhhhhh
+vgvhgvgggggggggggggggggggggggggggggggggggggg
 React + TypeScript + Vite.
 
 ### Routing

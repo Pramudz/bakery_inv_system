@@ -9,7 +9,7 @@ import { AuditEntity } from "../../common/audit.entity";
 import { Product } from "../products/products.entity";
 import { UnitOfMeasure } from "../units/units.entity";
 import { GoodsReceipt } from "./goods-receipt.entity";
-import { PurchaseOrderLine } from "./purchase-order-line.entity";
+import { PurchaseOrderLine } from "../purchase-orders/purchase-order-line.entity";
 @Entity("tbl_goods_receipt_line")
 export class GoodsReceiptLine extends AuditEntity {
   @PrimaryGeneratedColumn({ name: "goods_receipt_line_id", type: "bigint" })

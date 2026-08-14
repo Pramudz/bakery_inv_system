@@ -4,7 +4,8 @@ import { Tenant } from '../tenants/tenant.entity';
 import { Product } from '../products/products.entity';
 import { ProductUnit } from '../product-units/product-units.entity';
 import { PriceListItem } from '../price-list-items/price-list-items.entity';
-import { GoodsReceiptLine, PurchaseOrderLine } from '../purchasing/purchasing.entities';
+import { GoodsReceiptLine } from '../goods-receipts/goods-receipt-line.entity';
+import { PurchaseOrderLine } from '../purchase-orders/purchase-order-line.entity';
 @Entity('tbl_unit_of_measure')
 export class UnitOfMeasure extends AuditEntity {
   @PrimaryGeneratedColumn({name:'unit_id',type:'bigint'}) unitId!: number;

@@ -12,7 +12,7 @@ import { Tenant } from "../tenants/tenant.entity";
 import { User } from "../users/user.entity";
 import { Supplier } from "../suppliers/suppliers.entity";
 import { Location } from "../locations/locations.entity";
-import { PurchaseOrder } from "./purchase-order.entity";
+import { PurchaseOrder } from "../purchase-orders/purchase-order.entity";
 import { GoodsReceiptLine } from "./goods-receipt-line.entity";
 @Entity("tbl_goods_receipt")
 @Unique(["tenantId", "grnNumber"])
