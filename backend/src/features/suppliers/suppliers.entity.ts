@@ -2,7 +2,8 @@ import { Column, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColum
 import { AuditEntity } from '../../common/audit.entity';
 import { Tenant } from '../tenants/tenant.entity';
 import { ProductSupplier } from '../product-suppliers/product-suppliers.entity';
-import { GoodsReceipt, PurchaseOrder } from '../purchasing/purchasing.entities';
+import { GoodsReceipt } from '../goods-receipts/goods-receipt.entity';
+import { PurchaseOrder } from '../purchase-orders/purchase-order.entity';
 @Entity('tbl_supplier')
 export class Supplier extends AuditEntity {
   @PrimaryGeneratedColumn({name:'supplier_id',type:'bigint'}) supplierId!: number;

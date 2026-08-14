@@ -3,7 +3,11 @@ import { AuditEntity } from '../../common/audit.entity';
 import { Tenant } from '../tenants/tenant.entity';
 import { ProductLocation } from '../product-locations/product-locations.entity';
 import { UserLocation } from '../user-locations/user-locations.entity';
-import { GoodsReceipt, InventoryAgeLayer, InventoryBalance, InventoryLedger, PurchaseOrder } from '../purchasing/purchasing.entities';
+import { GoodsReceipt } from '../goods-receipts/goods-receipt.entity';
+import { InventoryAgeLayer } from '../inventory-age-layers/inventory-age-layer.entity';
+import { InventoryBalance } from '../inventory-balance/inventory-balance.entity';
+import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
+import { PurchaseOrder } from '../purchase-orders/purchase-order.entity';
 @Entity('tbl_location')
 export class Location extends AuditEntity {
   @PrimaryGeneratedColumn({name:'location_id',type:'bigint'}) locationId!: number;
