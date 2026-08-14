@@ -166,8 +166,8 @@ export class PurchasingService {
       const purchaseOrder = await this.po(Number(dto.purchaseOrderId), user);
       if (
         !["APPROVED", "SENT", "PART_RECEIVED"].includes(purchaseOrder.status) ||
-        purchaseOrder.supplierId !== Number(dto.supplierId) ||
-        purchaseOrder.locationId !== Number(dto.locationId)
+        Number(purchaseOrder.supplierId) !== Number(dto.supplierId) ||
+        Number(purchaseOrder.locationId) !== Number(dto.locationId)
       ) {
         throw new BadRequestException("PO is not eligible for this receipt.");
       }
@@ -183,6 +183,7 @@ export class PurchasingService {
           receiptType,
           supplierId: Number(dto.supplierId),
           locationId: Number(dto.locationId),
+          supplierInvoiceDate: dto.supplierInvoiceDate || null,
           purchaseOrderId:
             receiptType === "PO_BASED" ? Number(dto.purchaseOrderId) : null,
           createdByUserId: user.userId,
@@ -223,6 +224,7 @@ export class PurchasingService {
         receiptType: goodsReceipt.receiptType,
         supplierId: Number(dto.supplierId),
         locationId: Number(dto.locationId),
+        supplierInvoiceDate: dto.supplierInvoiceDate || null,
       });
       await manager.getRepository(GoodsReceipt).save(goodsReceipt);
       await manager
@@ -260,7 +262,7 @@ export class PurchasingService {
         .getRepository(GoodsReceipt)
         .findOneBy({ goodsReceiptId: id, tenantId: user.tenantId });
       if (!goodsReceipt) throw new NotFoundException("GRN not found.");
-      await this.assertLocationAccess(user, goodsReceipt.locationId);
+      await this.assertLocationAccess(user, Number(goodsReceipt.locationId));
       if (goodsReceipt.status !== "DRAFT")
         throw new BadRequestException("Only draft GRNs can be posted.");
       const lines = await manager
@@ -271,8 +273,8 @@ export class PurchasingService {
       for (const line of lines) {
         await this.assertProductAndUnit(
           manager,
-          line.productId,
-          line.unitId,
+          Number(line.productId),
+          Number(line.unitId),
           user.tenantId,
         );
         const quantity = Number(line.receivedQty);
@@ -291,7 +293,10 @@ export class PurchasingService {
         );
       }
       if (goodsReceipt.purchaseOrderId)
-        await this.refreshPoStatus(manager, goodsReceipt.purchaseOrderId);
+        await this.refreshPoStatus(
+          manager,
+          Number(goodsReceipt.purchaseOrderId),
+        );
       goodsReceipt.status = "POSTED";
       goodsReceipt.postedByUserId = user.userId;
       goodsReceipt.postedAt = new Date();
@@ -311,13 +316,13 @@ export class PurchasingService {
     const poLine = await manager
       .getRepository(PurchaseOrderLine)
       .findOneBy({
-        purchaseOrderLineId: line.purchaseOrderLineId,
-        purchaseOrderId: goodsReceipt.purchaseOrderId!,
+        purchaseOrderLineId: Number(line.purchaseOrderLineId),
+        purchaseOrderId: Number(goodsReceipt.purchaseOrderId),
       });
     if (
       !poLine ||
-      poLine.productId !== line.productId ||
-      poLine.unitId !== line.unitId
+      Number(poLine.productId) !== Number(line.productId) ||
+      Number(poLine.unitId) !== Number(line.unitId)
     )
       throw new BadRequestException(
         "Receipt line does not match the purchase order.",
@@ -526,6 +531,14 @@ export class PurchasingService {
               taxAmount: String(taxAmount),
               netUnitCost: String(netUnitCost),
               lineTotal: String(quantity * netUnitCost),
+              manufactureDate:
+                parentField === "goodsReceiptId"
+                  ? row.manufactureDate || null
+                  : undefined,
+              expiryDate:
+                parentField === "goodsReceiptId"
+                  ? row.expiryDate || null
+                  : undefined,
             }),
         );
     }
