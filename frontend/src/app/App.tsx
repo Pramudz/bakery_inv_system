@@ -12,6 +12,7 @@ const tenantGroups = [
   { title:'Organization', items:[['Users','/users'],['Roles','/roles'],['Permissions','/permissions']] },
   { title:'Product Master', items:[['Products','/products'],['Categories','/categories'],['Brands','/brands'],['Units','/units'],['Identifiers','/identifier-types'],['Attributes','/attributes']] },
   { title:'Supply & Pricing', items:[['Suppliers','/suppliers'],['Product Suppliers','/product-suppliers'],['Product Costing','/product-costing'],['Price Lists','/price-lists']] },
+  { title:'Customers', items:[['Customers','/customers']] },
   { title:'Purchasing', items:[['Purchase Orders','/purchase-orders'],['Goods Receipts','/goods-receipts']] },
   { title:'Locations', items:[['Locations','/locations'],['Product Locations','/product-locations']] },
   { title:'System', items:[['Modules','/modules'],['User Roles','/user-roles'],['Role Permissions','/role-permissions'],['Sessions','/user-sessions']] },

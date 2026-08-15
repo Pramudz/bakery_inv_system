@@ -34,6 +34,7 @@ import { ProductUnitsPage } from "../features/product-units/pages/ProductUnitsPa
 import { UserSessionsPage } from "../features/user-sessions/pages/UserSessionsPage";
 import { PurchaseOrdersPage } from "../features/purchasing/pages/PurchaseOrdersPage";
 import { GoodsReceiptsPage } from "../features/purchasing/pages/GoodsReceiptsPage";
+import { CustomersPage } from "../features/customers/pages/CustomersPage";
 
 const tenantChildren = [
   { path: "my-tenant", element: <TenantProfilePage /> },
@@ -61,6 +62,7 @@ const tenantChildren = [
   { path: "user-sessions", element: <UserSessionsPage /> },
   { path: "purchase-orders", element: <PurchaseOrdersPage /> },
   { path: "goods-receipts", element: <GoodsReceiptsPage /> },
+  { path: "customers", element: <CustomersPage /> },
 ];
 
 export const router = createBrowserRouter([

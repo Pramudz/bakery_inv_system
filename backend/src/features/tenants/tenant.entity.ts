@@ -7,6 +7,7 @@ import { Brand } from '../brands/brands.entity';
 import { UnitOfMeasure } from '../units/units.entity';
 import { Product } from '../products/products.entity';
 import { Supplier } from '../suppliers/suppliers.entity';
+import { Customer } from '../customers/customers.entity';
 import { PriceList } from '../price-lists/price-lists.entity';
 import { Location } from '../locations/locations.entity';
 import { Attribute } from '../attributes/attributes.entity';
@@ -30,6 +31,7 @@ export class Tenant extends AuditEntity {
   @OneToMany(() => UnitOfMeasure, (unit) => unit.tenant) units!: UnitOfMeasure[];
   @OneToMany(() => Product, (product) => product.tenant) products!: Product[];
   @OneToMany(() => Supplier, (supplier) => supplier.tenant) suppliers!: Supplier[];
+  @OneToMany(() => Customer, (customer) => customer.tenant) customers!: Customer[];
   @OneToMany(() => PriceList, (priceList) => priceList.tenant) priceLists!: PriceList[];
   @OneToMany(() => Location, (location) => location.tenant) locations!: Location[];
   @OneToMany(() => Attribute, (attribute) => attribute.tenant) attributes!: Attribute[];

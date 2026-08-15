@@ -34,6 +34,7 @@ import { SecurityModule } from './features/auth/security.module';
 import { UserLocationModule } from './features/user-locations/user-locations.module';
 import { TenantModulesModule } from './features/tenant-modules/tenant-modules.module';
 import { PurchasingModule } from './features/purchasing/purchasing.module';
+import { CustomerModule } from './features/customers/customers.module';
 
 
 @Module({
@@ -65,6 +66,7 @@ import { PurchasingModule } from './features/purchasing/purchasing.module';
     TenantsModule,
     UsersModule,
     CategoryModule,
+    CustomerModule,
     SupplierModule,
     LocationModule,
     UnitOfMeasureModule,
