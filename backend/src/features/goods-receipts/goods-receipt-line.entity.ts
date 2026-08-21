@@ -10,6 +10,7 @@ import { Product } from "../products/products.entity";
 import { UnitOfMeasure } from "../units/units.entity";
 import { GoodsReceipt } from "./goods-receipt.entity";
 import { PurchaseOrderLine } from "../purchase-orders/purchase-order-line.entity";
+import { ProductUnit } from "../product-units/product-units.entity";
 @Entity("tbl_goods_receipt_line")
 export class GoodsReceiptLine extends AuditEntity {
   @PrimaryGeneratedColumn({ name: "goods_receipt_line_id", type: "bigint" })
@@ -43,10 +44,19 @@ export class GoodsReceiptLine extends AuditEntity {
   })
   @JoinColumn({ name: "unit_id" })
   unit!: UnitOfMeasure;
+  @Column({ name: "product_unit_id", type: "bigint", nullable: true })
+  productUnitId!: number | null;
+  @ManyToOne(() => ProductUnit, { nullable: true, onDelete: "RESTRICT" })
+  @JoinColumn({ name: "product_unit_id" })
+  productUnit!: ProductUnit | null;
+  @Column({ name: "conversion_factor_snapshot", type: "decimal", precision: 18, scale: 6, nullable: true })
+  conversionFactorSnapshot!: string | null;
   @Column({ name: "received_qty", type: "decimal", precision: 18, scale: 4 })
   receivedQty!: string;
   @Column({ name: "unit_cost", type: "decimal", precision: 18, scale: 4 })
   unitCost!: string;
+  @Column({ name: "source_supplier_price_id", type: "bigint", nullable: true })
+  sourceSupplierPriceId!: number | null;
   @Column({
     name: "discount_amount",
     type: "decimal",

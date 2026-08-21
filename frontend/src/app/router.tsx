@@ -15,12 +15,9 @@ import { CategoriesPage } from "../features/categories/pages/CategoriesPage";
 import { SuppliersPage } from "../features/suppliers/pages/SuppliersPage";
 import { LocationsPage } from "../features/locations/pages/LocationsPage";
 import { ProductsPage } from "../features/products/pages/ProductsPage";
-import { ProductSuppliersPage } from "../features/product-suppliers/pages/ProductSuppliersPage";
-import { ProductCostingPage } from "../features/product-costing/pages/ProductCostingPage";
 import { BrandsPage } from "../features/brands/pages/BrandsPage";
 import { IdentifierTypesPage } from "../features/identifier-types/pages/IdentifierTypesPage";
 import { ProductIdentifiersPage } from "../features/product-identifiers/pages/ProductIdentifiersPage";
-import { ProductLocationsPage } from "../features/product-locations/pages/ProductLocationsPage";
 import { AttributesPage } from "../features/attributes/pages/AttributesPage";
 import { ProductAttributesPage } from "../features/product-attributes/pages/ProductAttributesPage";
 import { PriceListsPage } from "../features/price-lists/pages/PriceListsPage";
@@ -42,12 +39,9 @@ const tenantChildren = [
   { path: "suppliers", element: <SuppliersPage /> },
   { path: "locations", element: <LocationsPage /> },
   { path: "products", element: <ProductsPage /> },
-  { path: "product-suppliers", element: <ProductSuppliersPage /> },
-  { path: "product-costing", element: <ProductCostingPage /> },
   { path: "brands", element: <BrandsPage /> },
   { path: "identifier-types", element: <IdentifierTypesPage /> },
   { path: "product-identifiers", element: <ProductIdentifiersPage /> },
-  { path: "product-locations", element: <ProductLocationsPage /> },
   { path: "attributes", element: <AttributesPage /> },
   { path: "product-attributes", element: <ProductAttributesPage /> },
   { path: "price-lists", element: <PriceListsPage /> },

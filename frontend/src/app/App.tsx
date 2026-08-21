@@ -31,6 +31,7 @@ const tenantGroups = [
       ["Brands", "/brands"],
       ["Units", "/units"],
       ["Identifiers", "/identifier-types"],
+      ["Price Lists", "/price-lists"],
       ["Attributes", "/attributes"],
     ],
   },
@@ -38,9 +39,6 @@ const tenantGroups = [
     title: "Supply & Pricing",
     items: [
       ["Suppliers", "/suppliers"],
-      ["Product Suppliers", "/product-suppliers"],
-      ["Product Costing", "/product-costing"],
-      ["Price Lists", "/price-lists"],
     ],
   },
   {
@@ -54,7 +52,6 @@ const tenantGroups = [
     title: "Locations",
     items: [
       ["Locations", "/locations"],
-      ["Product Locations", "/product-locations"],
     ],
   },
   {
@@ -84,11 +81,8 @@ const moduleForPath: Record<string, string> = {
   "/identifier-types": "MASTER_DATA",
   "/attributes": "MASTER_DATA",
   "/suppliers": "SUPPLIER",
-  "/product-suppliers": "SUPPLIER",
-  "/product-costing": "PRICING",
   "/price-lists": "PRICING",
   "/locations": "LOCATION",
-  "/product-locations": "LOCATION",
   "/purchase-orders": "PURCHASING",
   "/goods-receipts": "PURCHASING",
 };
@@ -109,11 +103,8 @@ const viewPermissionForPath: Record<string, string> = {
   "/identifier-types": "IDENTIFIER_TYPE_VIEW",
   "/attributes": "ATTRIBUTE_VIEW",
   "/suppliers": "SUPPLIER_VIEW",
-  "/product-suppliers": "PRODUCT_SUPPLIER_VIEW",
-  "/product-costing": "PRODUCT_SUPPLIER_PRICE_VIEW",
   "/price-lists": "PRICE_LIST_VIEW",
   "/locations": "LOCATION_VIEW",
-  "/product-locations": "PRODUCT_LOCATION_VIEW",
   "/purchase-orders": "PURCHASE_ORDER_VIEW",
   "/goods-receipts": "GRN_VIEW",
 };

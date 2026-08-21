@@ -15,6 +15,8 @@ export class UnitOfMeasure extends AuditEntity {
   @Column({name:'name',type:'varchar',length:100}) name!: string;
   @Column({name:'symbol',type:'varchar',length:20,nullable:true}) symbol!: string|null;
   @Column({name:'unit_type',type:'varchar',length:50}) unitType!: string;
+  @Column({name:'allows_decimal_quantity',default:false}) allowsDecimalQuantity!: boolean;
+  @Column({name:'quantity_precision',type:'tinyint',unsigned:true,default:0}) quantityPrecision!: number;
   @Column({name:'is_active',default:true}) isActive!: boolean;
   @OneToMany(() => Product, (product) => product.baseUnit) baseProducts!: Product[];
   @OneToMany(() => ProductUnit, (productUnit) => productUnit.unit) productUnits!: ProductUnit[];

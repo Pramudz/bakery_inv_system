@@ -21,7 +21,7 @@ async function request<T>(
 ): Promise<T> {
   const headers = new Headers(options.headers);
 
-  if (!headers.has('Content-Type')) {
+  if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
@@ -102,4 +102,10 @@ export const apiClient = {
           ? undefined
           : JSON.stringify(data),
     }),
+
+  delete: <T>(path: string) =>
+    request<T>(path, { method: 'DELETE' }),
+
+  postForm: <T>(path: string, data: FormData) =>
+    request<T>(path, { method: 'POST', body: data }),
 };

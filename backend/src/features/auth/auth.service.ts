@@ -169,7 +169,7 @@ export class AuthService {
     const user = await this.userRepository.findOne({
       where: {
         username: dto.username,
-        tenant: { tenantCode: dto.tenantCode },
+        tenant: { code: dto.tenantCode },
       },
       select: {
         userId: true,
@@ -194,7 +194,7 @@ export class AuthService {
       throw new UnauthorizedException('User is inactive.');
     }
 
-    if (!user.tenant?.tenantIsActive) {
+    if (!user.tenant?.isActive) {
       throw new UnauthorizedException('Tenant is inactive.');
     }
 
@@ -247,8 +247,8 @@ export class AuthService {
       scope: 'TENANT',
       tenant: {
         tenantId: user.tenant.tenantId,
-        tenantCode: user.tenant.tenantCode,
-        tenantName: user.tenant.tenantName,
+        tenantCode: user.tenant.code,
+        tenantName: user.tenant.name,
       },
       user: {
         userId: user.userId,

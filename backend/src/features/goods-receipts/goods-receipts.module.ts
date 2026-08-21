@@ -9,6 +9,7 @@ import { GoodsReceiptLine } from './goods-receipt-line.entity';
 import { GoodsReceipt } from './goods-receipt.entity';
 import { GoodsReceiptsController } from './goods-receipts.controller';
 import { GoodsReceiptsService } from './goods-receipts.service';
+import { NumberSequencesModule } from '../number-sequences/number-sequences.module';
 
-@Module({ imports: [TypeOrmModule.forFeature([GoodsReceipt, GoodsReceiptLine, PurchaseOrder, PurchaseOrderLine]), InventoryBalanceModule, InventoryLedgerModule, InventoryAgeLayerModule], controllers: [GoodsReceiptsController], providers: [GoodsReceiptsService] })
+@Module({ imports: [TypeOrmModule.forFeature([GoodsReceipt, GoodsReceiptLine, PurchaseOrder, PurchaseOrderLine]), InventoryBalanceModule, InventoryLedgerModule, InventoryAgeLayerModule, NumberSequencesModule], controllers: [GoodsReceiptsController], providers: [GoodsReceiptsService] })
 export class GoodsReceiptsModule {}

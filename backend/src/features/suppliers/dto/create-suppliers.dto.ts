@@ -1,11 +1,22 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsEmail, IsEmpty, IsNotEmpty, IsOptional, IsString, Length, MaxLength } from 'class-validator';
+
+const EmptyToNull = () => Transform(({ value }) => typeof value === 'string' && value.trim() === '' ? null : value);
+const EmptyCodeToUndefined = () => Transform(({ value }) => typeof value === 'string' && value.trim() === '' ? undefined : value);
+
 export class CreateSupplierDto {
-  @IsString() @IsNotEmpty() @MaxLength(50) supplierCode!: string;
+  @IsEmpty({ message: 'tenantId cannot be supplied.' }) tenantId?: never;
+  @EmptyCodeToUndefined() @IsOptional() @IsString() @MaxLength(50) supplierCode?: string;
   @IsString() @IsNotEmpty() @MaxLength(200) supplierName!: string;
-  @IsOptional() @IsString() @MaxLength(150) contactName?: string;
-  @IsOptional() @IsString() @MaxLength(30) phone?: string;
-  @IsOptional() @IsEmail() @MaxLength(150) email?: string;
-  @IsOptional() @IsString() @MaxLength(255) addressLine1?: string;
-  @IsOptional() @IsString() @MaxLength(255) addressLine2?: string;
-  @IsOptional() @IsString() @MaxLength(100) city?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @EmptyToNull() @IsOptional() @IsString() @MaxLength(150) contactName?: string | null;
+  @EmptyToNull() @IsOptional() @IsString() @MaxLength(50) phone?: string | null;
+  @EmptyToNull() @IsOptional() @IsString() @MaxLength(50) mobile?: string | null;
+  @EmptyToNull() @IsOptional() @IsEmail() @MaxLength(150) email?: string | null;
+  @EmptyToNull() @IsOptional() @IsString() @MaxLength(255) addressLine1?: string | null;
+  @EmptyToNull() @IsOptional() @IsString() @MaxLength(255) addressLine2?: string | null;
+  @EmptyToNull() @IsOptional() @IsString() @MaxLength(100) city?: string | null;
+  @EmptyToNull() @IsOptional() @IsString() @MaxLength(100) districtOrState?: string | null;
+  @EmptyToNull() @IsOptional() @IsString() @MaxLength(30) postalCode?: string | null;
+  @EmptyToNull() @IsOptional() @IsString() @Length(2, 2) countryCode?: string | null;
 }

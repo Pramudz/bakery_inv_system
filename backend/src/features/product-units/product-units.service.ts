@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ProductUnit } from './product-units.entity';
@@ -38,11 +38,14 @@ export class ProductUnitService {
     const second = await secondRepo.findOne({ where: { unitId: (dto as any).unitId, tenantId } as any });
     if (!second) throw new NotFoundException('Unit not found for this tenant.');
 
+    if (await this.repo.findOneBy({ productId: Number(dto.productId), unitId: Number(dto.unitId) }))
+      throw new ConflictException('Unit is already configured for this product.');
+
     return this.repo.save(this.repo.create(dto as any));
   }
 
   async update(id: number, dto: UpdateProductUnitDto, tenantId: number) {
-    await this.findOne(id, tenantId);
+    const current = await this.findOne(id, tenantId);
     if ((dto as any).productId !== undefined) {
       const parent = await this.dataSource.getRepository(Product).findOne({ where: { productId: (dto as any).productId, tenantId } as any });
       if (!parent) throw new NotFoundException('Product not found for this tenant.');
@@ -51,6 +54,12 @@ export class ProductUnitService {
       const second = await this.dataSource.getRepository(UnitOfMeasure).findOne({ where: { unitId: (dto as any).unitId, tenantId } as any });
       if (!second) throw new NotFoundException('Unit not found for this tenant.');
     }
+    const duplicate = await this.repo.findOneBy({
+      productId: Number((dto as any).productId ?? current.productId),
+      unitId: Number((dto as any).unitId ?? current.unitId),
+    });
+    if (duplicate && Number(duplicate.productUnitId) !== id)
+      throw new ConflictException('Unit is already configured for this product.');
     await this.repo.update(id, dto as any);
     return this.findOne(id, tenantId);
   }

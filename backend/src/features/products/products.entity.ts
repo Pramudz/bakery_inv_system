@@ -15,6 +15,7 @@ import { InventoryAgeLayer } from '../inventory-age-layers/inventory-age-layer.e
 import { InventoryBalance } from '../inventory-balance/inventory-balance.entity';
 import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
 import { PurchaseOrderLine } from '../purchase-orders/purchase-order-line.entity';
+import { ProductImage } from '../product-images/product-image.entity';
 
 @Entity('tbl_product')
 @Unique('uq_product_tenant_sku', ['tenantId', 'sku'])
@@ -45,6 +46,7 @@ export class Product extends AuditEntity {
   @OneToMany(() => PriceListItem, (item) => item.product) priceListItems!: PriceListItem[];
   @OneToMany(() => ProductLocation, (location) => location.product) productLocations!: ProductLocation[];
   @OneToMany(() => ProductAttributes, (attribute) => attribute.product) productAttributes!: ProductAttributes[];
+  @OneToMany(() => ProductImage, (image) => image.product) productImages!: ProductImage[];
   @OneToMany(() => PurchaseOrderLine, (line) => line.product) purchaseOrderLines!: PurchaseOrderLine[];
   @OneToMany(() => GoodsReceiptLine, (line) => line.product) goodsReceiptLines!: GoodsReceiptLine[];
   @OneToMany(() => InventoryBalance, (balance) => balance.product) inventoryBalances!: InventoryBalance[];

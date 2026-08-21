@@ -63,10 +63,7 @@ Shared MySQL database with tenant isolation using `tenant_id` on tenant-owned ma
 
 TypeORM is the ORM.
 
-Local development may use:
-`DB_SYNCHRONIZE=true`
-
-Production must use:
+Local development and production must use:
 `DB_SYNCHRONIZE=false`
 and migrations.
 

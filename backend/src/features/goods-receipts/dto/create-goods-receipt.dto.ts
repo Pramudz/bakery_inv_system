@@ -16,7 +16,9 @@ import {
 
 export class GoodsReceiptLineDto {
   @IsOptional() @IsInt() purchaseOrderLineId?: number;
+  @IsOptional() @IsInt() sourceSupplierPriceId?: number;
   @IsInt() productId!: number;
+  @IsInt() productUnitId!: number;
   @IsInt() unitId!: number;
   @IsNumber() @Min(0.0001) receivedQty!: number;
   @IsNumber() @Min(0) unitCost!: number;
@@ -29,7 +31,6 @@ export class GoodsReceiptLineDto {
 }
 
 export class CreateGoodsReceiptDto {
-  @IsString() @IsNotEmpty() @MaxLength(50) grnNumber!: string;
   @IsString() @IsIn(['PO_BASED', 'DIRECT']) receiptType!: string;
   @IsOptional() @IsInt() purchaseOrderId?: number;
   @IsInt() supplierId!: number;

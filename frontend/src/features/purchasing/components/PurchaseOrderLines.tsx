@@ -2,11 +2,16 @@ import { Field } from "../../../components/ui/Field";
 type Props = {
   lines: any[];
   products: any[];
+  supplierId: string;
+  orderDate: string;
+  currencyCode: string;
   onChange: (lines: any[]) => void;
 };
 const emptyLine = {
   productId: "",
+  productUnitId: "",
   unitId: "",
+  sourceSupplierPriceId: undefined,
   orderedQty: "1",
   unitCost: "0",
   discountAmount: "0",
@@ -19,18 +24,39 @@ export const poNet = (line: any) =>
   numeric(line.taxAmount);
 export const poLineTotal = (line: any) =>
   numeric(line.orderedQty) * poNet(line);
-export function PurchaseOrderLines({ lines, products, onChange }: Props) {
+export function PurchaseOrderLines({ lines, products, supplierId, orderDate, currencyCode, onChange }: Props) {
+  const priceFor = (product: any, productUnitId: string) => {
+    const link = (product?.productSuppliers ?? []).find((candidate: any) => String(candidate.supplierId) === String(supplierId) && candidate.isActive !== false);
+    const supplierUnit = (link?.supplierUnits ?? []).find((unit: any) => unit.isActive !== false && String(unit.productUnitId) === productUnitId);
+    return (supplierUnit?.prices ?? [])
+      .filter((price: any) => Number(price.minimumQuantity) === 1 && price.currencyCode === String(currencyCode || "LKR").toUpperCase() && price.isActive !== false && price.effectiveFrom <= orderDate && (!price.effectiveTo || price.effectiveTo >= orderDate))
+      .sort((a: any, b: any) => String(b.effectiveFrom).localeCompare(String(a.effectiveFrom)))[0];
+  };
   const update = (index: number, key: string, value: string) =>
     onChange(
       lines.map((line, lineIndex) => {
         if (lineIndex !== index) return line;
         if (key === "productId") {
           const product = products.find((x) => String(x.productId) === value);
+          const link = (product?.productSuppliers ?? []).find((candidate: any) => String(candidate.supplierId) === String(supplierId) && candidate.isActive !== false);
+          const supplierUnit = (link?.supplierUnits ?? []).find((unit: any) => unit.isActive !== false && unit.isDefaultPurchaseUnit) ?? (link?.supplierUnits ?? []).find((unit: any) => unit.isActive !== false);
+          const productUnit = (product?.productUnits ?? []).find((unit: any) => Number(unit.productUnitId) === Number(supplierUnit?.productUnitId));
+          const productUnitId = String(productUnit?.productUnitId ?? "");
+          const price = priceFor(product, productUnitId);
           return {
             ...line,
             productId: value,
-            unitId: String(product?.baseUnitId ?? ""),
+            productUnitId,
+            unitId: String(productUnit?.unitId ?? ""),
+            unitCost: price ? String(price.purchasePrice) : line.unitCost,
+            sourceSupplierPriceId: price?.productSupplierPriceId,
           };
+        }
+        if (key === "productUnitId") {
+          const product = products.find((x) => String(x.productId) === String(line.productId));
+          const productUnit = (product?.productUnits ?? []).find((unit: any) => String(unit.productUnitId) === value);
+          const price = priceFor(product, value);
+          return { ...line, productUnitId: value, unitId: String(productUnit?.unitId ?? ""), unitCost: price ? String(price.purchasePrice) : line.unitCost, sourceSupplierPriceId: price?.productSupplierPriceId };
         }
         return { ...line, [key]: value };
       }),
@@ -73,9 +99,7 @@ export function PurchaseOrderLines({ lines, products, onChange }: Props) {
                   />
                 </td>
                 <td>
-                  <span className="unit-readonly">
-                    {line.unitId || "Select product"}
-                  </span>
+                  <Field label="" value={line.productUnitId} onChange={(v) => update(index, "productUnitId", v)} required options={((products.find((x) => String(x.productId) === String(line.productId))?.productUnits) ?? []).filter((unit: any) => unit.isActive !== false && unit.isPurchaseUnit).map((unit: any) => ({ value: unit.productUnitId, label: `${unit.unit?.code ?? unit.unit?.name ?? unit.unitId} × ${unit.conversionFactor}` }))} />
                 </td>
                 <td>
                   <Field

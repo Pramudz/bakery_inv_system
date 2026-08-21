@@ -4,10 +4,11 @@ import { Product } from './products.entity';
 import { ProductController } from './products.controller';
 import { ProductService } from './products.service';
 import { NumberSequencesModule } from '../number-sequences/number-sequences.module';
+import { ProductImage } from '../product-images/product-image.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Product]),
+    TypeOrmModule.forFeature([Product, ProductImage]),
     NumberSequencesModule,
   ],
   controllers: [ProductController],

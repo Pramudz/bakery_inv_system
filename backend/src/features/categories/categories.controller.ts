@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { CategoryService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-categories.dto';
 import { UpdateCategoryDto } from './dto/update-categories.dto';
@@ -15,8 +15,23 @@ export class CategoryController {
 
   @Get()
   @RequirePermission('CATEGORY_VIEW')
-  findAll(@CurrentUser() user: AuthPrincipal) {
-    return this.service.findAll(user.tenantId);
+  findAll(
+    @CurrentUser() user: AuthPrincipal,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+  ) {
+    if (!page && !limit && search === undefined && status === undefined) {
+      return this.service.findAll(user.tenantId);
+    }
+    return this.service.findPage(
+      user.tenantId,
+      Number(page || 1),
+      Number(limit || 20),
+      search || '',
+      status || '',
+    );
   }
 
   @Get(':id')
@@ -41,5 +56,11 @@ export class CategoryController {
   @RequirePermission('CATEGORY_DEACTIVATE')
   deactivate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthPrincipal) {
     return this.service.deactivate(id, user.tenantId);
+  }
+
+  @Patch(':id/activate')
+  @RequirePermission('CATEGORY_DEACTIVATE')
+  activate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthPrincipal) {
+    return this.service.activate(id, user.tenantId);
   }
 }

@@ -3,11 +3,16 @@ type Props = {
   lines: any[];
   products: any[];
   poBased: boolean;
+  supplierId: string;
+  receiptDate: string;
+  currencyCode: string;
   onChange: (lines: any[]) => void;
 };
 const empty = {
   productId: "",
+  productUnitId: "",
   unitId: "",
+  sourceSupplierPriceId: undefined,
   receivedQty: "1",
   unitCost: "0",
   discountAmount: "0",
@@ -24,15 +29,36 @@ export function GoodsReceiptLines({
   lines,
   products,
   poBased,
+  supplierId,
+  receiptDate,
+  currencyCode,
   onChange,
 }: Props) {
+  const priceFor = (product: any, productUnitId: string) => {
+    const link = (product?.productSuppliers ?? []).find((candidate: any) => String(candidate.supplierId) === String(supplierId) && candidate.isActive !== false);
+    const supplierUnit = (link?.supplierUnits ?? []).find((unit: any) => unit.isActive !== false && String(unit.productUnitId) === productUnitId);
+    return (supplierUnit?.prices ?? [])
+      .filter((price: any) => Number(price.minimumQuantity) === 1 && price.currencyCode === String(currencyCode || "LKR").toUpperCase() && price.isActive !== false && price.effectiveFrom <= receiptDate && (!price.effectiveTo || price.effectiveTo >= receiptDate))
+      .sort((a: any, b: any) => String(b.effectiveFrom).localeCompare(String(a.effectiveFrom)))[0];
+  };
   const update = (i: number, k: string, v: string) =>
     onChange(
       lines.map((line, n) => {
         if (n !== i) return line;
         if (k === "productId") {
           const p = products.find((x) => String(x.productId) === v);
-          return { ...line, productId: v, unitId: String(p?.baseUnitId ?? "") };
+          const link = (p?.productSuppliers ?? []).find((candidate: any) => String(candidate.supplierId) === String(supplierId) && candidate.isActive !== false);
+          const supplierUnit = (link?.supplierUnits ?? []).find((unit: any) => unit.isActive !== false && unit.isDefaultPurchaseUnit) ?? (link?.supplierUnits ?? []).find((unit: any) => unit.isActive !== false);
+          const productUnit = (p?.productUnits ?? []).find((unit: any) => Number(unit.productUnitId) === Number(supplierUnit?.productUnitId));
+          const productUnitId = String(productUnit?.productUnitId ?? "");
+          const price = priceFor(p, productUnitId);
+          return { ...line, productId: v, productUnitId, unitId: String(productUnit?.unitId ?? ""), unitCost: price ? String(price.purchasePrice) : line.unitCost, sourceSupplierPriceId: price?.productSupplierPriceId };
+        }
+        if (k === "productUnitId") {
+          const product = products.find((x) => String(x.productId) === String(line.productId));
+          const productUnit = (product?.productUnits ?? []).find((unit: any) => String(unit.productUnitId) === v);
+          const price = priceFor(product, v);
+          return { ...line, productUnitId: v, unitId: String(productUnit?.unitId ?? ""), unitCost: price ? String(price.purchasePrice) : line.unitCost, sourceSupplierPriceId: price?.productSupplierPriceId };
         }
         return { ...line, [k]: v };
       }),
@@ -98,7 +124,7 @@ export function GoodsReceiptLines({
                       />
                     )}
                   </td>
-                  <td>{line.unitId}</td>
+                  <td>{poBased ? (line.productUnit?.unit?.code ?? line.unitId) : <Field label="" value={line.productUnitId} onChange={(v) => update(i, "productUnitId", v)} required options={((products.find((x) => String(x.productId) === String(line.productId))?.productUnits) ?? []).filter((unit: any) => unit.isActive !== false && unit.isPurchaseUnit).map((unit: any) => ({ value: unit.productUnitId, label: `${unit.unit?.code ?? unit.unit?.name ?? unit.unitId} × ${unit.conversionFactor}` }))} />}</td>
                   {poBased && (
                     <>
                       <td>{line.orderedQty}</td>

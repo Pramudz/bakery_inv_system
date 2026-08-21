@@ -11,7 +11,9 @@ import { GoodsReceiptLines, grnTotal } from "./GoodsReceiptLines";
 const today = new Date().toISOString().slice(0, 10);
 const blank = {
   productId: "",
+  productUnitId: "",
   unitId: "",
+  sourceSupplierPriceId: undefined,
   receivedQty: "1",
   unitCost: "0",
   discountAmount: "0",
@@ -52,7 +54,6 @@ export function GoodsReceiptForm({
           lines: initial.lines?.length ? initial.lines : [{ ...blank }],
         }
       : {
-          grnNumber: "",
           receiptType: "DIRECT",
           purchaseOrderId: "",
           supplierId: "",
@@ -95,10 +96,15 @@ export function GoodsReceiptForm({
           productId: String(line.productId),
           productName: line.product?.productName,
           unitId: String(line.unitId),
+          productUnitId: String(line.productUnitId ?? ""),
+          conversionFactorSnapshot: line.conversionFactorSnapshot,
           orderedQty: String(line.orderedQty),
           previouslyReceivedQty: String(line.receivedQty),
           receivedQty: "0",
           unitCost: String(line.unitCost),
+          discountAmount: String(line.discountAmount),
+          taxAmount: String(line.taxAmount),
+          sourceSupplierPriceId: line.sourceSupplierPriceId ?? undefined,
         })),
     });
   };
@@ -153,13 +159,6 @@ export function GoodsReceiptForm({
               </button>
             </div>
             <div className="form-grid">
-              <Field
-                label="GRN Number"
-                value={form.grnNumber}
-                onChange={(v) => setForm({ ...form, grnNumber: v })}
-                required
-                disabled={!editable}
-              />
               {poBased ? (
                 <Field
                   label="Purchase Order"
@@ -249,6 +248,9 @@ export function GoodsReceiptForm({
               lines={form.lines}
               products={products.data ?? []}
               poBased={poBased}
+              supplierId={form.supplierId}
+              receiptDate={form.receiptDate}
+              currencyCode={form.currencyCode}
               onChange={(lines) => setForm({ ...form, lines })}
             />
           )}

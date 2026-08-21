@@ -44,6 +44,9 @@ export class AuthorizationCatalogService implements OnModuleInit {
     const purchasing = byCode.get('PURCHASING')!;
     const purchasingPermissions = ['PURCHASE_ORDER_VIEW','PURCHASE_ORDER_CREATE','PURCHASE_ORDER_UPDATE','PURCHASE_ORDER_APPROVE','PURCHASE_ORDER_CANCEL','GRN_VIEW','GRN_CREATE','GRN_UPDATE','GRN_POST','GRN_CANCEL'];
     for (const code of purchasingPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: purchasing.moduleId, code, name: code.replace(/_/g,' ').toLowerCase(), isActive: true }));
+    const tenantProfilePermission = 'TENANT_PROFILE_UPDATE';
+    const masterData = byCode.get('MASTER_DATA')!;
+    if (!await permissions.findOneBy({ code: tenantProfilePermission })) await permissions.save(permissions.create({ moduleId: masterData.moduleId, code: tenantProfilePermission, name: 'Update own tenant profile', description: 'Update the authenticated tenant company profile and logo.', isActive: true }));
     for (const tenant of tenants) for (const module of byCode.values()) {
       if (module.code === 'PURCHASING') continue;
       if (!await tenantModules.findOneBy({ tenantId: tenant.tenantId, moduleId: module.moduleId })) await tenantModules.save(tenantModules.create({ tenantId: tenant.tenantId, moduleId: module.moduleId, isEnabled: true }));

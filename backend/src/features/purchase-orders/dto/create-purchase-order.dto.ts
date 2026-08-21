@@ -14,7 +14,9 @@ import {
 } from 'class-validator';
 
 export class PurchaseOrderLineDto {
+  @IsOptional() @IsInt() sourceSupplierPriceId?: number;
   @IsInt() productId!: number;
+  @IsInt() productUnitId!: number;
   @IsInt() unitId!: number;
   @IsNumber() @Min(0.0001) orderedQty!: number;
   @IsNumber() @Min(0) unitCost!: number;
@@ -24,7 +26,6 @@ export class PurchaseOrderLineDto {
 }
 
 export class CreatePurchaseOrderDto {
-  @IsString() @IsNotEmpty() @MaxLength(50) poNumber!: string;
   @IsInt() supplierId!: number;
   @IsInt() locationId!: number;
   @IsDateString() orderDate!: string;

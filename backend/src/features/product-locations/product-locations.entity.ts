@@ -1,8 +1,9 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from 'typeorm';
 import { AuditEntity } from '../../common/audit.entity';
 import { Product } from '../products/products.entity';
 import { Location } from '../locations/locations.entity';
 @Entity('tbl_product_location')
+@Unique('uq_product_location_product_location', ['productId', 'locationId'])
 export class ProductLocation extends AuditEntity {
   @PrimaryGeneratedColumn({name:'product_location_id',type:'bigint'}) productLocationId!: number;
   @Column({name:'product_id',type:'bigint'}) productId!: number;

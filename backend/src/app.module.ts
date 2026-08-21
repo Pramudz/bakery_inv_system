@@ -38,6 +38,7 @@ import { InventoryAgeLayerModule } from './features/inventory-age-layers/invento
 import { InventoryBalanceModule } from './features/inventory-balance/inventory-balance.module';
 import { InventoryLedgerModule } from './features/inventory-ledger/inventory-ledger.module';
 import { PurchaseOrdersModule } from './features/purchase-orders/purchase-orders.module';
+import { ProductSupplierUnitsModule } from './features/product-supplier-units/product-supplier-units.module';
 
 
 @Module({
@@ -94,6 +95,7 @@ import { PurchaseOrdersModule } from './features/purchase-orders/purchase-orders
     UserRoleModule,
     RolePermissionModule,
     UserSessionModule,
+    ProductSupplierUnitsModule,
   ],
 })
 export class AppModule {}

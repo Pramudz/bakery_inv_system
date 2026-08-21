@@ -16,6 +16,53 @@ export class BrandService {
     });
   }
 
+  async findPage(
+    tenantId: number,
+    page: number,
+    limit: number,
+    search: string,
+    status: string,
+  ) {
+    const safePage = Math.max(1, Number.isFinite(page) ? page : 1);
+    const safeLimit = [20, 50, 100].includes(limit) ? limit : 20;
+    const searchText = search.trim();
+    const query = this.repo
+      .createQueryBuilder('brand')
+      .leftJoinAndSelect('brand.tenant', 'tenant')
+      .where('brand.tenantId = :tenantId', { tenantId });
+
+    if (searchText) {
+      query.andWhere(
+        '(LOWER(brand.brandCode) LIKE LOWER(:search) OR LOWER(brand.brandName) LIKE LOWER(:search))',
+        { search: `%${searchText}%` },
+      );
+    }
+    if (status === 'active') {
+      query.andWhere('brand.isActive = :active', { active: true });
+    }
+    if (status === 'inactive') {
+      query.andWhere('brand.isActive = :active', { active: false });
+    }
+
+    const [rows, total] = await query
+      .orderBy('brand.brandName', 'ASC')
+      .addOrderBy('brand.brandId', 'ASC')
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit)
+      .getManyAndCount();
+    const items = rows.map((row) => {
+      const { tenantId: _tenantId, ...item } = row;
+      return item;
+    });
+    return {
+      items,
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+    };
+  }
+
   async findOne(id: number, tenantId: number) {
     const row = await this.repo.findOne({
       where: { brandId: id, tenantId } as any,
@@ -55,6 +102,12 @@ export class BrandService {
   async deactivate(id: number, tenantId: number) {
     await this.findOne(id, tenantId);
     await this.repo.update({ brandId: id, tenantId } as any, { isActive: false } as any);
+    return this.findOne(id, tenantId);
+  }
+
+  async activate(id: number, tenantId: number) {
+    await this.findOne(id, tenantId);
+    await this.repo.update({ brandId: id, tenantId } as any, { isActive: true } as any);
     return this.findOne(id, tenantId);
   }
 }

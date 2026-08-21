@@ -26,8 +26,8 @@ export class GoodsReceipt extends AuditEntity {
   })
   @JoinColumn({ name: "tenant_id" })
   tenant!: Tenant;
-  @Column({ name: "grn_number", type: "varchar", length: 50 })
-  grnNumber!: string;
+  @Column({ name: "grn_number", type: "varchar", length: 50, nullable: true })
+  grnNumber!: string | null;
   @Column({ name: "receipt_type", type: "varchar", length: 20 })
   receiptType!: string;
   @Column({ name: "purchase_order_id", type: "bigint", nullable: true })

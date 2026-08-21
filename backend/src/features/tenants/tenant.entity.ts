@@ -21,9 +21,22 @@ import { PurchaseOrder } from '../purchase-orders/purchase-order.entity';
 @Entity('tbl_tenant')
 export class Tenant extends AuditEntity {
   @PrimaryGeneratedColumn({ name: 'tenant_id', type: 'bigint' }) tenantId!: number;
-  @Column({ name: 'tenant_code', type: 'varchar', length: 50, unique: true }) tenantCode!: string;
-  @Column({ name: 'tenant_name', type: 'varchar', length: 150 }) tenantName!: string;
-  @Column({ name: 'tenant_is_active', default: true }) tenantIsActive!: boolean;
+  @Column({ name: 'code', type: 'varchar', length: 50, unique: true }) code!: string;
+  @Column({ name: 'name', type: 'varchar', length: 150 }) name!: string;
+  @Column({ name: 'is_active', default: true }) isActive!: boolean;
+  @Column({ name: 'legal_name', type: 'varchar', length: 200, nullable: true }) legalName!: string | null;
+  @Column({ name: 'registration_number', type: 'varchar', length: 100, nullable: true }) registrationNumber!: string | null;
+  @Column({ name: 'tax_registration_number', type: 'varchar', length: 100, nullable: true }) taxRegistrationNumber!: string | null;
+  @Column({ name: 'email', type: 'varchar', length: 150, nullable: true }) email!: string | null;
+  @Column({ name: 'phone', type: 'varchar', length: 50, nullable: true }) phone!: string | null;
+  @Column({ name: 'website', type: 'varchar', length: 255, nullable: true }) website!: string | null;
+  @Column({ name: 'address_line1', type: 'varchar', length: 200, nullable: true }) addressLine1!: string | null;
+  @Column({ name: 'address_line2', type: 'varchar', length: 200, nullable: true }) addressLine2!: string | null;
+  @Column({ name: 'city', type: 'varchar', length: 100, nullable: true }) city!: string | null;
+  @Column({ name: 'state_province', type: 'varchar', length: 100, nullable: true }) stateProvince!: string | null;
+  @Column({ name: 'postal_code', type: 'varchar', length: 30, nullable: true }) postalCode!: string | null;
+  @Column({ name: 'country_code', type: 'varchar', length: 2, nullable: true }) countryCode!: string | null;
+  @Column({ name: 'logo_url', type: 'varchar', length: 500, nullable: true }) logoUrl!: string | null;
   @Column({ name: 'allow_direct_grn', default: true }) allowDirectGrn!: boolean;
   @Column({ name: 'po_required_for_grn', default: false }) poRequiredForGrn!: boolean;
 

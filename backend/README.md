@@ -8,4 +8,5 @@ Start:
 `npm run start:dev`
 
 The database/schema must exist before TypeORM connects.
-`DB_SYNCHRONIZE=true` creates/updates tables from entities in local development.
+Use `DB_SYNCHRONIZE=false` and run `npm run migration:run`. TypeORM schema
+synchronization can rebuild MySQL tables and conflict with foreign-key indexes.

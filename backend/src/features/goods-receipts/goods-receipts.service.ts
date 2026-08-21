@@ -15,6 +15,12 @@ import { CreateGoodsReceiptDto, GoodsReceiptLineDto } from './dto/create-goods-r
 import { UpdateGoodsReceiptDto } from './dto/update-goods-receipt.dto';
 import { GoodsReceiptLine } from './goods-receipt-line.entity';
 import { GoodsReceipt } from './goods-receipt.entity';
+import { NumberSequencesService } from '../number-sequences/number-sequences.service';
+import { NumberSequenceKeys } from '../number-sequences/number-sequence-keys';
+import { formatGoodsReceiptNumber } from '../number-sequences/number-sequence-formatters';
+import { loadDocumentHeader } from '../../common/document-header';
+import { ProductSupplierPrice } from '../product-supplier-prices/product-supplier-price.entity';
+import { baseInventorySnapshot, purchaseOrderLineSnapshot, productUnitSnapshot } from '../../common/transaction-unit-snapshot';
 
 @Injectable()
 export class GoodsReceiptsService {
@@ -23,10 +29,18 @@ export class GoodsReceiptsService {
     private readonly balances: InventoryBalanceService,
     private readonly ledgers: InventoryLedgerService,
     private readonly ageLayers: InventoryAgeLayerService,
+    private readonly numberSequences: NumberSequencesService,
   ) {}
 
   list(user: TenantPrincipal) { return this.dataSource.getRepository(GoodsReceipt).findBy({ tenantId: user.tenantId }); }
-  async get(id: number, user: TenantPrincipal) { const goodsReceipt = await this.find(id, user); const lines = await this.dataSource.getRepository(GoodsReceiptLine).findBy({ goodsReceiptId: id }); return { ...goodsReceipt, lines }; }
+  async get(id: number, user: TenantPrincipal) {
+    const goodsReceipt = await this.find(id, user);
+    const [lines, documentHeader] = await Promise.all([
+      this.dataSource.getRepository(GoodsReceiptLine).find({ where: { goodsReceiptId: id }, relations: { product: true, productUnit: { unit: true } } }),
+      loadDocumentHeader(this.dataSource, user.tenantId, Number(goodsReceipt.locationId)),
+    ]);
+    return { ...goodsReceipt, lines, documentHeader };
+  }
 
   async create(dto: CreateGoodsReceiptDto, user: TenantPrincipal) {
     const receiptType = dto.receiptType;
@@ -43,7 +57,7 @@ export class GoodsReceiptsService {
       const repository = manager.getRepository(GoodsReceipt);
       const { lines, ...header } = dto;
       const goodsReceipt = await repository.save(repository.create({ ...header, tenantId: user.tenantId, receiptType, supplierId: Number(dto.supplierId), locationId: Number(dto.locationId), supplierInvoiceDate: dto.supplierInvoiceDate || null, purchaseOrderId: receiptType === 'PO_BASED' ? Number(dto.purchaseOrderId) : null, createdByUserId: user.userId, status: 'DRAFT', currencyCode: dto.currencyCode || 'LKR', isActive: true }));
-      await this.saveLines(manager, goodsReceipt.goodsReceiptId, dto.lines, user.tenantId);
+      await this.saveLines(manager, goodsReceipt.goodsReceiptId, dto.lines, user.tenantId, Number(dto.supplierId), receiptType, goodsReceipt.purchaseOrderId);
       return goodsReceipt;
     });
   }
@@ -57,7 +71,7 @@ export class GoodsReceiptsService {
       Object.assign(goodsReceipt, { ...dto, tenantId: user.tenantId, receiptType: goodsReceipt.receiptType, supplierId: Number(dto.supplierId), locationId: Number(dto.locationId), supplierInvoiceDate: dto.supplierInvoiceDate || null });
       await manager.getRepository(GoodsReceipt).save(goodsReceipt);
       await manager.getRepository(GoodsReceiptLine).delete({ goodsReceiptId: id });
-      await this.saveLines(manager, id, dto.lines as GoodsReceiptLineDto[], user.tenantId);
+      await this.saveLines(manager, id, dto.lines as GoodsReceiptLineDto[], user.tenantId, Number(dto.supplierId), goodsReceipt.receiptType, goodsReceipt.purchaseOrderId);
       return goodsReceipt;
     });
   }
@@ -76,12 +90,16 @@ export class GoodsReceiptsService {
       if (!goodsReceipt) throw new NotFoundException('GRN not found.');
       await this.assertLocationAccess(user, Number(goodsReceipt.locationId));
       if (goodsReceipt.status !== 'DRAFT') throw new BadRequestException('Only draft GRNs can be posted.');
+      const year = String(new Date().getFullYear());
+      const nextNumber = await this.numberSequences.getTenantNextNumber(manager, user.tenantId, NumberSequenceKeys.GOODS_RECEIPT, year);
+      goodsReceipt.grnNumber = formatGoodsReceiptNumber(user.tenantId, year, nextNumber);
       const lines = await manager.getRepository(GoodsReceiptLine).findBy({ goodsReceiptId: id });
       if (!lines.length) throw new BadRequestException('GRN requires at least one line.');
       for (const line of lines) {
-        await this.assertProductAndUnit(manager, Number(line.productId), Number(line.unitId), user.tenantId);
         const quantity = Number(line.receivedQty), cost = Number(line.netUnitCost);
         if (quantity <= 0 || cost < 0) throw new BadRequestException('Invalid receipt quantity or cost.');
+        if (!line.productUnitId || !line.conversionFactorSnapshot)
+          throw new BadRequestException('This historical GRN line has no reliable product-unit conversion snapshot and cannot be posted until it is reviewed.');
         if (goodsReceipt.receiptType === 'PO_BASED') await this.receivePoLine(manager, goodsReceipt, line, quantity);
         await this.addInventory(manager, goodsReceipt, line, quantity, cost, user);
       }
@@ -94,7 +112,7 @@ export class GoodsReceiptsService {
   private async receivePoLine(manager: EntityManager, goodsReceipt: GoodsReceipt, line: GoodsReceiptLine, quantity: number) {
     if (!line.purchaseOrderLineId) throw new BadRequestException('PO receipt line is required.');
     const poLine = await manager.getRepository(PurchaseOrderLine).findOneBy({ purchaseOrderLineId: Number(line.purchaseOrderLineId), purchaseOrderId: Number(goodsReceipt.purchaseOrderId) });
-    if (!poLine || Number(poLine.productId) !== Number(line.productId) || Number(poLine.unitId) !== Number(line.unitId)) throw new BadRequestException('Receipt line does not match the purchase order.');
+    if (!poLine || Number(poLine.productId) !== Number(line.productId) || Number(poLine.productUnitId) !== Number(line.productUnitId)) throw new BadRequestException('Receipt line does not match the purchase order.');
     if (Number(poLine.receivedQty) + quantity > Number(poLine.orderedQty)) throw new BadRequestException('Receipt exceeds remaining PO quantity.');
     poLine.receivedQty = String(Number(poLine.receivedQty) + quantity);
     poLine.status = Number(poLine.receivedQty) >= Number(poLine.orderedQty) ? 'RECEIVED' : 'PART_RECEIVED';
@@ -109,26 +127,57 @@ export class GoodsReceiptsService {
   }
 
   private async addInventory(manager: EntityManager, grn: GoodsReceipt, line: GoodsReceiptLine, quantity: number, cost: number, user: TenantPrincipal) {
-    const movement = await this.balances.addStock(manager, user.tenantId, grn.locationId, line.productId, quantity, cost);
-    await this.ledgers.insert(manager, { tenantId: user.tenantId, locationId: grn.locationId, productId: line.productId, movementDate: new Date(), movementType: 'GRN', sourceDocumentType: 'GRN', sourceDocumentId: grn.goodsReceiptId, sourceDocumentLineId: line.goodsReceiptLineId, quantityIn: String(quantity), quantityOut: '0', unitCost: String(cost), movementValue: String(quantity * cost), quantityBefore: String(movement.quantityBefore), quantityAfter: String(movement.quantityAfter), averageCostBefore: String(movement.averageCostBefore), averageCostAfter: String(movement.averageCostAfter), createdByUserId: user.userId });
-    await this.ageLayers.insert(manager, { tenantId: user.tenantId, locationId: grn.locationId, productId: line.productId, sourceDocumentType: 'GRN', sourceDocumentId: grn.goodsReceiptId, sourceDocumentLineId: line.goodsReceiptLineId, receiptDate: grn.receiptDate, originalQuantity: String(quantity), remainingQuantity: String(quantity), originalUnitCost: String(cost), batchNumber: line.batchNumber, manufactureDate: line.manufactureDate, expiryDate: line.expiryDate, isActive: true });
+    const conversionFactor = Number(line.conversionFactorSnapshot);
+    if (!(conversionFactor > 0)) throw new BadRequestException('Invalid product-unit conversion snapshot.');
+    const { baseQuantity, baseUnitCost, movementValue } = baseInventorySnapshot(quantity, cost, conversionFactor);
+    const movement = await this.balances.addStock(manager, user.tenantId, grn.locationId, line.productId, baseQuantity, baseUnitCost);
+    await this.ledgers.insert(manager, { tenantId: user.tenantId, locationId: grn.locationId, productId: line.productId, movementDate: new Date(), movementType: 'GRN', sourceDocumentType: 'GRN', sourceDocumentId: grn.goodsReceiptId, sourceDocumentLineId: line.goodsReceiptLineId, quantityIn: String(baseQuantity), quantityOut: '0', unitCost: String(baseUnitCost), movementValue: String(movementValue), quantityBefore: String(movement.quantityBefore), quantityAfter: String(movement.quantityAfter), averageCostBefore: String(movement.averageCostBefore), averageCostAfter: String(movement.averageCostAfter), createdByUserId: user.userId });
+    await this.ageLayers.insert(manager, { tenantId: user.tenantId, locationId: grn.locationId, productId: line.productId, sourceDocumentType: 'GRN', sourceDocumentId: grn.goodsReceiptId, sourceDocumentLineId: line.goodsReceiptLineId, receiptDate: grn.receiptDate, originalQuantity: String(baseQuantity), remainingQuantity: String(baseQuantity), originalUnitCost: String(baseUnitCost), batchNumber: line.batchNumber, manufactureDate: line.manufactureDate, expiryDate: line.expiryDate, isActive: true });
   }
 
-  private async saveLines(manager: EntityManager, goodsReceiptId: number, rows: GoodsReceiptLineDto[], tenantId: number) {
+  private async saveLines(manager: EntityManager, goodsReceiptId: number, rows: GoodsReceiptLineDto[], tenantId: number, supplierId: number, receiptType: string, purchaseOrderId: number | null) {
     if (!Array.isArray(rows) || rows.length === 0) throw new BadRequestException('At least one line is required.');
     for (const row of rows) {
-      await this.assertProductAndUnit(manager, Number(row.productId), Number(row.unitId), tenantId);
-      const quantity = Number(row.receivedQty), unitCost = Number(row.unitCost), discountAmount = Number(row.discountAmount || 0), taxAmount = Number(row.taxAmount || 0);
+      let productId = Number(row.productId), productUnitId = Number(row.productUnitId), unitId: number, conversionFactorSnapshot: string;
+      let unitCost = Number(row.unitCost), discountAmount = Number(row.discountAmount || 0), taxAmount = Number(row.taxAmount || 0), sourceSupplierPriceId = row.sourceSupplierPriceId ?? null;
+      let agreedNetUnitCost: number | null = null;
+      if (receiptType === 'PO_BASED') {
+        if (!row.purchaseOrderLineId || !purchaseOrderId) throw new BadRequestException('PO receipt line is required.');
+        const poLine = await manager.getRepository(PurchaseOrderLine).findOneBy({ purchaseOrderLineId: Number(row.purchaseOrderLineId), purchaseOrderId: Number(purchaseOrderId) });
+        if (!poLine?.productUnitId || !poLine.conversionFactorSnapshot)
+          throw new BadRequestException('The selected PO line has no reliable product-unit conversion snapshot.');
+        const snapshot = purchaseOrderLineSnapshot(poLine);
+        productId = snapshot.productId; productUnitId = snapshot.productUnitId; unitId = snapshot.unitId;
+        conversionFactorSnapshot = snapshot.conversionFactorSnapshot;
+        unitCost = Number(snapshot.unitCost); discountAmount = Number(snapshot.discountAmount); taxAmount = Number(snapshot.taxAmount);
+        agreedNetUnitCost = Number(snapshot.netUnitCost);
+        sourceSupplierPriceId = snapshot.sourceSupplierPriceId;
+      } else {
+        const productUnit = await this.resolveProductUnit(manager, productId, productUnitId, tenantId);
+        ({ unitId, conversionFactorSnapshot } = productUnitSnapshot(productUnit));
+        await this.assertSupplierPriceSource(manager, row, supplierId, productUnitId);
+      }
+      const quantity = Number(row.receivedQty);
       if (quantity <= 0 || unitCost < 0 || discountAmount < 0 || taxAmount < 0) throw new BadRequestException('Invalid quantity or cost.');
-      const netUnitCost = unitCost - discountAmount + taxAmount;
+      const netUnitCost = agreedNetUnitCost ?? (unitCost - discountAmount + taxAmount);
       const repository = manager.getRepository(GoodsReceiptLine);
-      await repository.save(repository.create({ ...row, goodsReceiptId, productId: Number(row.productId), unitId: Number(row.unitId), receivedQty: String(quantity), unitCost: String(unitCost), discountAmount: String(discountAmount), taxAmount: String(taxAmount), netUnitCost: String(netUnitCost), lineTotal: String(quantity * netUnitCost), manufactureDate: row.manufactureDate || null, expiryDate: row.expiryDate || null }));
+      await repository.save(repository.create({ ...row, goodsReceiptId, productId, productUnitId, unitId, conversionFactorSnapshot, sourceSupplierPriceId, receivedQty: String(quantity), unitCost: String(unitCost), discountAmount: String(discountAmount), taxAmount: String(taxAmount), netUnitCost: String(netUnitCost), lineTotal: String(quantity * netUnitCost), manufactureDate: row.manufactureDate || null, expiryDate: row.expiryDate || null }));
     }
+  }
+
+  private async assertSupplierPriceSource(manager: EntityManager, row: GoodsReceiptLineDto, supplierId: number, productUnitId: number) {
+    if (!row.sourceSupplierPriceId) return;
+    const price = await manager.getRepository(ProductSupplierPrice).findOne({
+      where: { productSupplierPriceId: Number(row.sourceSupplierPriceId) },
+      relations: { productSupplierUnit: { productSupplier: true, productUnit: true } },
+    });
+    if (!price || Number(price.productSupplierUnit.productSupplier.productId) !== Number(row.productId) || Number(price.productSupplierUnit.productSupplier.supplierId) !== supplierId || Number(price.productSupplierUnit.productUnitId) !== productUnitId || !price.productSupplierUnit.isActive || Number(price.minimumQuantity) !== 1)
+      throw new BadRequestException('Selected supplier price is not valid for this goods receipt line.');
   }
 
   private async validateReferences(user: TenantPrincipal, supplierId: number, locationId: number) { if (!await this.dataSource.getRepository(Supplier).findOneBy({ supplierId, tenantId: user.tenantId, isActive: true })) throw new NotFoundException('Supplier not found.'); await this.assertLocationAccess(user, locationId); }
   private async assertLocationAccess(user: TenantPrincipal, locationId: number) { const location = await this.dataSource.getRepository(Location).findOneBy({ locationId, tenantId: user.tenantId, isActive: true }); if (!location) throw new NotFoundException('Location not found.'); if (user.accessScope === 'LOCATION' && !user.assignedLocationIds.map(Number).includes(locationId)) throw new ForbiddenException('User is not assigned to this location.'); }
-  private async assertProductAndUnit(manager: EntityManager, productId: number, unitId: number, tenantId: number) { const product = await manager.getRepository(Product).findOneBy({ productId, tenantId, isActive: true }); if (!product) throw new NotFoundException('Product not found.'); if (Number(product.baseUnitId) === unitId) return; if (!await manager.getRepository(ProductUnit).findOneBy({ productId, unitId, isActive: true })) throw new BadRequestException('Unit is not valid for this product.'); }
+  private async resolveProductUnit(manager: EntityManager, productId: number, productUnitId: number, tenantId: number) { const product = await manager.getRepository(Product).findOneBy({ productId, tenantId, isActive: true }); if (!product) throw new NotFoundException('Product not found.'); const productUnit = await manager.getRepository(ProductUnit).findOneBy({ productUnitId, productId, isActive: true, isPurchaseUnit: true }); if (!productUnit) throw new BadRequestException('Product unit is not a valid active purchase unit for this product.'); return productUnit; }
   private async find(id: number, user: TenantPrincipal) { const grn = await this.dataSource.getRepository(GoodsReceipt).findOneBy({ goodsReceiptId: id, tenantId: user.tenantId }); if (!grn) throw new NotFoundException('GRN not found.'); return grn; }
   private async findPo(id: number, user: TenantPrincipal) { const po = await this.dataSource.getRepository(PurchaseOrder).findOneBy({ purchaseOrderId: id, tenantId: user.tenantId }); if (!po) throw new NotFoundException('Purchase order not found.'); return po; }
 }

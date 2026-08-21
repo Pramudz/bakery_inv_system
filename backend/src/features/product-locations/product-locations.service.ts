@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ProductLocation } from './product-locations.entity';
@@ -38,11 +38,14 @@ export class ProductLocationService {
     const second = await secondRepo.findOne({ where: { locationId: (dto as any).locationId, tenantId } as any });
     if (!second) throw new NotFoundException('Location not found for this tenant.');
 
+    if (await this.repo.findOneBy({ productId: Number(dto.productId), locationId: Number(dto.locationId) }))
+      throw new ConflictException('Location is already assigned to this product.');
+
     return this.repo.save(this.repo.create(dto as any));
   }
 
   async update(id: number, dto: UpdateProductLocationDto, tenantId: number) {
-    await this.findOne(id, tenantId);
+    const current = await this.findOne(id, tenantId);
     if ((dto as any).productId !== undefined) {
       const parent = await this.dataSource.getRepository(Product).findOne({ where: { productId: (dto as any).productId, tenantId } as any });
       if (!parent) throw new NotFoundException('Product not found for this tenant.');
@@ -51,6 +54,12 @@ export class ProductLocationService {
       const second = await this.dataSource.getRepository(Location).findOne({ where: { locationId: (dto as any).locationId, tenantId } as any });
       if (!second) throw new NotFoundException('Location not found for this tenant.');
     }
+    const duplicate = await this.repo.findOneBy({
+      productId: Number((dto as any).productId ?? current.productId),
+      locationId: Number((dto as any).locationId ?? current.locationId),
+    });
+    if (duplicate && Number(duplicate.productLocationId) !== id)
+      throw new ConflictException('Location is already assigned to this product.');
     await this.repo.update(id, dto as any);
     return this.findOne(id, tenantId);
   }
