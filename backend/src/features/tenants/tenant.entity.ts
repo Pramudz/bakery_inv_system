@@ -36,6 +36,7 @@ export class Tenant extends AuditEntity {
   @Column({ name: 'state_province', type: 'varchar', length: 100, nullable: true }) stateProvince!: string | null;
   @Column({ name: 'postal_code', type: 'varchar', length: 30, nullable: true }) postalCode!: string | null;
   @Column({ name: 'country_code', type: 'varchar', length: 2, nullable: true }) countryCode!: string | null;
+  @Column({ name: 'time_zone', type: 'varchar', length: 64, default: 'Asia/Colombo' }) timeZone!: string;
   @Column({ name: 'logo_url', type: 'varchar', length: 500, nullable: true }) logoUrl!: string | null;
   @Column({ name: 'allow_direct_grn', default: true }) allowDirectGrn!: boolean;
   @Column({ name: 'po_required_for_grn', default: false }) poRequiredForGrn!: boolean;

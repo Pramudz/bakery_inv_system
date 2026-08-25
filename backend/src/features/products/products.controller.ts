@@ -126,7 +126,7 @@ export class ProductController {
   @Post(":id/selling-prices/publish")
   @RequirePermission("PRODUCT_UPDATE")
   publishSellingPrices(@Param("id", ParseIntPipe) id: number, @Body() dto: PublishSellingPricesDto, @CurrentUser() user: AuthPrincipal) {
-    return this.service.publishSellingPrices(id, dto, user.tenantId);
+    return this.service.publishSellingPrices(id, dto, user.tenantId, user.userId);
   }
 
   @Patch(":id/general")

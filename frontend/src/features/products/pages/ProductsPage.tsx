@@ -66,6 +66,12 @@ type Price = {
   isActive?: boolean;
   effectiveStatus?: string;
   pendingRemoval?: boolean;
+  discount?: {
+    discountType: "PERCENTAGE" | "FIXED_AMOUNT";
+    discountValue: string;
+    effectiveFrom: string;
+    effectiveTo?: string;
+  };
 };
 type Location = {
   productLocationId?: number;
@@ -133,6 +139,11 @@ const localDateValue = (date = new Date()) => {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
+const dateValueInTimeZone = (timeZone: string, date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
+  return `${value('year')}-${value('month')}-${value('day')}`;
+};
 const displayDate = (value?: string | null) => {
   if (!value) return "—";
   const [year, month, day] = String(value).slice(0, 10).split("-");
@@ -140,6 +151,27 @@ const displayDate = (value?: string | null) => {
 };
 const displayMoney = (currency: string, value: string | number) =>
   `${currency || "LKR"} ${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const initialDiscountPreview = (row: Price) => {
+  const base = Number(row.sellingPrice || 0);
+  const value = Number(row.discount?.discountValue || 0);
+  const amount = row.discount?.discountType === "PERCENTAGE" ? base * value / 100 : value;
+  return { amount: Math.max(0, amount), finalPrice: Math.max(0, base - amount) };
+};
+const initialDiscountError = (row: Price) => {
+  if (!row.discount) return "";
+  const base = Number(row.sellingPrice);
+  const value = Number(row.discount.discountValue);
+  if (!row.discount.discountValue) return "Discount value is required.";
+  if (row.discount.discountType === "PERCENTAGE" && (value <= 0 || value > 100)) return "Percentage discount must be greater than 0 and cannot exceed 100.";
+  if (row.discount.discountType === "FIXED_AMOUNT" && value <= 0) return "Discount value must be greater than zero.";
+  if (row.discount.discountType === "FIXED_AMOUNT" && value > base) return "Fixed discount cannot exceed the selling price.";
+  if (!row.discount.effectiveFrom) return "Discount effective date is required.";
+  if (row.discount.effectiveFrom < row.effectiveFrom) return "Discount effective date cannot be before the price effective date.";
+  if (row.discount.effectiveTo && row.discount.effectiveTo < row.discount.effectiveFrom) return "Discount Effective To cannot be before Effective From.";
+  if (row.effectiveTo && (!row.discount.effectiveTo || row.discount.effectiveTo > row.effectiveTo)) return "Discount cannot end after its parent price ends.";
+  if (base - initialDiscountPreview(row).amount < 0) return "Final selling price cannot be negative.";
+  return "";
+};
 const displayDateTime = (value?: string | null) => value
   ? new Intl.DateTimeFormat(undefined, { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value))
   : "—";
@@ -173,7 +205,8 @@ const emptyProduct = (): ProductForm => ({
 });
 
 export function ProductsPage() {
-  const { permissions } = useAuth();
+  const { permissions, tenant } = useAuth();
+  const tenantDateValue = (date = new Date()) => dateValueInTimeZone(tenant?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, date);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -340,7 +373,7 @@ export function ProductsPage() {
       sellingPrice: "",
       currencyCode: "LKR",
       minimumQuantity: "1",
-      effectiveFrom: new Date().toISOString().slice(0, 10),
+      effectiveFrom: tenantDateValue(),
     }]);
     setSupplierPrices([]);
     setRemovedSellingPriceIds([]);
@@ -474,7 +507,7 @@ export function ProductsPage() {
         sellingPrice: "",
         currencyCode: "LKR",
         minimumQuantity: "1",
-        effectiveFrom: new Date().toISOString().slice(0, 10),
+        effectiveFrom: tenantDateValue(),
       },
     ]));
   const addSupplierPrice = () =>
@@ -490,7 +523,7 @@ export function ProductsPage() {
         purchasePrice: "",
         currencyCode: "LKR",
         minimumQuantity: "1",
-        effectiveFrom: new Date().toISOString().slice(0, 10),
+        effectiveFrom: tenantDateValue(),
       },
     ]));
   const clearPricingErrors = () => {
@@ -499,6 +532,17 @@ export function ProductsPage() {
   };
   const updateSellingPrice = (index: number, change: Partial<Price>) => {
     setPrices((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...change } : row));
+    clearPricingErrors();
+  };
+  const toggleInitialDiscount = (index: number, enabled: boolean) => {
+    setPrices((rows) => rows.map((row, rowIndex) => rowIndex === index ? {
+      ...row,
+      discount: enabled ? { discountType: "PERCENTAGE", discountValue: "", effectiveFrom: row.effectiveFrom, effectiveTo: "" } : undefined,
+    } : row));
+    clearPricingErrors();
+  };
+  const updateInitialDiscount = (index: number, change: Partial<NonNullable<Price["discount"]>>) => {
+    setPrices((rows) => rows.map((row, rowIndex) => rowIndex === index && row.discount ? { ...row, discount: { ...row.discount, ...change } } : row));
     clearPricingErrors();
   };
   const updateSupplierPrice = (index: number, change: Partial<SupplierPrice>) => {
@@ -545,7 +589,7 @@ export function ProductsPage() {
     purchasePrice: "",
     currencyCode: "LKR",
     minimumQuantity: "1",
-    effectiveFrom: localDateValue(),
+    effectiveFrom: tenantDateValue(),
     isActive: true,
   });
 
@@ -656,7 +700,7 @@ export function ProductsPage() {
       const priceChanges: Partial<SupplierPrice> = {
         purchasePrice: initialPriceDraft.purchasePrice,
         currencyCode: initialPriceDraft.currencyCode.trim().toUpperCase() || "LKR",
-        effectiveFrom: localDateValue(),
+        effectiveFrom: tenantDateValue(),
         isActive: true,
       };
       if (existingIndex >= 0) return rows.map((row, index) => index === existingIndex ? { ...row, ...priceChanges } : row);
@@ -914,7 +958,7 @@ export function ProductsPage() {
   const validPrices = mode === "update" || (
     (!form.isSellable || prices.some((x) => !x.pendingRemoval && x.isActive !== false)) &&
     prices.filter((x) => !x.pendingRemoval).every(
-      (x) => x.priceListId && x.unitId && Number(x.sellingPrice) > 0,
+      (x) => x.priceListId && x.unitId && Number(x.sellingPrice) > 0 && !initialDiscountError(x),
     ));
   const validSupplierPrices = mode === "update" || !form.isPurchasable || (
     activeCreateSupplierIds.size > 0 &&
@@ -946,6 +990,11 @@ export function ProductsPage() {
     validAttributes;
 
   const goToNextStep = () => {
+    if (mode === "create" && step === 3 && !validPrices) {
+      setPricingError(prices.map(initialDiscountError).find(Boolean) || "Complete every required selling-price field.");
+      setError("");
+      return;
+    }
     if (mode === "create" && step === 4 && !validSupplierPrices) {
       setPricingError("Purchasable products require at least one active supplier, one active supplier purchase unit, and one valid initial purchase price.");
       setError("");
@@ -1170,6 +1219,10 @@ export function ProductsPage() {
       return;
     }
     if (!setupValid) {
+      if (!validPrices) {
+        setPricingError(prices.map(initialDiscountError).find(Boolean) || "Complete every required selling-price field.");
+        setStep(3);
+      }
       setError(
         !validPrices
           ? "At least one selling price is required."
@@ -1218,6 +1271,12 @@ export function ProductsPage() {
           effectiveFrom: x.effectiveFrom,
           effectiveTo: x.effectiveTo || undefined,
           isActive: x.isActive,
+          ...(x.discount ? { discount: {
+            discountType: x.discount.discountType,
+            discountValue: x.discount.discountValue,
+            effectiveFrom: x.discount.effectiveFrom,
+            effectiveTo: x.discount.effectiveTo || undefined,
+          } } : {}),
         })) } : {}),
         ...(mode === "create" ? { supplierLinks: [...new Set(supplierPrices.filter((x) => !x.pendingRemoval && x.supplierIsActive !== false && x.supplierId).map((x) => x.supplierId))].map((supplierId) => {
           const supplierRows = supplierPrices.filter((x) => !x.pendingRemoval && x.supplierIsActive !== false && x.supplierId === supplierId);
@@ -1226,7 +1285,7 @@ export function ProductsPage() {
             supplierId: Number(supplierId), isPrimarySupplier: supplierRows.some((x) => x.isPrimarySupplier), isActive: true,
             units: unitIds.map((unitId) => {
               const unitRows = supplierRows.filter((x) => x.unitId === unitId), first = unitRows[0];
-              return { unitId: Number(unitId), supplierProductCode: first.supplierProductCode.trim() || null, minimumOrderQty: first.minimumOrderQty ? Number(first.minimumOrderQty) : null, leadTimeDays: first.leadTimeDays ? Number(first.leadTimeDays) : null, isDefaultPurchaseUnit: Boolean(first.isDefaultPurchaseUnit), isActive: true, prices: unitRows.filter((x) => Number(x.purchasePrice) > 0 && x.isActive !== false).map((x) => ({ purchasePrice: Number(x.purchasePrice), currencyCode: x.currencyCode, effectiveFrom: x.effectiveFrom, effectiveTo: x.effectiveTo || null, isActive: true })) };
+              return { unitId: Number(unitId), supplierProductCode: first.supplierProductCode.trim() || null, minimumOrderQty: first.minimumOrderQty ? Number(first.minimumOrderQty) : null, leadTimeDays: first.leadTimeDays ? Number(first.leadTimeDays) : null, isDefaultPurchaseUnit: Boolean(first.isDefaultPurchaseUnit), isActive: true, prices: unitRows.filter((x) => Number(x.purchasePrice) > 0 && x.isActive !== false).map((x) => ({ purchasePrice: Number(x.purchasePrice), currencyCode: x.currencyCode, effectiveTo: x.effectiveTo || null, isActive: true })) };
             }),
           };
         }) } : {}),
@@ -2369,12 +2428,14 @@ export function ProductsPage() {
               priceListOptions={priceListOptions}
               unitOptions={unitOptions}
               unitsDirty={unitsDirty}
+              productName={form.productName}
+              sku={form.sku}
             /></div>
           )}
           {step === 3 && mode === "create" && (
             <Section
               title="Selling Prices"
-              description="Customer selling prices use the product base unit. Minimum quantity is fixed at 1 for the current MVP."
+              description="Add base selling prices. An initial discount is optional and will be saved atomically with its price."
             >
               <div className="mini-table selling-price-grid">
                 <div className="mini-head price-history">
@@ -2384,7 +2445,7 @@ export function ProductsPage() {
                   <span className="mvp-hidden-column">Minimum qty</span>
                   <span className="mvp-hidden-column">Currency</span>
                   <span>Effective from</span>
-                  <span className="mvp-hidden-column">Effective to</span>
+                  <span>Effective to</span>
                   <span>Status</span>
                   <span className="actions-head">Actions</span>
                 </div>
@@ -2424,7 +2485,7 @@ export function ProductsPage() {
                     />
                     <input aria-hidden="true" className="control mvp-hidden-column" value={x.currencyCode} disabled />
                     {x.priceListItemId ? <span>{displayDate(x.effectiveFrom)}</span> : <input className="control" type="date" value={x.effectiveFrom} onChange={(e) => updateSellingPrice(i, { effectiveFrom: e.target.value })} />}
-                    <input aria-hidden="true" className="control mvp-hidden-column" type="date" value={x.effectiveTo ?? ""} disabled />
+                    <input className="control" type="date" value={x.effectiveTo ?? ""} onChange={(event) => updateSellingPrice(i, { effectiveTo: event.target.value })} />
                     <span className={`status ${visiblePriceStatus(x) === "Current" ? "status-on" : visiblePriceStatus(x) === "Future" ? "status-warn" : "status-off"}`}>{x.pendingRemoval ? "Pending deletion" : visiblePriceStatus(x)}</span>
                     {x.priceListItemId && !x.pendingRemoval && (
                       <div className="price-action-stack"><button type="button" className="btn btn-secondary btn-compact" disabled={busy || visiblePriceStatus(x) !== "Current"} onClick={() => changeSellingPrice(x, i)}>Change Price</button><button type="button" className="btn btn-ghost btn-compact" disabled={busy || visiblePriceStatus(x) === "Ended"} onClick={() => endSellingPrice(x, i)}>End Price</button></div>
@@ -2439,6 +2500,21 @@ export function ProductsPage() {
                     >
                       ×
                     </button>}
+                    <div className={`initial-discount-panel${x.discount ? " enabled" : ""}`}>
+                      <label className="initial-discount-toggle"><input type="checkbox" checked={Boolean(x.discount)} onChange={(event) => toggleInitialDiscount(i, event.target.checked)} /><span>Add an initial discount</span></label>
+                      {!x.discount && <span className="initial-discount-off">No discount — customer pays {displayMoney(x.currencyCode, x.sellingPrice)}.</span>}
+                      {x.discount && <>
+                        <div className="initial-discount-fields">
+                          <label><span>Discount Type</span><select className="control" value={x.discount.discountType} onChange={(event) => updateInitialDiscount(i, { discountType: event.target.value as "PERCENTAGE" | "FIXED_AMOUNT" })}><option value="PERCENTAGE">Percentage</option><option value="FIXED_AMOUNT">Fixed amount</option></select></label>
+                          <label><span>Discount Value *</span><div className="create-money-input"><input className="control" type="number" min="0" step="0.01" value={x.discount.discountValue} onChange={(event) => updateInitialDiscount(i, { discountValue: event.target.value })} /><span>{x.discount.discountType === "PERCENTAGE" ? "%" : x.currencyCode}</span></div></label>
+                          <label><span>Effective From *</span><input className="control" type="date" value={x.discount.effectiveFrom} onChange={(event) => updateInitialDiscount(i, { effectiveFrom: event.target.value })} /></label>
+                          <label><span>Effective To (optional)</span><input className="control" type="date" value={x.discount.effectiveTo ?? ""} onChange={(event) => updateInitialDiscount(i, { effectiveTo: event.target.value })} /></label>
+                          <aside className="initial-discount-preview"><span>Customer Pays</span><strong>{displayMoney(x.currencyCode, initialDiscountPreview(x).finalPrice)}</strong><em>Save {displayMoney(x.currencyCode, initialDiscountPreview(x).amount)}</em><small>{x.discount.discountType === "PERCENTAGE" ? `${Number(x.discount.discountValue || 0)}% off` : "Fixed discount"}</small></aside>
+                        </div>
+                        <p className="initial-discount-note">ⓘ This discount will end automatically if this price ends.</p>
+                        {initialDiscountError(x) && <div className="field-error">{initialDiscountError(x)}</div>}
+                      </>}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2449,6 +2525,7 @@ export function ProductsPage() {
               >
                 ＋ Add price
               </button>
+              <div className="create-price-atomic-note">✓ Price and optional discount will be created together when the product is saved.</div>
             </Section>
           )}
 

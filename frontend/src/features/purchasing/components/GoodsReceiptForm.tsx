@@ -21,6 +21,7 @@ const blank = {
   batchNumber: "",
   manufactureDate: "",
   expiryDate: "",
+  costOverrideReason: "",
 };
 export function GoodsReceiptForm({
   close,
@@ -102,6 +103,7 @@ export function GoodsReceiptForm({
           previouslyReceivedQty: String(line.receivedQty),
           receivedQty: "0",
           unitCost: String(line.unitCost),
+          baselineUnitCost: String(line.unitCost),
           discountAmount: String(line.discountAmount),
           taxAmount: String(line.taxAmount),
           sourceSupplierPriceId: line.sourceSupplierPriceId ?? undefined,
@@ -232,7 +234,7 @@ export function GoodsReceiptForm({
                 label="Currency"
                 value={form.currencyCode}
                 onChange={(v) => setForm({ ...form, currencyCode: v })}
-                disabled={!editable}
+                disabled={!editable || poBased}
               />
               <Field
                 label="Notes"

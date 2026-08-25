@@ -22,6 +22,7 @@ export class GoodsReceiptLineDto {
   @IsInt() unitId!: number;
   @IsNumber() @Min(0.0001) receivedQty!: number;
   @IsNumber() @Min(0) unitCost!: number;
+  @IsOptional() @IsString() @MaxLength(500) costOverrideReason?: string;
   @IsOptional() @IsNumber() @Min(0) discountAmount?: number;
   @IsOptional() @IsNumber() @Min(0) taxAmount?: number;
   @IsOptional() @IsString() @MaxLength(100) batchNumber?: string;

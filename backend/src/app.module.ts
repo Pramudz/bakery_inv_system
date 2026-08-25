@@ -39,6 +39,7 @@ import { InventoryBalanceModule } from './features/inventory-balance/inventory-b
 import { InventoryLedgerModule } from './features/inventory-ledger/inventory-ledger.module';
 import { PurchaseOrdersModule } from './features/purchase-orders/purchase-orders.module';
 import { ProductSupplierUnitsModule } from './features/product-supplier-units/product-supplier-units.module';
+import { PriceListItemDiscountModule } from './features/price-list-item-discounts/price-list-item-discounts.module';
 
 
 @Module({
@@ -96,6 +97,7 @@ import { ProductSupplierUnitsModule } from './features/product-supplier-units/pr
     RolePermissionModule,
     UserSessionModule,
     ProductSupplierUnitsModule,
+    PriceListItemDiscountModule,
   ],
 })
 export class AppModule {}

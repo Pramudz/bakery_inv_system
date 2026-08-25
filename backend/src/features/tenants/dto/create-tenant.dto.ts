@@ -1,4 +1,4 @@
-import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, IsUrl, Length, MaxLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, IsTimeZone, IsUrl, Length, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 const EmptyToNull = () => Transform(({ value }) => value === '' ? null : value);
 export class CreateTenantDto {
@@ -17,4 +17,5 @@ export class CreateTenantDto {
   @EmptyToNull() @IsOptional() @IsString() @MaxLength(100) stateProvince?: string;
   @EmptyToNull() @IsOptional() @IsString() @MaxLength(30) postalCode?: string;
   @EmptyToNull() @IsOptional() @IsString() @Length(2, 2) countryCode?: string;
+  @IsOptional() @IsString() @IsTimeZone() @MaxLength(64) timeZone?: string;
 }

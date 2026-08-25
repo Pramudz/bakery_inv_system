@@ -6,13 +6,13 @@ import { Field } from '../../../components/ui/Field';
 
 const emptyForm = (): TenantInput => ({
   code: '', name: '', isActive: true, legalName: '', registrationNumber: '', taxRegistrationNumber: '',
-  email: '', phone: '', website: '', addressLine1: '', addressLine2: '', city: '', stateProvince: '', postalCode: '', countryCode: '',
+  email: '', phone: '', website: '', addressLine1: '', addressLine2: '', city: '', stateProvince: '', postalCode: '', countryCode: '', timeZone: 'Asia/Colombo',
 });
 const toForm = (tenant: Tenant): TenantInput => ({
   code: tenant.code ?? '', name: tenant.name ?? '', isActive: tenant.isActive,
   legalName: tenant.legalName ?? '', registrationNumber: tenant.registrationNumber ?? '', taxRegistrationNumber: tenant.taxRegistrationNumber ?? '',
   email: tenant.email ?? '', phone: tenant.phone ?? '', website: tenant.website ?? '', addressLine1: tenant.addressLine1 ?? '',
-  addressLine2: tenant.addressLine2 ?? '', city: tenant.city ?? '', stateProvince: tenant.stateProvince ?? '', postalCode: tenant.postalCode ?? '', countryCode: tenant.countryCode ?? '',
+  addressLine2: tenant.addressLine2 ?? '', city: tenant.city ?? '', stateProvince: tenant.stateProvince ?? '', postalCode: tenant.postalCode ?? '', countryCode: tenant.countryCode ?? '', timeZone: tenant.timeZone,
 });
 
 export function TenantsPage() {
@@ -51,7 +51,8 @@ export function TenantsPage() {
 
   const save = useMutation({
     mutationFn: async ({ data, tenantId }: { data: TenantInput; tenantId?: number }) => {
-      let saved = tenantId ? await tenantsApi.update(tenantId, data) : (await tenantsApi.create(data)).tenant;
+      const { timeZone: _creationTimeZone, ...ordinaryUpdate } = data;
+      let saved = tenantId ? await tenantsApi.update(tenantId, ordinaryUpdate) : (await tenantsApi.create(data)).tenant;
       if (tenantId && removeLogo && !logoFile) saved = await tenantsApi.removeLogo(tenantId);
       if (logoFile) saved = await tenantsApi.uploadLogo(saved.tenantId, logoFile);
       return saved;
@@ -83,6 +84,7 @@ export function TenantsPage() {
     if (!form.code.trim()) errors.code = 'Tenant code is required.';
     if (!form.name.trim()) errors.name = 'Tenant name is required.';
     if (form.countryCode && form.countryCode.length !== 2) errors.countryCode = 'Country code must contain 2 letters.';
+    if (!editing && !form.timeZone.trim()) errors.timeZone = 'IANA timezone is required.';
     if (Object.keys(errors).length) { setFieldErrors(errors); return; }
     setApiError(''); setDuplicateCode(''); save.mutate({ data: { ...form, code: form.code.trim().toUpperCase(), countryCode: form.countryCode?.toUpperCase() }, tenantId: editing?.tenantId });
   };
@@ -102,7 +104,7 @@ export function TenantsPage() {
     </div>
 
     <Modal open={open} onClose={closeModal} title={editing ? 'Edit tenant' : 'Create tenant'} subtitle="Tenant identity, contact, address, and branding." wide><form onSubmit={submit}><div className="modal-body tenant-form-body">{editLoading ? <div className="empty">Loading tenant data...</div> : <>
-      <FormSection title="Basic Information"><Field label="Tenant code" value={form.code} onChange={(value) => change('code', value.toUpperCase())} required /><Field label="Tenant name" value={form.name} onChange={(value) => change('name', value)} required /><Field label="Legal name" value={form.legalName} onChange={(value) => change('legalName', value)} /><Field label="Registration number" value={form.registrationNumber} onChange={(value) => change('registrationNumber', value)} /><Field label="Tax registration number" value={form.taxRegistrationNumber} onChange={(value) => change('taxRegistrationNumber', value)} /><label className="check tenant-active"><input type="checkbox" checked={form.isActive} onChange={(event) => change('isActive', event.target.checked)} /> Active</label></FormSection>
+      <FormSection title="Basic Information"><Field label="Tenant code" value={form.code} onChange={(value) => change('code', value.toUpperCase())} required /><Field label="Tenant name" value={form.name} onChange={(value) => change('name', value)} required /><Field label="Legal name" value={form.legalName} onChange={(value) => change('legalName', value)} /><Field label="Registration number" value={form.registrationNumber} onChange={(value) => change('registrationNumber', value)} /><Field label="Tax registration number" value={form.taxRegistrationNumber} onChange={(value) => change('taxRegistrationNumber', value)} />{!editing && <Field label="Business timezone" value={form.timeZone} onChange={(value) => change('timeZone', value)} placeholder="Asia/Colombo" hint="IANA timezone set by the platform administrator." required />}<label className="check tenant-active"><input type="checkbox" checked={form.isActive} onChange={(event) => change('isActive', event.target.checked)} /> Active</label></FormSection>
       <FormSection title="Contact Details"><Field label="Email" type="email" value={form.email} onChange={(value) => change('email', value)} /><Field label="Phone" value={form.phone} onChange={(value) => change('phone', value)} /><Field label="Website" type="url" value={form.website} onChange={(value) => change('website', value)} full /></FormSection>
       <FormSection title="Head Office Address"><Field label="Address line 1" value={form.addressLine1} onChange={(value) => change('addressLine1', value)} /><Field label="Address line 2" value={form.addressLine2} onChange={(value) => change('addressLine2', value)} /><Field label="City" value={form.city} onChange={(value) => change('city', value)} /><Field label="State / Province" value={form.stateProvince} onChange={(value) => change('stateProvince', value)} /><Field label="Postal code" value={form.postalCode} onChange={(value) => change('postalCode', value)} /><Field label="Country code" value={form.countryCode} onChange={(value) => change('countryCode', value.toUpperCase().slice(0, 2))} placeholder="LK" /></FormSection>
       <FormSection title="Branding"><div className="branding-editor">{logoPreview && !removeLogo ? <img className="tenant-logo-preview" src={logoPreview} alt="Tenant logo preview" /> : <div className="tenant-logo-placeholder">No logo</div>}<div><input key={fileKey} type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" onChange={(event) => selectLogo(event.target.files?.[0])} /><small className="field-hint">PNG, JPG, JPEG or WEBP. Maximum 2MB.</small>{logoPreview && !removeLogo && <button type="button" className="btn btn-danger-soft" onClick={() => { setLogoFile(null); setLogoPreview(''); setRemoveLogo(true); setFileKey((key) => key + 1); }}>Remove logo</button>}</div></div></FormSection>

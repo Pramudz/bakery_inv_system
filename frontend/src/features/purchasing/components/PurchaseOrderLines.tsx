@@ -16,6 +16,7 @@ const emptyLine = {
   unitCost: "0",
   discountAmount: "0",
   taxAmount: "0",
+  costOverrideReason: "",
 };
 const numeric = (value: unknown) => Number(value || 0);
 export const poNet = (line: any) =>
@@ -31,6 +32,12 @@ export function PurchaseOrderLines({ lines, products, supplierId, orderDate, cur
     return (supplierUnit?.prices ?? [])
       .filter((price: any) => Number(price.minimumQuantity) === 1 && price.currencyCode === String(currencyCode || "LKR").toUpperCase() && price.isActive !== false && price.effectiveFrom <= orderDate && (!price.effectiveTo || price.effectiveTo >= orderDate))
       .sort((a: any, b: any) => String(b.effectiveFrom).localeCompare(String(a.effectiveFrom)))[0];
+  };
+  const requiresReason = (line: any) => {
+    if (!line.sourceSupplierPriceId) return true;
+    const product = products.find((x) => String(x.productId) === String(line.productId));
+    const price = priceFor(product, String(line.productUnitId));
+    return !price || Number(line.unitCost) !== Number(price.purchasePrice);
   };
   const update = (index: number, key: string, value: string) =>
     onChange(
@@ -50,13 +57,14 @@ export function PurchaseOrderLines({ lines, products, supplierId, orderDate, cur
             unitId: String(productUnit?.unitId ?? ""),
             unitCost: price ? String(price.purchasePrice) : line.unitCost,
             sourceSupplierPriceId: price?.productSupplierPriceId,
+            costOverrideReason: "",
           };
         }
         if (key === "productUnitId") {
           const product = products.find((x) => String(x.productId) === String(line.productId));
           const productUnit = (product?.productUnits ?? []).find((unit: any) => String(unit.productUnitId) === value);
           const price = priceFor(product, value);
-          return { ...line, productUnitId: value, unitId: String(productUnit?.unitId ?? ""), unitCost: price ? String(price.purchasePrice) : line.unitCost, sourceSupplierPriceId: price?.productSupplierPriceId };
+          return { ...line, productUnitId: value, unitId: String(productUnit?.unitId ?? ""), unitCost: price ? String(price.purchasePrice) : line.unitCost, sourceSupplierPriceId: price?.productSupplierPriceId, costOverrideReason: "" };
         }
         return { ...line, [key]: value };
       }),
@@ -76,6 +84,7 @@ export function PurchaseOrderLines({ lines, products, supplierId, orderDate, cur
               <th>Unit</th>
               <th>Ordered qty</th>
               <th>Unit cost</th>
+              <th>Cost override reason</th>
               <th>Discount</th>
               <th>Tax</th>
               <th>Net cost</th>
@@ -97,6 +106,9 @@ export function PurchaseOrderLines({ lines, products, supplierId, orderDate, cur
                     }))}
                     required
                   />
+                </td>
+                <td>
+                  <Field label="" value={line.costOverrideReason ?? ""} onChange={(v) => update(index, "costOverrideReason", v)} required={requiresReason(line)} />
                 </td>
                 <td>
                   <Field label="" value={line.productUnitId} onChange={(v) => update(index, "productUnitId", v)} required options={((products.find((x) => String(x.productId) === String(line.productId))?.productUnits) ?? []).filter((unit: any) => unit.isActive !== false && unit.isPurchaseUnit).map((unit: any) => ({ value: unit.productUnitId, label: `${unit.unit?.code ?? unit.unit?.name ?? unit.unitId} × ${unit.conversionFactor}` }))} />

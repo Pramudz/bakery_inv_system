@@ -6,6 +6,7 @@ import { CreateProductSupplierDto } from './dto/create-product-suppliers.dto';
 import { UpdateProductSupplierDto } from './dto/update-product-suppliers.dto';
 import { Product } from '../products/products.entity';
 import { Supplier } from '../suppliers/suppliers.entity';
+import { assertProductOperationalReadiness } from '../products/product-operational-readiness';
 
 @Injectable()
 export class ProductSupplierService {
@@ -57,13 +58,18 @@ export class ProductSupplierService {
       if (dto.isPrimarySupplier && isActive)
         await manager.getRepository(ProductSupplier).update({ productId: current.productId, isActive: true }, { isPrimarySupplier: false });
       await manager.getRepository(ProductSupplier).update(id, { ...dto, isPrimarySupplier: isActive ? (dto.isPrimarySupplier ?? current.isPrimarySupplier) : false });
+      await assertProductOperationalReadiness(manager, current.productId, tenantId);
       return manager.getRepository(ProductSupplier).findOneByOrFail({ productSupplierId: id });
     });
   }
 
   async deactivate(id: number, tenantId: number) {
-    await this.findOne(id, tenantId);
-    await this.repo.update(id, { isActive: false, isPrimarySupplier: false } as any);
-    return this.findOne(id, tenantId);
+    return this.dataSource.transaction(async manager => {
+      const current = await manager.getRepository(ProductSupplier).findOne({ where: { productSupplierId: id, product: { tenantId } } as any });
+      if (!current) throw new NotFoundException('ProductSupplier not found');
+      await manager.getRepository(ProductSupplier).update(id, { isActive: false, isPrimarySupplier: false } as any);
+      await assertProductOperationalReadiness(manager, current.productId, tenantId);
+      return manager.getRepository(ProductSupplier).findOneByOrFail({ productSupplierId: id });
+    });
   }
 }

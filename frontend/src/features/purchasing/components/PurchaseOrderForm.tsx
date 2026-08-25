@@ -18,6 +18,7 @@ const blank = {
   unitCost: "0",
   discountAmount: "0",
   taxAmount: "0",
+  costOverrideReason: "",
 };
 export function PurchaseOrderForm({
   close,

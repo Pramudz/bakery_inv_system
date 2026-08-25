@@ -51,6 +51,8 @@ export class PurchaseOrderLine extends AuditEntity {
   unitCost!: string;
   @Column({ name: "source_supplier_price_id", type: "bigint", nullable: true })
   sourceSupplierPriceId!: number | null;
+  @Column({ name: "cost_override_reason", type: "varchar", length: 500, nullable: true })
+  costOverrideReason!: string | null;
   @Column({
     name: "discount_amount",
     type: "decimal",

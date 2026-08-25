@@ -7,6 +7,7 @@ import { UpdatePriceListItemDto } from './dto/update-price-list-items.dto';
 import { PriceList } from '../price-lists/price-lists.entity';
 import { Product } from '../products/products.entity';
 import { ProductUnit } from '../product-units/product-units.entity';
+import { assertProductOperationalReadiness } from '../products/product-operational-readiness';
 
 @Injectable()
 export class PriceListItemService {
@@ -47,28 +48,36 @@ export class PriceListItemService {
   }
 
   async update(id: number, dto: UpdatePriceListItemDto, tenantId: number) {
-    const existing = await this.findOne(id, tenantId);
+    return this.dataSource.transaction(async manager => {
+    const existing = await manager.getRepository(PriceListItem).findOne({ where: { priceListItemId: id, priceList: { tenantId } } as any });
+    if (!existing) throw new NotFoundException('PriceListItem not found');
     if ((dto as any).priceListId !== undefined) {
-      const parent = await this.dataSource.getRepository(PriceList).findOne({ where: { priceListId: (dto as any).priceListId, tenantId } as any });
+      const parent = await manager.getRepository(PriceList).findOne({ where: { priceListId: (dto as any).priceListId, tenantId } as any });
       if (!parent) throw new NotFoundException('Price list not found for this tenant.');
     }
     if ((dto as any).productId !== undefined) {
-      const second = await this.dataSource.getRepository(Product).findOne({ where: { productId: (dto as any).productId, tenantId } as any });
+      const second = await manager.getRepository(Product).findOne({ where: { productId: (dto as any).productId, tenantId } as any });
       if (!second) throw new NotFoundException('Product not found for this tenant.');
     }
     const productId = Number((dto as any).productId ?? existing.productId);
     const unitId = Number((dto as any).unitId ?? existing.unitId);
-    const productUnit = await this.dataSource.getRepository(ProductUnit).findOneBy({ productId, unitId, isActive: true });
+    const productUnit = await manager.getRepository(ProductUnit).findOneBy({ productId, unitId, isActive: true });
     if (!productUnit) throw new NotFoundException('Active Product Unit not found for this product.');
     if (!productUnit.isBaseUnit || !productUnit.isSalesUnit || Number(productUnit.conversionFactor) !== 1)
       throw new BadRequestException('Selling prices can only use the active base Product Unit.');
-    await this.repo.update(id, { ...dto, tenantId, productUnitId: productUnit.productUnitId } as any);
-    return this.findOne(id, tenantId);
+    await manager.getRepository(PriceListItem).update(id, { ...dto, tenantId, productUnitId: productUnit.productUnitId } as any);
+    await assertProductOperationalReadiness(manager, productId, tenantId);
+    return manager.getRepository(PriceListItem).findOneByOrFail({ priceListItemId: id });
+    });
   }
 
   async deactivate(id: number, tenantId: number) {
-    await this.findOne(id, tenantId);
-    await this.repo.update(id, { isActive: false } as any);
-    return this.findOne(id, tenantId);
+    return this.dataSource.transaction(async manager => {
+      const existing = await manager.getRepository(PriceListItem).findOne({ where: { priceListItemId: id, priceList: { tenantId } } as any });
+      if (!existing) throw new NotFoundException('PriceListItem not found');
+      await manager.getRepository(PriceListItem).update(id, { isActive: false } as any);
+      await assertProductOperationalReadiness(manager, existing.productId, tenantId);
+      return manager.getRepository(PriceListItem).findOneByOrFail({ priceListItemId: id });
+    });
   }
 }

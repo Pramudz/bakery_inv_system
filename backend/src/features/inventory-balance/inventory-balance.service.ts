@@ -6,7 +6,10 @@ import { InventoryBalance } from './inventory-balance.entity';
 export class InventoryBalanceService {
   async addStock(manager: EntityManager, tenantId: number, locationId: number, productId: number, quantity: number, cost: number) {
     const repository = manager.getRepository(InventoryBalance);
-    let balance = await repository.findOneBy({ tenantId, locationId, productId });
+    let balance = await repository.createQueryBuilder('balance')
+      .setLock('pessimistic_write')
+      .where('balance.tenantId = :tenantId AND balance.locationId = :locationId AND balance.productId = :productId', { tenantId, locationId, productId })
+      .getOne();
     const quantityBefore = Number(balance?.quantityOnHand ?? 0);
     const averageCostBefore = Number(balance?.averageCost ?? 0);
     const quantityAfter = quantityBefore + quantity;

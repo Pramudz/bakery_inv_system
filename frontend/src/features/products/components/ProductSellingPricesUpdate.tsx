@@ -6,6 +6,8 @@ import {
   type SellingPriceHistoryPage,
   type SellingPriceSummary,
 } from "../api/productsApi";
+import { PriceItemDiscountControls } from './PriceItemDiscountControls';
+import { SellingPriceCompactList } from "./SellingPriceCompactList";
 
 type ProductUnitOption = {
   productUnitId?: number;
@@ -31,6 +33,7 @@ type Draft = {
   effectiveMode?: "NOW" | "SCHEDULED";
   effectiveFrom?: string;
   effectiveTo?: string;
+  newDiscount?: { discountType: string; discountValue: string; effectiveFrom: string; effectiveTo?: string };
 };
 type Editor = {
   kind: "ADD" | "CHANGE" | "END";
@@ -61,12 +64,16 @@ export function ProductSellingPricesUpdate({
   priceListOptions,
   unitOptions,
   unitsDirty,
+  productName,
+  sku,
 }: {
   productId: number;
   productUnits: ProductUnitOption[];
   priceListOptions: Option[];
   unitOptions: Option[];
   unitsDirty: boolean;
+  productName: string;
+  sku: string;
 }) {
   const [summary, setSummary] = useState<SellingPriceSummary[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -78,6 +85,11 @@ export function ProductSellingPricesUpdate({
     effectiveMode: "NOW",
     effectiveFrom: "",
     effectiveTo: "",
+    createNewDiscount: false,
+    discountType: 'PERCENTAGE',
+    discountValue: '',
+    discountEffectiveFrom: '',
+    discountEffectiveTo: '',
   });
   const [publishOpen, setPublishOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -91,6 +103,8 @@ export function ProductSellingPricesUpdate({
     toDate: "",
   });
   const [busy, setBusy] = useState(false);
+  const [rowBusyId, setRowBusyId] = useState<number | null>(null);
+  const [expandedPriceItemId, setExpandedPriceItemId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -113,15 +127,17 @@ export function ProductSellingPricesUpdate({
     [productUnits, unitOptions],
   );
 
-  const refreshSummary = async () => {
-    setBusy(true);
+  const refreshSummary = async (priceListItemId?: number) => {
+    if (priceListItemId) setRowBusyId(priceListItemId);
+    else setBusy(true);
     setError("");
     try {
       setSummary(await productsApi.sellingPriceSummary(productId));
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
-      setBusy(false);
+      if (priceListItemId) setRowBusyId(null);
+      else setBusy(false);
     }
   };
   useEffect(() => {
@@ -159,20 +175,22 @@ export function ProductSellingPricesUpdate({
       effectiveMode: "NOW",
       effectiveFrom: localInput(tomorrow),
       effectiveTo: "",
+      createNewDiscount: false, discountType: 'PERCENTAGE', discountValue: '', discountEffectiveFrom: '', discountEffectiveTo: '',
     });
     setEditor({ kind: "ADD" });
     setError("");
   };
-  const openChange = (group: SellingPriceSummary) => {
+  const openChange = (group: SellingPriceSummary, scheduled = false) => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     setForm({
       priceListId: String(group.priceListId),
       productUnitId: String(group.productUnitId),
       price: "",
-      effectiveMode: "NOW",
+      effectiveMode: scheduled ? "SCHEDULED" : "NOW",
       effectiveFrom: localInput(tomorrow),
       effectiveTo: "",
+      createNewDiscount: false, discountType: 'PERCENTAGE', discountValue: '', discountEffectiveFrom: '', discountEffectiveTo: '',
     });
     setEditor({ kind: "CHANGE", group });
     setError("");
@@ -187,6 +205,7 @@ export function ProductSellingPricesUpdate({
       effectiveMode: "NOW",
       effectiveFrom: "",
       effectiveTo: localInput(initialEnd),
+      createNewDiscount: false, discountType: 'PERCENTAGE', discountValue: '', discountEffectiveFrom: '', discountEffectiveTo: '',
     });
     setEditor({ kind: "END", group });
     setError("");
@@ -208,6 +227,11 @@ export function ProductSellingPricesUpdate({
       effectiveTo: draft.effectiveTo
         ? localInput(new Date(draft.effectiveTo))
         : "",
+      createNewDiscount: Boolean(draft.newDiscount),
+      discountType: draft.newDiscount?.discountType ?? 'PERCENTAGE',
+      discountValue: draft.newDiscount?.discountValue ?? '',
+      discountEffectiveFrom: draft.newDiscount?.effectiveFrom ? localInput(new Date(draft.newDiscount.effectiveFrom)) : '',
+      discountEffectiveTo: draft.newDiscount?.effectiveTo ? localInput(new Date(draft.newDiscount.effectiveTo)) : '',
     });
     setEditor({
       kind:
@@ -251,6 +275,10 @@ export function ProductSellingPricesUpdate({
       setError("Select the required effective date and time.");
       return;
     }
+    if (editor.kind === 'CHANGE' && form.createNewDiscount && (Number(form.discountValue) <= 0 || !form.discountEffectiveFrom)) {
+      setError('New discount value and Effective From are required.');
+      return;
+    }
     const action: Draft = {
       id:
         editor.draftIndex == null
@@ -291,6 +319,12 @@ export function ProductSellingPricesUpdate({
         editor.kind === "END"
           ? new Date(form.effectiveTo).toISOString()
           : undefined,
+      newDiscount: editor.kind === 'CHANGE' && form.createNewDiscount ? {
+        discountType: form.discountType,
+        discountValue: form.discountValue,
+        effectiveFrom: new Date(form.discountEffectiveFrom).toISOString(),
+        effectiveTo: form.discountEffectiveTo ? new Date(form.discountEffectiveTo).toISOString() : undefined,
+      } : undefined,
     };
     const duplicate = drafts.some(
       (draft, index) =>
@@ -366,6 +400,7 @@ export function ProductSellingPricesUpdate({
         effectiveMode: draft.effectiveMode,
         effectiveFrom: draft.effectiveFrom,
         effectiveTo: draft.effectiveTo,
+        newDiscount: draft.newDiscount,
       }));
       setSummary(await productsApi.publishSellingPrices(productId, actions));
       setDrafts([]);
@@ -389,6 +424,18 @@ export function ProductSellingPricesUpdate({
     draft.effectiveMode === "NOW"
       ? "On publish (server time)"
       : dateTime(draft.effectiveFrom ?? draft.effectiveTo);
+  const openPriceHistory = (group?: SellingPriceSummary) => {
+    setHistory(null);
+    setHistoryFilters({
+      page: 1,
+      priceListId: group ? String(group.priceListId) : "",
+      productUnitId: group ? String(group.productUnitId) : "",
+      status: "",
+      fromDate: "",
+      toDate: "",
+    });
+    setHistoryOpen(true);
+  };
 
   return (
     <>
@@ -396,24 +443,24 @@ export function ProductSellingPricesUpdate({
         <div className="selling-update-head">
           <div>
             <h3>Selling Prices</h3>
-            <p>Maintain current and scheduled prices for the product base unit.</p>
-            <strong>Unpublished changes: {drafts.length}</strong>
+            <p>Review current prices and manage changes by price list.</p>
+            {!drafts.length && <span className="selling-no-changes">No unpublished changes</span>}
           </div>
-          <div>
+          <div className="selling-head-actions">
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => setHistoryOpen(true)}
+              onClick={() => openPriceHistory()}
             >
-              View Price History
+              All History
             </button>
             <button
               type="button"
-              className="btn btn-primary"
-              disabled={!drafts.length || busy || unitsDirty}
-              onClick={() => setPublishOpen(true)}
+              className="btn btn-secondary"
+              disabled={unitsDirty || activeSalesUnits.length !== 1}
+              onClick={openAdd}
             >
-              Publish Prices ({drafts.length})
+              + Add Price
             </button>
           </div>
         </div>
@@ -424,7 +471,32 @@ export function ProductSellingPricesUpdate({
         )}
         {success && <div className="success-box">{success}</div>}
         {error && <div className="error-box">{error}</div>}
-        <div className="selling-price-toolbar">
+        <SellingPriceCompactList
+          summary={summary}
+          expandedPriceItemId={expandedPriceItemId}
+          rowBusyId={rowBusyId}
+          unitsDirty={unitsDirty}
+          productName={productName}
+          sku={sku}
+          onToggle={(priceListItemId) =>
+            setExpandedPriceItemId((current) => current === priceListItemId ? null : priceListItemId)
+          }
+          onChangePrice={openChange}
+          onEndPrice={openEnd}
+          onCancelFuture={cancelFuture}
+          onPriceHistory={openPriceHistory}
+          onRefresh={(priceListItemId) => void refreshSummary(priceListItemId)}
+          onError={setError}
+        />
+        <button
+          type="button"
+          className="btn btn-secondary selling-add-another"
+          disabled={unitsDirty || activeSalesUnits.length !== 1}
+          onClick={openAdd}
+        >
+          + Add Another Price List
+        </button>
+        <div className="selling-price-toolbar" hidden>
           <button
             type="button"
             className="btn btn-secondary"
@@ -434,7 +506,7 @@ export function ProductSellingPricesUpdate({
             + Add Price
           </button>
         </div>
-        <div className="selling-summary-table">
+        <div className="selling-summary-table" hidden>
           <div className="selling-summary-row head">
             <span>Price List</span>
             <span>Unit</span>
@@ -458,6 +530,13 @@ export function ProductSellingPricesUpdate({
                       group.current.sellingPrice,
                     )
                   : "No current price"}
+                {group.current?.currentDiscount && <small>
+                  {group.current.currentDiscount.discountType === 'PERCENTAGE'
+                    ? `${group.current.currentDiscount.discountValue}% discount`
+                    : `${money(group.current.currencyCode, group.current.currentDiscount.discountValue)} discount`}
+                  {` · ${group.current.currentDiscount.status === 'FUTURE' ? 'Scheduled' : 'Current'} · Final `}
+                  {money(group.current.currencyCode, group.current.currentDiscount.status === 'FUTURE' ? group.current.discountedUnitPrice : group.current.finalUnitPrice)}
+                </small>}
               </strong>
               <span>{dateTime(group.current?.effectiveFrom)}</span>
               <span>{dateTime(group.current?.effectiveTo)}</span>
@@ -502,6 +581,7 @@ export function ProductSellingPricesUpdate({
                     >
                       End Price
                     </button>
+                    <PriceItemDiscountControls group={group} productName={productName} sku={sku} onChanged={refreshSummary} onError={setError} />
                   </>
                 )}
               </div>
@@ -561,6 +641,15 @@ export function ProductSellingPricesUpdate({
           </div>
         )}
       </section>
+      {drafts.length > 0 && (
+        <div className="selling-publish-footer">
+          <strong>{drafts.length} unpublished {drafts.length === 1 ? "change" : "changes"}</strong>
+          <div>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setDrafts([])}>Discard</button>
+            <button type="button" className="btn btn-primary" disabled={busy || unitsDirty} onClick={() => setPublishOpen(true)}>Publish Changes</button>
+          </div>
+        </div>
+      )}
 
       <Modal
         open={Boolean(editor)}
@@ -617,19 +706,10 @@ export function ProductSellingPricesUpdate({
               />
             )}
             {editor?.kind === "CHANGE" && (
-              <Field
-                label="Current Price"
-                value={
-                  editor.group?.current
-                    ? money(
-                        editor.group.current.currencyCode,
-                        editor.group.current.sellingPrice,
-                      )
-                    : ""
-                }
-                onChange={() => {}}
-                disabled
-              />
+              <>
+                <Field label="Current Price" value={editor.group?.current ? money(editor.group.current.currencyCode, editor.group.current.sellingPrice) : ""} onChange={() => {}} disabled />
+                <Field label="Attached Discount / Final" value={editor.group?.current?.currentDiscount ? `${editor.group.current.currentDiscount.discountType === 'PERCENTAGE' ? `${editor.group.current.currentDiscount.discountValue}%` : money(editor.group.current.currencyCode, editor.group.current.currentDiscount.discountValue)} (${editor.group.current.currentDiscount.status}) · ${money(editor.group.current.currencyCode, editor.group.current.currentDiscount.finalUnitPrice)}` : 'No discount'} onChange={() => {}} disabled />
+              </>
             )}
             {editor?.kind !== "END" && (
               <Field
@@ -661,6 +741,14 @@ export function ProductSellingPricesUpdate({
                 required
               />
             )}
+            {editor?.kind === 'CHANGE' && <label className="check"><input type="checkbox" checked={form.createNewDiscount} onChange={(event) => setForm({ ...form, createNewDiscount: event.target.checked })} /> Create a new discount for the new price</label>}
+            {editor?.kind === 'CHANGE' && form.createNewDiscount && <>
+              <Field label="New Discount Type" value={form.discountType} onChange={(discountType) => setForm({ ...form, discountType })} options={[{ value: 'PERCENTAGE', label: 'Percentage' }, { value: 'FIXED_AMOUNT', label: 'Fixed amount' }]} required />
+              <Field label="New Discount Value" type="number" value={form.discountValue} onChange={(discountValue) => setForm({ ...form, discountValue })} required />
+              <Field label="Discount Effective From" type="datetime-local" value={form.discountEffectiveFrom} onChange={(discountEffectiveFrom) => setForm({ ...form, discountEffectiveFrom })} required />
+              <Field label="Discount Effective To" type="datetime-local" value={form.discountEffectiveTo} onChange={(discountEffectiveTo) => setForm({ ...form, discountEffectiveTo })} />
+              <div className="success-box">New final-price preview: {money(editor.group?.current?.currencyCode ?? 'LKR', Math.max(0, Number(form.price || 0) - (form.discountType === 'PERCENTAGE' ? Number(form.price || 0) * Number(form.discountValue || 0) / 100 : Number(form.discountValue || 0))))}</div>
+            </>}
           </div>
           {editor?.kind === "END" && (
             <div className="warning-box">
@@ -728,7 +816,7 @@ export function ProductSellingPricesUpdate({
       <Modal
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
-        title="Selling Price History"
+        title={historyFilters.priceListId ? "Price History" : "All History"}
         subtitle="Published revisions are read-only."
         wide
       >

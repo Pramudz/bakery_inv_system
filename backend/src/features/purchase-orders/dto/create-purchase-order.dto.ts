@@ -20,6 +20,7 @@ export class PurchaseOrderLineDto {
   @IsInt() unitId!: number;
   @IsNumber() @Min(0.0001) orderedQty!: number;
   @IsNumber() @Min(0) unitCost!: number;
+  @IsOptional() @IsString() @MaxLength(500) costOverrideReason?: string;
   @IsOptional() @IsNumber() @Min(0) discountAmount?: number;
   @IsOptional() @IsNumber() @Min(0) taxAmount?: number;
   @IsOptional() @IsString() notes?: string;

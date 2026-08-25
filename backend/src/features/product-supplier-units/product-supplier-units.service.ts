@@ -11,6 +11,7 @@ import { CreateProductSupplierUnitDto } from './dto/create-product-supplier-unit
 import { UpdateProductSupplierUnitDto } from './dto/update-product-supplier-unit.dto';
 import { ProductSupplier } from '../product-suppliers/product-suppliers.entity';
 import { ProductUnit } from '../product-units/product-units.entity';
+import { assertProductOperationalReadiness } from '../products/product-operational-readiness';
 
 @Injectable()
 export class ProductSupplierUnitsService {
@@ -43,7 +44,17 @@ export class ProductSupplierUnitsService {
   }
 
   async findOne(id: number, tenantId: number) {
-    const row = await this.repo
+    const row = await this.findOneWithRepository(this.repo, id, tenantId);
+
+    if (!row) {
+      throw new NotFoundException('Supplier purchase unit not found.');
+    }
+
+    return row;
+  }
+
+  private findOneWithRepository(repository: Repository<ProductSupplierUnit>, id: number, tenantId: number) {
+    return repository
       .createQueryBuilder('supplierUnit')
       .innerJoinAndSelect('supplierUnit.productSupplier', 'supplierLink')
       .innerJoinAndSelect('supplierLink.product', 'product')
@@ -53,12 +64,6 @@ export class ProductSupplierUnitsService {
       .where('supplierUnit.product_supplier_unit_id = :id', { id })
       .andWhere('product.tenant_id = :tenantId', { tenantId })
       .getOne();
-
-    if (!row) {
-      throw new NotFoundException('Supplier purchase unit not found.');
-    }
-
-    return row;
   }
 
   private async ensureDefaultPurchaseUnit(
@@ -190,8 +195,9 @@ export class ProductSupplierUnitsService {
     tenantId: number,
   ) {
     return this.dataSource.transaction(async (manager) => {
-      const current = await this.findOne(id, tenantId);
       const repository = manager.getRepository(ProductSupplierUnit);
+      const current = await this.findOneWithRepository(repository, id, tenantId);
+      if (!current) throw new NotFoundException('Supplier purchase unit not found.');
 
       if (dto.isDefaultPurchaseUnit === true) {
         await repository.update(
@@ -227,15 +233,23 @@ export class ProductSupplierUnitsService {
         current.productSupplierId,
       );
 
-      return this.findOne(id, tenantId);
+      await assertProductOperationalReadiness(
+        manager,
+        current.productSupplier.productId,
+        tenantId,
+      );
+
+      return this.findOneWithRepository(repository, id, tenantId);
     });
   }
 
   async deactivate(id: number, tenantId: number) {
     return this.dataSource.transaction(async (manager) => {
-      const current = await this.findOne(id, tenantId);
+      const repository = manager.getRepository(ProductSupplierUnit);
+      const current = await this.findOneWithRepository(repository, id, tenantId);
+      if (!current) throw new NotFoundException('Supplier purchase unit not found.');
 
-      await manager.getRepository(ProductSupplierUnit).update(
+      await repository.update(
         { productSupplierUnitId: current.productSupplierUnitId },
         {
           isActive: false,
@@ -248,17 +262,25 @@ export class ProductSupplierUnitsService {
         current.productSupplierId,
       );
 
-      return this.findOne(id, tenantId);
+      await assertProductOperationalReadiness(
+        manager,
+        current.productSupplier.productId,
+        tenantId,
+      );
+
+      return this.findOneWithRepository(repository, id, tenantId);
     });
   }
 
   async activate(id: number, tenantId: number) {
     return this.dataSource.transaction(async (manager) => {
-      const current = await this.findOne(id, tenantId);
+      const repository = manager.getRepository(ProductSupplierUnit);
+      const current = await this.findOneWithRepository(repository, id, tenantId);
+      if (!current) throw new NotFoundException('Supplier purchase unit not found.');
       if (!current.productSupplier.isActive) throw new BadRequestException('Activate the Product Supplier before activating its purchase unit.');
       if (!current.productUnit.isActive || !current.productUnit.isPurchaseUnit) throw new BadRequestException('The Product Unit must be active and purchase-enabled.');
 
-      await manager.getRepository(ProductSupplierUnit).update(
+      await repository.update(
         { productSupplierUnitId: current.productSupplierUnitId },
         { isActive: true },
       );
@@ -268,7 +290,7 @@ export class ProductSupplierUnitsService {
         current.productSupplierId,
       );
 
-      return this.findOne(id, tenantId);
+      return this.findOneWithRepository(repository, id, tenantId);
     });
   }
 }

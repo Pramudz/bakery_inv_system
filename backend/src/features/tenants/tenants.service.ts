@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -18,6 +19,7 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { MediaStorageService } from '../../common/media-storage.service';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
+import { assertSupportedIanaTimeZone, DEFAULT_TENANT_TIME_ZONE } from '../../common/business-date';
 
 const DEFAULT_ADMIN_USERNAME = 'Admin';
 const DEFAULT_ADMIN_PASSWORD = 'tenantadmin@123';
@@ -77,6 +79,7 @@ export class TenantsService {
       // 1. Tenant
       const tenant = tenantRepository.create({
         ...this.cleanPayload(dto),
+        timeZone: assertSupportedIanaTimeZone(dto.timeZone ?? DEFAULT_TENANT_TIME_ZONE),
       });
 
       const savedTenant = await tenantRepository.save(tenant);
@@ -159,6 +162,8 @@ export class TenantsService {
   }
 
   async update(id: number, dto: UpdateTenantDto) {
+    if ('timeZone' in dto)
+      throw new BadRequestException('Tenant timezone cannot be changed through normal tenant administration.');
     await this.findOne(id);
 
     if (dto.code) {
@@ -175,6 +180,8 @@ export class TenantsService {
   }
 
   async updateMyTenant(tenantId: number, dto: UpdateMyTenantDto) {
+    if ('timeZone' in dto)
+      throw new BadRequestException('Tenant timezone cannot be changed from My Tenant.');
     await this.findOne(tenantId);
     await this.repo.update(tenantId, this.cleanPayload(dto));
     return this.findOne(tenantId);
@@ -206,7 +213,7 @@ export class TenantsService {
     return this.findOne(id);
   }
 
-  private cleanPayload(dto: Partial<CreateTenantDto>): Partial<Tenant> {
+  private cleanPayload(dto: Partial<CreateTenantDto | UpdateTenantDto | UpdateMyTenantDto>): Partial<Tenant> {
     const payload: Record<string, unknown> = { ...dto };
     for (const key of Object.keys(payload)) {
       const value = payload[key];

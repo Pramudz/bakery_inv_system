@@ -1,11 +1,14 @@
-# ERP Architecture Decision Record
+# ERP Architecture Decision Record - Not a Valid Document Don't Consider this for AI tasks
 
-## Frontend hhhhhhhh
-vgvhgvgggggggggggggggggggggggggggggggggggggg
+## Frontend
+
+
 React + TypeScript + Vite.
 
 ### Routing
+
 React Router owns application URLs:
+
 - `/tenants`
 - `/users`
 - `/categories`
@@ -18,7 +21,9 @@ React Router owns application URLs:
 Do not use a home-grown `activeMenu` variable as routing.
 
 ### Server state
+
 TanStack Query owns API/server state:
+
 - loading
 - caching
 - refetching
@@ -26,12 +31,15 @@ TanStack Query owns API/server state:
 - mutations
 
 ### Global state
+
 React Context is reserved for small application-wide state such as the selected tenant and UI preferences.
 
 ### Local state
+
 Forms use React local state.
 
 ### Redux
+
 Not used initially. It can be introduced later only if complex client-side state genuinely requires it.
 
 ## Frontend structure
@@ -42,6 +50,7 @@ Not used initially. It can be introduced later only if complex client-side state
 `features/<feature>/types`
 
 Shared:
+
 - `components/layout`
 - `components/ui`
 - `services/apiClient.ts`
@@ -76,6 +85,7 @@ JWT authentication, sessions, roles and permissions are reserved for the authent
 ## API
 
 A centralized API client handles:
+
 - base URL
 - JSON headers
 - response parsing

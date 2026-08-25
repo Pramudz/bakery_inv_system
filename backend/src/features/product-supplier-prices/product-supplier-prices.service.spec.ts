@@ -4,6 +4,7 @@ import { BadRequestException } from '@nestjs/common';
 import { ProductSupplierPricesService } from './product-supplier-prices.service';
 import { ProductSupplierPrice } from './product-supplier-price.entity';
 import { ProductSupplierUnit } from '../product-supplier-units/product-supplier-unit.entity';
+import { Tenant } from '../tenants/tenant.entity';
 
 test('overlapping supplier price is rejected with the required message', async () => {
   const priceRepo: any = {
@@ -16,6 +17,7 @@ test('overlapping supplier price is rejected with the required message', async (
         return { createQueryBuilder: () => builder };
       }
       if (entity === ProductSupplierPrice) return priceRepo;
+      if (entity === Tenant) return { findOneBy: async () => ({ tenantId: 3, timeZone: 'Asia/Colombo' }) };
       return {};
     },
   };

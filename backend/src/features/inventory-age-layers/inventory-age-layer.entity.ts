@@ -4,12 +4,14 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
+  Unique,
 } from "typeorm";
 import { AuditEntity } from "../../common/audit.entity";
 import { Tenant } from "../tenants/tenant.entity";
 import { Location } from "../locations/locations.entity";
 import { Product } from "../products/products.entity";
 @Entity("tbl_inventory_age_layer")
+@Unique("uq_inventory_age_layer_source", ["tenantId", "sourceDocumentType", "sourceDocumentId", "sourceDocumentLineId"])
 export class InventoryAgeLayer extends AuditEntity {
   @PrimaryGeneratedColumn({ name: "inventory_age_layer_id", type: "bigint" })
   inventoryAgeLayerId!: number;

@@ -1,7 +1,7 @@
 export type AuthScope = 'PLATFORM' | 'TENANT';
 
 export interface PlatformUser { platformUserId: string; username: string; email: string | null; firstName: string | null; lastName: string | null; mobile: string | null; }
-export interface TenantSummary { tenantId: string; tenantCode: string; tenantName: string; }
+export interface TenantSummary { tenantId: string; tenantCode: string; tenantName: string; timeZone: string; }
 export interface TenantUser { userId: string; username: string; email: string | null; firstName: string | null; lastName: string | null; mobile: string | null; }
 export type AccessScope = 'TENANT' | 'LOCATION';
 export interface TenantRole { roleId: string; code: string; name: string; accessScope: AccessScope; }

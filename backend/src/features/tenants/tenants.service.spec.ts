@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { TenantsService } from './tenants.service';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 import { TenantSelfController } from './tenant-self.controller';
+import { UpdateTenantDto } from './dto/update-tenant.dto';
 
 const tenant = { tenantId: 7, code: 'BAKE', name: 'Bake House', isActive: true, locations: [] };
 
@@ -41,6 +42,26 @@ test('tenant create rejects a globally duplicated code before bootstrap', async 
 test('blank optional tenant fields do not fail validation', async () => {
   const dto = plainToInstance(CreateTenantDto, { code: 'NEW', name: 'New Tenant', isActive: true, email: '', website: '', countryCode: '' });
   assert.deepEqual(await validate(dto), []);
+});
+
+test('platform tenant creation accepts a valid IANA timezone and rejects invalid values', async () => {
+  const valid = plainToInstance(CreateTenantDto, { code: 'NEW', name: 'New Tenant', isActive: true, timeZone: 'America/New_York' });
+  const invalid = plainToInstance(CreateTenantDto, { code: 'NEW', name: 'New Tenant', isActive: true, timeZone: 'UTC+05:30' });
+  assert.deepEqual(await validate(valid), []);
+  assert.ok((await validate(invalid)).some((error) => error.property === 'timeZone'));
+});
+
+test('normal platform and My Tenant updates reject timezone changes', async () => {
+  const platform = plainToInstance(UpdateTenantDto, { timeZone: 'America/New_York' });
+  const self = plainToInstance(UpdateMyTenantDto, { timeZone: 'America/New_York' });
+  assert.ok((await validate(platform)).some((error) => error.property === 'timeZone'));
+  assert.ok((await validate(self)).some((error) => error.property === 'timeZone'));
+});
+
+test('tenant service blocks timezone changes even when called without the HTTP validation pipe', async () => {
+  const service = new TenantsService({} as any, {} as any, {} as any);
+  await assert.rejects(() => service.update(7, { timeZone: 'America/New_York' } as any), BadRequestException);
+  await assert.rejects(() => service.updateMyTenant(7, { timeZone: 'America/New_York' } as any), BadRequestException);
 });
 
 test('My Tenant rejects tenant identifiers and tenant code changes', async () => {

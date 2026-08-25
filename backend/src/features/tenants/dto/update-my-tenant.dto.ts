@@ -7,6 +7,7 @@ export class UpdateMyTenantDto {
   @IsEmpty({ message: 'tenantId cannot be supplied.' }) tenantId?: never;
   @IsEmpty({ message: 'Tenant code cannot be changed from My Tenant.' }) code?: never;
   @IsEmpty({ message: 'Tenant status cannot be changed from My Tenant.' }) isActive?: never;
+  @IsEmpty({ message: 'Tenant timezone cannot be changed from My Tenant.' }) timeZone?: never;
 
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(150) name?: string;
   @EmptyToNull() @IsOptional() @IsString() @MaxLength(200) legalName?: string;

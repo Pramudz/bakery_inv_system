@@ -42,7 +42,7 @@ function fixture(existing: any[], options: FixtureOptions = {}) {
       throw new Error(`Unexpected repository: ${entity?.name}`);
     },
   };
-  const service = new ProductService({} as any, { manager } as any, {} as any);
+  const service = new ProductService({} as any, { manager } as any, {} as any, {} as any);
   return { service, manager, deleted, saved };
 }
 

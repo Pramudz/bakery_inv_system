@@ -15,7 +15,7 @@ test('selecting a primary image clears every other active image in the same tran
   const manager: any = {
     getRepository: (entity: any) => entity === Product ? { findOneBy: async () => ({ productId: 4 }) } : entity === ProductImage ? imageRepo : {},
   };
-  const service = new ProductService({} as any, { transaction: async (work: any) => work(manager) } as any, {} as any);
+  const service = new ProductService({} as any, { transaction: async (work: any) => work(manager) } as any, {} as any, {} as any);
   const saved = await service.updateImage(4, 2, { isPrimary: true }, 8);
   assert.equal(saved.isPrimary, true);
   assert.deepEqual(calls, ['clear', 'save']);

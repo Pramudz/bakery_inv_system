@@ -6,6 +6,7 @@ import { CreateProductLocationDto } from './dto/create-product-locations.dto';
 import { UpdateProductLocationDto } from './dto/update-product-locations.dto';
 import { Product } from '../products/products.entity';
 import { Location } from '../locations/locations.entity';
+import { assertProductOperationalReadiness } from '../products/product-operational-readiness';
 
 @Injectable()
 export class ProductLocationService {
@@ -45,28 +46,37 @@ export class ProductLocationService {
   }
 
   async update(id: number, dto: UpdateProductLocationDto, tenantId: number) {
-    const current = await this.findOne(id, tenantId);
+    return this.dataSource.transaction(async manager => {
+    const current = await manager.getRepository(ProductLocation).findOne({ where: { productLocationId: id, product: { tenantId } } as any });
+    if (!current) throw new NotFoundException('ProductLocation not found');
     if ((dto as any).productId !== undefined) {
-      const parent = await this.dataSource.getRepository(Product).findOne({ where: { productId: (dto as any).productId, tenantId } as any });
+      const parent = await manager.getRepository(Product).findOne({ where: { productId: (dto as any).productId, tenantId } as any });
       if (!parent) throw new NotFoundException('Product not found for this tenant.');
     }
     if ((dto as any).locationId !== undefined) {
-      const second = await this.dataSource.getRepository(Location).findOne({ where: { locationId: (dto as any).locationId, tenantId } as any });
+      const second = await manager.getRepository(Location).findOne({ where: { locationId: (dto as any).locationId, tenantId } as any });
       if (!second) throw new NotFoundException('Location not found for this tenant.');
     }
-    const duplicate = await this.repo.findOneBy({
+    const repository = manager.getRepository(ProductLocation);
+    const duplicate = await repository.findOneBy({
       productId: Number((dto as any).productId ?? current.productId),
       locationId: Number((dto as any).locationId ?? current.locationId),
     });
     if (duplicate && Number(duplicate.productLocationId) !== id)
       throw new ConflictException('Location is already assigned to this product.');
-    await this.repo.update(id, dto as any);
-    return this.findOne(id, tenantId);
+    await repository.update(id, dto as any);
+    await assertProductOperationalReadiness(manager, current.productId, tenantId);
+    return repository.findOneByOrFail({ productLocationId: id });
+    });
   }
 
   async deactivate(id: number, tenantId: number) {
-    await this.findOne(id, tenantId);
-    await this.repo.update(id, { isActive: false } as any);
-    return this.findOne(id, tenantId);
+    return this.dataSource.transaction(async manager => {
+      const current = await manager.getRepository(ProductLocation).findOne({ where: { productLocationId: id, product: { tenantId } } as any });
+      if (!current) throw new NotFoundException('ProductLocation not found');
+      await manager.getRepository(ProductLocation).update(id, { isActive: false } as any);
+      await assertProductOperationalReadiness(manager, current.productId, tenantId);
+      return manager.getRepository(ProductLocation).findOneByOrFail({ productLocationId: id });
+    });
   }
 }

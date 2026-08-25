@@ -5,6 +5,7 @@ import { ProductSupplierPrice } from './product-supplier-price.entity';
 import { CreateProductSupplierPriceDto } from './dto/create-product-supplier-price.dto';
 import { periodsOverlap, priceDateEnd, priceDateStart } from '../products/product-price-periods';
 import { ProductSupplierUnit } from '../product-supplier-units/product-supplier-unit.entity';
+import { tenantBusinessClock } from '../../common/business-date';
 
 @Injectable()
 export class ProductSupplierPricesService {
@@ -70,10 +71,11 @@ export class ProductSupplierPricesService {
         dto,
         tenantId,
       );
+      const { timeZone } = await tenantBusinessClock(manager, tenantId);
 
-      const effectiveFrom = priceDateStart(dto.effectiveFrom);
+      const effectiveFrom = priceDateStart(dto.effectiveFrom, timeZone);
       const effectiveTo = dto.effectiveTo
-        ? priceDateEnd(dto.effectiveTo)
+        ? priceDateEnd(dto.effectiveTo, timeZone)
         : null;
 
       if (effectiveTo && effectiveTo < effectiveFrom) {

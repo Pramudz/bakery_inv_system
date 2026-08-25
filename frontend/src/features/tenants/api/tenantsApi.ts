@@ -12,6 +12,7 @@ export interface Tenant {
   email?: string | null; phone?: string | null; website?: string | null;
   addressLine1?: string | null; addressLine2?: string | null; city?: string | null;
   stateProvince?: string | null; postalCode?: string | null; countryCode?: string | null;
+  timeZone: string;
   logoUrl?: string | null; locations?: TenantLocation[]; createdAt?: string; updatedAt?: string | null;
 }
 export type TenantInput = Omit<Tenant, 'tenantId' | 'locations' | 'logoUrl' | 'createdAt' | 'updatedAt'>;

@@ -13,6 +13,17 @@ import {
   ValidateNested,
 } from "class-validator";
 import { AddProductImageDto } from '../../product-images/dto/product-image.dto';
+import { IsEnum, Matches } from 'class-validator';
+import { PriceListItemDiscountType } from '../../price-list-item-discounts/price-list-item-discounts.entity';
+
+const POSITIVE_DISCOUNT_DECIMAL = /^(?=.*[1-9])\d+(?:\.\d{1,4})?$/;
+
+export class CreateInitialPriceDiscountDto {
+  @IsEnum(PriceListItemDiscountType) discountType!: PriceListItemDiscountType;
+  @Matches(POSITIVE_DISCOUNT_DECIMAL, { message: 'discountValue must be a positive decimal with at most 4 decimal places' }) discountValue!: string;
+  @IsDateString() effectiveFrom!: string;
+  @IsOptional() @IsDateString() effectiveTo?: string;
+}
 
 export class CreateProductImageInputDto extends AddProductImageDto {
   @IsOptional() @IsInt() productImageId?: number;
@@ -40,7 +51,7 @@ export class CreateProductIdentifierInputDto {
 export class CreateProductSupplierPriceInputDto {
   @IsNumber() @Min(0) purchasePrice!: number;
   @IsOptional() @IsString() @MaxLength(3) currencyCode?: string;
-  @IsDateString() effectiveFrom!: string;
+  @IsOptional() @IsDateString() effectiveFrom?: string;
   @IsOptional() @IsDateString() effectiveTo?: string | null;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
@@ -77,7 +88,7 @@ export class CreateProductAttributeInputDto {
   @IsString() @IsNotEmpty() @MaxLength(500) value!: string;
 }
 
-export class CreatePriceListItemInputDto {
+export class ProductPriceListItemInputDto {
   @IsOptional() @IsInt() priceListItemId?: number;
   @IsInt() priceListId!: number;
   @IsInt() unitId!: number;
@@ -86,6 +97,13 @@ export class CreatePriceListItemInputDto {
   @IsDateString() effectiveFrom!: string;
   @IsOptional() @IsDateString() effectiveTo?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
+export class CreatePriceListItemInputDto extends ProductPriceListItemInputDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateInitialPriceDiscountDto)
+  discount?: CreateInitialPriceDiscountDto;
 }
 
 export class CreateProductDto {

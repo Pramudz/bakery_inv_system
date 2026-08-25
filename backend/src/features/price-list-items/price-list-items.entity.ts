@@ -1,10 +1,11 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { AuditEntity } from '../../common/audit.entity';
 import { PriceList } from '../price-lists/price-lists.entity';
 import { Product } from '../products/products.entity';
 import { UnitOfMeasure } from '../units/units.entity';
 import { Tenant } from '../tenants/tenant.entity';
 import { ProductUnit } from '../product-units/product-units.entity';
+import { PriceListItemDiscount } from '../price-list-item-discounts/price-list-item-discounts.entity';
 @Entity('tbl_price_list_item')
 @Index('idx_price_list_item_currency_effective_context', ['productId', 'priceListId', 'unitId', 'currencyCode', 'minimumQuantity', 'effectiveFrom'])
 @Index('idx_selling_price_tenant_context', ['tenantId', 'productId', 'priceListId', 'productUnitId', 'minimumQuantity', 'effectiveFrom'])
@@ -26,4 +27,5 @@ export class PriceListItem extends AuditEntity {
   @Column({name:'effective_from',type:'datetime',precision:3}) effectiveFrom!: Date;
   @Column({name:'effective_to',type:'datetime',precision:3,nullable:true}) effectiveTo!: Date|null;
   @Column({name:'is_active',default:true}) isActive!: boolean;
+  @OneToMany(() => PriceListItemDiscount, (discount) => discount.priceListItem) discounts!: PriceListItemDiscount[];
 }

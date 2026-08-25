@@ -4,6 +4,7 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
+  Unique,
 } from "typeorm";
 import { AuditEntity } from "../../common/audit.entity";
 import { Tenant } from "../tenants/tenant.entity";
@@ -11,6 +12,7 @@ import { Location } from "../locations/locations.entity";
 import { Product } from "../products/products.entity";
 import { User } from "../users/user.entity";
 @Entity("tbl_inventory_ledger")
+@Unique("uq_inventory_ledger_source_movement", ["tenantId", "sourceDocumentType", "sourceDocumentId", "sourceDocumentLineId", "movementType"])
 export class InventoryLedger extends AuditEntity {
   @PrimaryGeneratedColumn({ name: "inventory_ledger_id", type: "bigint" })
   inventoryLedgerId!: number;

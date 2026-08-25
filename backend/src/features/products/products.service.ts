@@ -37,6 +37,7 @@ import {
   priceDateEnd,
   priceDateOnly,
   priceDateStart,
+  effectiveInstantStatus,
 } from "./product-price-periods";
 import { ProductImage } from "../product-images/product-image.entity";
 import {
@@ -61,6 +62,16 @@ import {
   ProductSupplierLinkInputDto,
   UpdateProductGeneralDto,
 } from "./dto/update-product-sections.dto";
+import {
+  PriceListItemDiscountService,
+  createDiscountWithManager,
+  endDiscountsForPriceItemWithManager,
+} from "../price-list-item-discounts/price-list-item-discounts.service";
+import { assertProductOperationalReadiness } from "./product-operational-readiness";
+import {
+  isEffectiveOnBusinessDate,
+  tenantBusinessClock,
+} from "../../common/business-date";
 
 @Injectable()
 export class ProductService {
@@ -69,6 +80,7 @@ export class ProductService {
     private readonly repo: Repository<Product>,
     private readonly dataSource: DataSource,
     private readonly numberSequencesService: NumberSequencesService,
+    private readonly discountService: PriceListItemDiscountService,
   ) {}
 
   async findAll(tenantId: number) {
@@ -105,8 +117,14 @@ export class ProductService {
                 .filter((price) => price.isActive)
                 .map((price) => ({
                   ...price,
-                  effectiveFrom: priceDateOnly(price.effectiveFrom),
-                  effectiveTo: priceDateOnly(price.effectiveTo),
+                  effectiveFrom: priceDateOnly(
+                    price.effectiveFrom,
+                    product.tenant.timeZone,
+                  ),
+                  effectiveTo: priceDateOnly(
+                    price.effectiveTo,
+                    product.tenant.timeZone,
+                  ),
                 })),
             })),
         })),
@@ -203,17 +221,18 @@ export class ProductService {
 
   private withPriceStatuses(product: Product) {
     const now = new Date();
+    const timeZone = product.tenant.timeZone;
     const status = (row: {
       isActive: boolean;
       effectiveFrom: Date;
       effectiveTo: Date | null;
-    }) => effectivePriceStatus(row, now);
+    }) => effectiveInstantStatus(row, now);
     return {
       ...product,
       priceListItems: (product.priceListItems ?? []).map((row) => ({
         ...row,
-        effectiveFrom: priceDateOnly(row.effectiveFrom),
-        effectiveTo: priceDateOnly(row.effectiveTo),
+        effectiveFrom: priceDateOnly(row.effectiveFrom, timeZone),
+        effectiveTo: priceDateOnly(row.effectiveTo, timeZone),
         effectiveStatus: status(row),
       })),
       productSuppliers: (product.productSuppliers ?? []).map((link) => ({
@@ -222,8 +241,8 @@ export class ProductService {
           ...unit,
           prices: (unit.prices ?? []).map((row) => ({
             ...row,
-            effectiveFrom: priceDateOnly(row.effectiveFrom),
-            effectiveTo: priceDateOnly(row.effectiveTo),
+            effectiveFrom: priceDateOnly(row.effectiveFrom, timeZone),
+            effectiveTo: priceDateOnly(row.effectiveTo, timeZone),
             effectiveStatus: status(row),
           })),
         })),
@@ -306,9 +325,22 @@ export class ProductService {
   async create(dto: CreateProductDto, user: TenantPrincipal) {
     const tenantId = user.tenantId;
     return this.dataSource.transaction(async (manager) => {
-      await this.validateReferences(dto, tenantId, manager);
-      await this.validateAggregateReferences(dto, user, manager);
-      this.validateRequiredSetup(dto);
+      const clock = await tenantBusinessClock(manager, tenantId, new Date());
+      const createDto: CreateProductDto = {
+        ...dto,
+        supplierLinks: this.withInitialSupplierBusinessDate(
+          dto.supplierLinks ?? [],
+          clock.businessDate,
+        ),
+      };
+      await this.validateReferences(createDto, tenantId, manager);
+      await this.validateAggregateReferences(createDto, user, manager);
+      this.validateRequiredSetup(
+        createDto,
+        false,
+        clock.businessDate,
+        clock.timeZone,
+      );
 
       const nextNumber = await this.numberSequencesService.getNextNumber(
         manager,
@@ -327,7 +359,7 @@ export class ProductService {
         prices = [],
         images = [],
         ...productData
-      } = dto;
+      } = createDto;
       const product = manager.create(Product, {
         ...productData,
         tenantId,
@@ -359,16 +391,47 @@ export class ProductService {
       await this.syncIdentifiers(manager, productId, tenantId, identifiers);
       await this.syncLocations(manager, productId, locations);
       await this.syncAttributes(manager, productId, productAttributes);
-      await this.syncSellingPrices(manager, productId, prices, [], tenantId);
+      await this.syncSellingPrices(
+        manager,
+        productId,
+        prices,
+        [],
+        tenantId,
+        user.userId,
+        clock.timeZone,
+      );
       await this.createSupplierAggregate(
         manager,
         productId,
         supplierLinks,
         unitMap,
+        clock.timeZone,
       );
       await this.syncImages(manager, productId, tenantId, images);
+      await assertProductOperationalReadiness(
+        manager,
+        productId,
+        tenantId,
+        clock.now,
+      );
       return this.findOneWithManager(manager, productId, tenantId);
     });
+  }
+
+  private withInitialSupplierBusinessDate(
+    links: NonNullable<CreateProductDto["supplierLinks"]>,
+    businessDate: string,
+  ): NonNullable<CreateProductDto["supplierLinks"]> {
+    return links.map((link) => ({
+      ...link,
+      units: link.units.map((unit) => ({
+        ...unit,
+        prices: unit.prices.map((price) => ({
+          ...price,
+          effectiveFrom: businessDate,
+        })),
+      })),
+    }));
   }
 
   private async validateAggregateReferences(
@@ -509,7 +572,7 @@ export class ProductService {
         this.assertNoDuplicates(
           unit.prices.map(
             (price) =>
-              `${(price.currencyCode || "LKR").toUpperCase()}:1:${new Date(price.effectiveFrom).toISOString()}`,
+              `${(price.currencyCode || "LKR").toUpperCase()}:1:${price.effectiveFrom ?? "ON_CREATE"}`,
           ),
           "Duplicate supplier price.",
         );
@@ -550,18 +613,18 @@ export class ProductService {
   private validateRequiredSetup(
     dto: CreateProductDto | UpdateProductDto,
     allowOmittedSellingPrices = false,
+    businessDate?: string,
+    timeZone?: string,
   ) {
     if (!(dto.productUnits ?? []).length)
       throw new BadRequestException("At least one product unit is required.");
-    const now = new Date();
     const current = (row: {
       isActive?: boolean;
-      effectiveFrom: string;
+      effectiveFrom?: string;
       effectiveTo?: string | null;
     }) =>
-      row.isActive !== false &&
-      new Date(row.effectiveFrom) <= now &&
-      (!row.effectiveTo || new Date(row.effectiveTo) >= now);
+      Boolean(businessDate && timeZone) &&
+      isEffectiveOnBusinessDate(row, businessDate!, timeZone!);
     const baseUnit = (dto.productUnits ?? []).find(
       (row) => row.isBaseUnit && row.isActive !== false,
     );
@@ -616,6 +679,7 @@ export class ProductService {
         .getRepository(Product)
         .findOneBy({ productId: id, tenantId });
       if (!product) throw new NotFoundException("Product not found");
+      const clock = await tenantBusinessClock(manager, tenantId);
       if (
         dto.baseUnitId !== undefined &&
         Number(dto.baseUnitId) !== Number(product.baseUnitId)
@@ -625,7 +689,7 @@ export class ProductService {
         );
       await this.validateReferences(dto, tenantId, manager);
       await this.validateAggregateReferences(dto, user, manager);
-      this.validateRequiredSetup(dto, true);
+      this.validateRequiredSetup(dto, true, clock.businessDate, clock.timeZone);
       const {
         productUnits = [],
         identifiers = [],
@@ -650,10 +714,11 @@ export class ProductService {
           prices,
           removedSellingPriceIds,
           tenantId,
+          undefined,
+          clock.timeZone,
         );
-      if (product.isSellable)
-        await this.assertCurrentBaseSellingPrice(manager, id, tenantId);
       await this.syncImages(manager, id, tenantId, images);
+      await assertProductOperationalReadiness(manager, id, tenantId);
       return this.findOneWithManager(manager, id, tenantId);
     });
   }
@@ -685,6 +750,7 @@ export class ProductService {
         );
       Object.assign(product, dto);
       await manager.getRepository(Product).save(product);
+      await assertProductOperationalReadiness(manager, id, tenantId);
       return this.findOneWithManager(manager, id, tenantId);
     });
   }
@@ -705,6 +771,7 @@ export class ProductService {
         "Selected unit does not belong to this tenant.",
       );
       await this.syncProductUnits(manager, id, units);
+      await assertProductOperationalReadiness(manager, id, tenantId);
       return this.findOneWithManager(manager, id, tenantId);
     });
   }
@@ -737,6 +804,7 @@ export class ProductService {
         "Selected location does not belong to this tenant.",
       );
       await this.syncLocations(manager, id, locations);
+      await assertProductOperationalReadiness(manager, id, tenantId);
       return this.findOneWithManager(manager, id, tenantId);
     });
   }
@@ -777,6 +845,7 @@ export class ProductService {
         "Selected supplier does not belong to this tenant.",
       );
       await this.syncSupplierLinks(manager, id, suppliers);
+      await assertProductOperationalReadiness(manager, id, tenantId);
       return this.findOneWithManager(manager, id, tenantId);
     });
   }
@@ -789,6 +858,7 @@ export class ProductService {
     const product = await manager.getRepository(Product).findOneOrFail({
       where: { productId: id, tenantId },
       relations: {
+        tenant: true,
         category: true,
         brand: true,
         baseUnit: true,
@@ -816,7 +886,7 @@ export class ProductService {
     productId: number,
     tenantId: number,
   ) {
-    const now = new Date();
+    const { now } = await tenantBusinessClock(manager, tenantId);
     const count = await manager
       .getRepository(PriceListItem)
       .createQueryBuilder("price")
@@ -830,7 +900,8 @@ export class ProductService {
       )
       .andWhere("price.isActive = 1 AND price.sellingPrice > 0")
       .andWhere(
-        "price.effectiveFrom <= :now AND (price.effectiveTo IS NULL OR price.effectiveTo >= :now)",
+        "price.effectiveFrom <= :now AND " +
+          "(price.effectiveTo IS NULL OR price.effectiveTo >= :now)",
         { now },
       )
       .getCount();
@@ -901,15 +972,21 @@ export class ProductService {
 
   private sellingPriceStatus(
     row: Pick<PriceListItem, "isActive" | "effectiveFrom" | "effectiveTo">,
-    now = new Date(),
+    now: Date,
+    _timeZone?: string,
   ) {
-    if (!row.isActive || (row.effectiveTo && row.effectiveTo < now))
-      return "ENDED" as const;
-    if (row.effectiveFrom > now) return "FUTURE" as const;
-    return "CURRENT" as const;
+    const status = effectiveInstantStatus(row, now);
+
+    return status === "INACTIVE" || status === "EXPIRED"
+      ? ("ENDED" as const)
+      : status;
   }
 
-  private sellingPriceResponse(row: PriceListItem, now = new Date()) {
+  private sellingPriceResponse(
+    row: PriceListItem,
+    now: Date,
+    timeZone: string,
+  ) {
     return {
       priceListItemId: Number(row.priceListItemId),
       priceListId: Number(row.priceListId),
@@ -920,7 +997,7 @@ export class ProductService {
       minimumQuantity: row.minimumQuantity,
       effectiveFrom: row.effectiveFrom,
       effectiveTo: row.effectiveTo,
-      status: this.sellingPriceStatus(row, now),
+      status: this.sellingPriceStatus(row, now, timeZone),
       priceList: row.priceList
         ? {
             priceListId: Number(row.priceList.priceListId),
@@ -963,7 +1040,8 @@ export class ProductService {
     manager: EntityManager = this.dataSource.manager,
   ) {
     await this.assertProductOwner(manager, productId, tenantId);
-    const now = new Date();
+    const clock = await tenantBusinessClock(manager, tenantId);
+    const { now, timeZone } = clock;
     const rows = await manager.getRepository(PriceListItem).find({
       where: { tenantId, productId },
       relations: { priceList: true, productUnit: { unit: true }, unit: true },
@@ -974,18 +1052,23 @@ export class ProductService {
       const key = `${row.priceListId}:${row.productUnitId}:${Number(row.minimumQuantity)}`;
       groups.set(key, [...(groups.get(key) ?? []), row]);
     }
-    return [...groups.values()]
-      .map((group) => {
+    const summaries = await Promise.all(
+      [...groups.values()].map(async (group) => {
         const working = group.filter((row) => row.isActive);
         const current =
           working
-            .filter((row) => this.sellingPriceStatus(row, now) === "CURRENT")
+            .filter(
+              (row) =>
+                this.sellingPriceStatus(row, now, timeZone) === "CURRENT",
+            )
             .sort(
               (a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime(),
             )[0] ?? null;
         const nextScheduled =
           working
-            .filter((row) => this.sellingPriceStatus(row, now) === "FUTURE")
+            .filter(
+              (row) => this.sellingPriceStatus(row, now, timeZone) === "FUTURE",
+            )
             .sort(
               (a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime(),
             )[0] ?? null;
@@ -999,15 +1082,37 @@ export class ProductService {
             code: display.priceList.code,
             name: display.priceList.name,
           },
-          productUnit: this.sellingPriceResponse(display, now).productUnit,
-          current: current ? this.sellingPriceResponse(current, now) : null,
+          productUnit: this.sellingPriceResponse(display, now, timeZone)
+            .productUnit,
+          current: current
+            ? {
+                ...this.sellingPriceResponse(current, now, timeZone),
+                ...(await this.discountService.breakdownForItem(
+                  current,
+                  tenantId,
+                  now,
+                  manager,
+                )),
+              }
+            : null,
           nextScheduled: nextScheduled
-            ? this.sellingPriceResponse(nextScheduled, now)
+            ? {
+                ...this.sellingPriceResponse(nextScheduled, now, timeZone),
+                ...(await this.discountService.breakdownForItem(
+                  nextScheduled,
+                  tenantId,
+                  nextScheduled.effectiveFrom,
+                  manager,
+                )),
+              }
             : null,
           historyCount: group.length,
         };
-      })
-      .sort((a, b) => a.priceList.name.localeCompare(b.priceList.name));
+      }),
+    );
+    return summaries.sort((a, b) =>
+      a.priceList.name.localeCompare(b.priceList.name),
+    );
   }
 
   async getSellingPriceHistory(
@@ -1020,7 +1125,8 @@ export class ProductService {
     const limit = [25, 50, 100].includes(Number(query.limit))
       ? Number(query.limit)
       : 25;
-    const now = new Date();
+    const clock = await tenantBusinessClock(this.dataSource.manager, tenantId);
+    const { now, timeZone } = clock;
     const builder = this.dataSource.manager
       .getRepository(PriceListItem)
       .createQueryBuilder("price")
@@ -1041,15 +1147,16 @@ export class ProductService {
       });
     if (query.fromDate)
       builder.andWhere("price.effectiveFrom >= :fromDate", {
-        fromDate: new Date(`${query.fromDate.slice(0, 10)}T00:00:00.000`),
+        fromDate: priceDateStart(query.fromDate, timeZone),
       });
     if (query.toDate)
       builder.andWhere("price.effectiveFrom <= :toDate", {
-        toDate: new Date(`${query.toDate.slice(0, 10)}T23:59:59.999`),
+        toDate: priceDateEnd(query.toDate, timeZone),
       });
     if (query.status === "CURRENT")
       builder.andWhere(
-        "price.isActive = 1 AND price.effectiveFrom <= :now AND (price.effectiveTo IS NULL OR price.effectiveTo >= :now)",
+        "price.isActive = 1 AND price.effectiveFrom <= :now AND " +
+          "(price.effectiveTo IS NULL OR price.effectiveTo >= :now)",
         { now },
       );
     if (query.status === "FUTURE")
@@ -1067,7 +1174,7 @@ export class ProductService {
       .take(limit)
       .getManyAndCount();
     return {
-      items: items.map((row) => this.sellingPriceResponse(row, now)),
+      items: items.map((row) => this.sellingPriceResponse(row, now, timeZone)),
       page,
       limit,
       totalItems,
@@ -1094,23 +1201,19 @@ export class ProductService {
         "Price List and Product Unit are required.",
       );
     const [priceList, productUnit] = await Promise.all([
-      manager
-        .getRepository(PriceList)
-        .findOneBy({
-          priceListId: action.priceListId,
-          tenantId,
+      manager.getRepository(PriceList).findOneBy({
+        priceListId: action.priceListId,
+        tenantId,
+        isActive: true,
+      }),
+      manager.getRepository(ProductUnit).findOne({
+        where: {
+          productUnitId: action.productUnitId,
+          productId,
           isActive: true,
-        }),
-      manager
-        .getRepository(ProductUnit)
-        .findOne({
-          where: {
-            productUnitId: action.productUnitId,
-            productId,
-            isActive: true,
-          },
-          relations: { unit: true },
-        }),
+        },
+        relations: { unit: true },
+      }),
     ]);
     if (!priceList)
       throw new BadRequestException(
@@ -1142,6 +1245,7 @@ export class ProductService {
     const target = await manager.getRepository(PriceListItem).findOne({
       where: { priceListItemId, productId, tenantId },
       relations: { priceList: true, productUnit: { unit: true } },
+      lock: { mode: "pessimistic_write" },
     });
     if (!target)
       throw new BadRequestException(
@@ -1181,6 +1285,7 @@ export class ProductService {
     productId: number,
     dto: PublishSellingPricesDto,
     tenantId: number,
+    userId = 0,
   ) {
     if (!dto.actions.length)
       throw new BadRequestException(
@@ -1201,7 +1306,9 @@ export class ProductService {
           productId,
           tenantId,
           action,
+          userId,
         );
+      await assertProductOperationalReadiness(manager, productId, tenantId);
     });
     return this.getSellingPriceSummary(productId, tenantId);
   }
@@ -1211,6 +1318,7 @@ export class ProductService {
     productId: number,
     tenantId: number,
     action: SellingPriceDraftActionDto,
+    userId: number,
   ) {
     const repo = manager.getRepository(PriceListItem);
     const now = new Date();
@@ -1248,7 +1356,7 @@ export class ProductService {
         throw new BadRequestException(
           "A selling price combination already exists. Use Change Price instead.",
         );
-      await repo.save(
+      const created = await repo.save(
         repo.create({
           tenantId,
           productId,
@@ -1263,6 +1371,14 @@ export class ProductService {
           isActive: true,
         }),
       );
+      if (action.newDiscount)
+        await createDiscountWithManager(
+          manager,
+          created,
+          tenantId,
+          userId,
+          action.newDiscount,
+        );
       return;
     }
     const target = await this.sellingPriceTarget(
@@ -1280,6 +1396,13 @@ export class ProductService {
       await repo.update(
         { priceListItemId: target.priceListItemId, tenantId, productId },
         { isActive: false },
+      );
+      await endDiscountsForPriceItemWithManager(
+        manager,
+        Number(target.priceListItemId),
+        tenantId,
+        new Date(target.effectiveFrom.getTime() - 1),
+        userId,
       );
       return;
     }
@@ -1320,11 +1443,18 @@ export class ProductService {
           "A future selling price already exists for this combination. Cancel it before scheduling another change.",
         );
       const end = new Date(from.getTime() - 1);
+      await endDiscountsForPriceItemWithManager(
+        manager,
+        Number(target.priceListItemId),
+        tenantId,
+        end,
+        userId,
+      );
       await repo.update(
         { priceListItemId: target.priceListItemId, tenantId, productId },
         { effectiveTo: end },
       );
-      await repo.save(
+      const created = await repo.save(
         repo.create({
           tenantId,
           productId,
@@ -1339,6 +1469,14 @@ export class ProductService {
           isActive: true,
         }),
       );
+      if (action.newDiscount)
+        await createDiscountWithManager(
+          manager,
+          created,
+          tenantId,
+          userId,
+          action.newDiscount,
+        );
       return;
     }
     if (action.action === "END_PRICE") {
@@ -1367,6 +1505,13 @@ export class ProductService {
         throw new BadRequestException(
           "Effective End must be before the next scheduled selling price.",
         );
+      await endDiscountsForPriceItemWithManager(
+        manager,
+        Number(target.priceListItemId),
+        tenantId,
+        end,
+        userId,
+      );
       await repo.update(
         { priceListItemId: target.priceListItemId, tenantId, productId },
         { effectiveTo: end },
@@ -1381,15 +1526,21 @@ export class ProductService {
       ProductSupplierPrice,
       "isActive" | "effectiveFrom" | "effectiveTo"
     >,
-    now = new Date(),
+    now: Date,
+    _timeZone?: string,
   ) {
-    if (!row.isActive || (row.effectiveTo && row.effectiveTo < now))
-      return "ENDED" as const;
-    if (row.effectiveFrom > now) return "FUTURE" as const;
-    return "CURRENT" as const;
+    const status = effectiveInstantStatus(row, now);
+
+    return status === "INACTIVE" || status === "EXPIRED"
+      ? ("ENDED" as const)
+      : status;
   }
 
-  private supplierPriceResponse(row: ProductSupplierPrice, now = new Date()) {
+  private supplierPriceResponse(
+    row: ProductSupplierPrice,
+    now: Date,
+    timeZone: string,
+  ) {
     const supplierUnit = row.productSupplierUnit;
     const link = supplierUnit?.productSupplier;
     return {
@@ -1400,7 +1551,7 @@ export class ProductService {
       minimumQuantity: Number(row.minimumQuantity),
       effectiveFrom: row.effectiveFrom,
       effectiveTo: row.effectiveTo,
-      status: this.supplierPriceStatus(row, now),
+      status: this.supplierPriceStatus(row, now, timeZone),
       supplier: link?.supplier
         ? {
             supplierId: Number(link.supplier.supplierId),
@@ -1430,7 +1581,8 @@ export class ProductService {
     manager: EntityManager = this.dataSource.manager,
   ) {
     await this.assertProductOwner(manager, productId, tenantId);
-    const now = new Date();
+    const clock = await tenantBusinessClock(manager, tenantId);
+    const { now, timeZone } = clock;
     const supplierUnits = await manager
       .getRepository(ProductSupplierUnit)
       .find({
@@ -1458,13 +1610,19 @@ export class ProductService {
         const working = group.filter((row) => row.isActive);
         const current =
           working
-            .filter((row) => this.supplierPriceStatus(row, now) === "CURRENT")
+            .filter(
+              (row) =>
+                this.supplierPriceStatus(row, now, timeZone) === "CURRENT",
+            )
             .sort(
               (a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime(),
             )[0] ?? null;
         const nextScheduled =
           working
-            .filter((row) => this.supplierPriceStatus(row, now) === "FUTURE")
+            .filter(
+              (row) =>
+                this.supplierPriceStatus(row, now, timeZone) === "FUTURE",
+            )
             .sort(
               (a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime(),
             )[0] ?? null;
@@ -1480,10 +1638,13 @@ export class ProductService {
           productUnit: this.supplierPriceResponse(
             (current ?? nextScheduled)!,
             now,
+            timeZone,
           ).productUnit,
-          current: current ? this.supplierPriceResponse(current, now) : null,
+          current: current
+            ? this.supplierPriceResponse(current, now, timeZone)
+            : null,
           nextScheduled: nextScheduled
-            ? this.supplierPriceResponse(nextScheduled, now)
+            ? this.supplierPriceResponse(nextScheduled, now, timeZone)
             : null,
         });
       }
@@ -1503,7 +1664,8 @@ export class ProductService {
     const limit = [25, 50, 100].includes(Number(query.limit))
       ? Number(query.limit)
       : 25;
-    const now = new Date();
+    const clock = await tenantBusinessClock(this.dataSource.manager, tenantId);
+    const { now, timeZone } = clock;
     const builder = this.dataSource.manager
       .getRepository(ProductSupplierPrice)
       .createQueryBuilder("price")
@@ -1528,21 +1690,24 @@ export class ProductService {
       );
     if (query.fromDate)
       builder.andWhere("price.effective_from >= :fromDate", {
-        fromDate: new Date(`${query.fromDate.slice(0, 10)}T00:00:00.000`),
+        fromDate: priceDateStart(query.fromDate, timeZone),
       });
     if (query.toDate)
       builder.andWhere("price.effective_from <= :toDate", {
-        toDate: new Date(`${query.toDate.slice(0, 10)}T23:59:59.999`),
+        toDate: priceDateEnd(query.toDate, timeZone),
       });
     if (query.status === "CURRENT")
       builder.andWhere(
-        "price.is_active = 1 AND price.effective_from <= :now AND (price.effective_to IS NULL OR price.effective_to >= :now)",
+        "price.is_active = 1 AND price.effective_from <= :now AND " +
+          "(price.effective_to IS NULL OR price.effective_to >= :now)",
         { now },
       );
+
     if (query.status === "FUTURE")
       builder.andWhere("price.is_active = 1 AND price.effective_from > :now", {
         now,
       });
+
     if (query.status === "ENDED")
       builder.andWhere("(price.is_active = 0 OR price.effective_to < :now)", {
         now,
@@ -1554,7 +1719,7 @@ export class ProductService {
       .take(limit)
       .getManyAndCount();
     return {
-      items: items.map((row) => this.supplierPriceResponse(row, now)),
+      items: items.map((row) => this.supplierPriceResponse(row, now, timeZone)),
       page,
       limit,
       totalItems,
@@ -1572,17 +1737,15 @@ export class ProductService {
       throw new BadRequestException(
         "Supplier purchase price revision is required.",
       );
-    const row = await manager
-      .getRepository(ProductSupplierPrice)
-      .findOne({
-        where: { productSupplierPriceId: id },
-        relations: {
-          productSupplierUnit: {
-            productSupplier: { product: true, supplier: true },
-            productUnit: { unit: true },
-          },
+    const row = await manager.getRepository(ProductSupplierPrice).findOne({
+      where: { productSupplierPriceId: id },
+      relations: {
+        productSupplierUnit: {
+          productSupplier: { product: true, supplier: true },
+          productUnit: { unit: true },
         },
-      });
+      },
+    });
     if (
       !row ||
       Number(row.productSupplierUnit.productSupplier.productId) !==
@@ -1602,16 +1765,14 @@ export class ProductService {
     currencyCode: string,
     now: Date,
   ) {
-    const rows = await manager
-      .getRepository(ProductSupplierPrice)
-      .find({
-        where: {
-          productSupplierUnitId,
-          currencyCode,
-          minimumQuantity: "1",
-          isActive: true,
-        },
-      });
+    const rows = await manager.getRepository(ProductSupplierPrice).find({
+      where: {
+        productSupplierUnitId,
+        currencyCode,
+        minimumQuantity: "1",
+        isActive: true,
+      },
+    });
     return rows
       .filter((row) => !row.effectiveTo || row.effectiveTo >= now)
       .sort((a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime());
@@ -1642,6 +1803,7 @@ export class ProductService {
           tenantId,
           action,
         );
+      await assertProductOperationalReadiness(manager, productId, tenantId);
     });
     return this.getSupplierPurchasePriceSummary(productId, tenantId);
   }
@@ -1671,11 +1833,12 @@ export class ProductService {
           relations: { productSupplier: { product: true }, productUnit: true },
         });
       if (
-  !supplierUnit ||
-  !supplierUnit.productSupplier.isActive ||
-  Number(supplierUnit.productSupplier.productId) !== Number(productId) ||
-  Number(supplierUnit.productSupplier.product.tenantId) !== Number(tenantId)
-)
+        !supplierUnit ||
+        !supplierUnit.productSupplier.isActive ||
+        Number(supplierUnit.productSupplier.productId) !== Number(productId) ||
+        Number(supplierUnit.productSupplier.product.tenantId) !==
+          Number(tenantId)
+      )
         throw new BadRequestException(
           "Supplier Purchase Unit is not active for this product and tenant. Save Supplier Unit changes first.",
         );
@@ -1953,13 +2116,11 @@ export class ProductService {
       throw new BadRequestException(
         "Only one primary identifier is allowed per product.",
       );
-    const identifierTypes = await manager
-      .getRepository(IdentifierType)
-      .findBy({
-        identifierTypeId: In([
-          ...new Set(rows.map((row) => Number(row.identifierTypeId))),
-        ]),
-      });
+    const identifierTypes = await manager.getRepository(IdentifierType).findBy({
+      identifierTypeId: In([
+        ...new Set(rows.map((row) => Number(row.identifierTypeId))),
+      ]),
+    });
     for (const row of rows) {
       let entity = row.productIdentifierId
         ? existing.find(
@@ -2160,7 +2321,15 @@ export class ProductService {
     rows: CreateProductDto["prices"] = [],
     removedIds: number[] = [],
     tenantId?: number,
+    createdBy?: number,
+    timeZone?: string,
   ) {
+    if (!timeZone && tenantId)
+      timeZone = (await tenantBusinessClock(manager, tenantId)).timeZone;
+    if (!timeZone)
+      throw new BadRequestException(
+        "Tenant timezone is required for selling prices.",
+      );
     const repo = manager.getRepository(PriceListItem);
     const existing = await repo.findBy({ productId });
     for (const priceId of [...new Set(removedIds.map(Number))]) {
@@ -2194,7 +2363,9 @@ export class ProductService {
           throw new BadRequestException(
             "Historical selling prices cannot be overwritten. Schedule a new price instead.",
           );
-        const to = row.effectiveTo ? priceDateEnd(row.effectiveTo) : null;
+        const to = row.effectiveTo
+          ? priceDateEnd(row.effectiveTo, timeZone)
+          : null;
         if (to && to < entity.effectiveFrom)
           throw new BadRequestException(
             "Selling price effectiveTo must be after effectiveFrom.",
@@ -2243,8 +2414,8 @@ export class ProductService {
         }
         continue;
       }
-      const from = priceDateStart(row.effectiveFrom),
-        to = row.effectiveTo ? priceDateEnd(row.effectiveTo) : null,
+      const from = priceDateStart(row.effectiveFrom, timeZone),
+        to = row.effectiveTo ? priceDateEnd(row.effectiveTo, timeZone) : null,
         currency = (row.currencyCode || "LKR").toUpperCase();
       if (to && to < from)
         throw new BadRequestException(
@@ -2311,6 +2482,28 @@ export class ProductService {
           isActive: row.isActive ?? true,
         }),
       );
+      if (row.discount) {
+        if (!createdBy)
+          throw new BadRequestException(
+            "Authenticated user is required to create an initial discount.",
+          );
+        await createDiscountWithManager(
+          manager,
+          saved,
+          Number(tenantId),
+          createdBy,
+          {
+            ...row.discount,
+            effectiveFrom: priceDateStart(
+              row.discount.effectiveFrom,
+              timeZone,
+            ).toISOString(),
+            effectiveTo: row.discount.effectiveTo
+              ? priceDateEnd(row.discount.effectiveTo, timeZone).toISOString()
+              : undefined,
+          },
+        );
+      }
       existing.push(saved);
     }
   }
@@ -2320,6 +2513,7 @@ export class ProductService {
     productId: number,
     links: NonNullable<CreateProductDto["supplierLinks"]>,
     unitMap: Map<number, number>,
+    timeZone: string,
   ) {
     const linkRepo = manager.getRepository(ProductSupplier);
     const supplierUnitRepo = manager.getRepository(ProductSupplierUnit);
@@ -2364,9 +2558,12 @@ export class ProductService {
         );
         const context: ProductSupplierPrice[] = [];
         for (const priceInput of unitInput.prices) {
-          const effectiveFrom = priceDateStart(priceInput.effectiveFrom);
+          const effectiveFrom = priceDateStart(
+            priceInput.effectiveFrom!,
+            timeZone,
+          );
           const effectiveTo = priceInput.effectiveTo
-            ? priceDateEnd(priceInput.effectiveTo)
+            ? priceDateEnd(priceInput.effectiveTo, timeZone)
             : null;
           if (effectiveTo && effectiveTo < effectiveFrom)
             throw new BadRequestException(
@@ -2734,8 +2931,15 @@ export class ProductService {
   }
 
   async activate(id: number, tenantId: number) {
-    await this.findOne(id, tenantId);
-    await this.repo.update({ productId: id, tenantId }, { isActive: true });
-    return this.findOne(id, tenantId);
+    return this.dataSource.transaction(async (manager) => {
+      const product = await manager
+        .getRepository(Product)
+        .findOneBy({ productId: id, tenantId });
+      if (!product) throw new NotFoundException("Product not found");
+      product.isActive = true;
+      await manager.getRepository(Product).save(product);
+      await assertProductOperationalReadiness(manager, id, tenantId);
+      return this.findOneWithManager(manager, id, tenantId);
+    });
   }
 }

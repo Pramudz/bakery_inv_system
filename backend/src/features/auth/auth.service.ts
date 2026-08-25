@@ -249,6 +249,7 @@ export class AuthService {
         tenantId: user.tenant.tenantId,
         tenantCode: user.tenant.code,
         tenantName: user.tenant.name,
+        timeZone: user.tenant.timeZone,
       },
       user: {
         userId: user.userId,
