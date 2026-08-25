@@ -1,3 +1,5 @@
-import { PartialType } from '@nestjs/mapped-types';
-import { CreateProductSupplierDto } from './create-product-suppliers.dto';
-export class UpdateProductSupplierDto extends PartialType(CreateProductSupplierDto) {}
+import { IsBoolean, IsOptional } from 'class-validator';
+export class UpdateProductSupplierDto {
+  @IsOptional() @IsBoolean() isPrimarySupplier?: boolean;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+}

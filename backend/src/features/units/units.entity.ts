@@ -4,7 +4,8 @@ import { Tenant } from '../tenants/tenant.entity';
 import { Product } from '../products/products.entity';
 import { ProductUnit } from '../product-units/product-units.entity';
 import { PriceListItem } from '../price-list-items/price-list-items.entity';
-import { GoodsReceiptLine, PurchaseOrderLine } from '../purchasing/purchasing.entities';
+import { GoodsReceiptLine } from '../goods-receipts/goods-receipt-line.entity';
+import { PurchaseOrderLine } from '../purchase-orders/purchase-order-line.entity';
 @Entity('tbl_unit_of_measure')
 export class UnitOfMeasure extends AuditEntity {
   @PrimaryGeneratedColumn({name:'unit_id',type:'bigint'}) unitId!: number;
@@ -14,6 +15,8 @@ export class UnitOfMeasure extends AuditEntity {
   @Column({name:'name',type:'varchar',length:100}) name!: string;
   @Column({name:'symbol',type:'varchar',length:20,nullable:true}) symbol!: string|null;
   @Column({name:'unit_type',type:'varchar',length:50}) unitType!: string;
+  @Column({name:'allows_decimal_quantity',default:false}) allowsDecimalQuantity!: boolean;
+  @Column({name:'quantity_precision',type:'tinyint',unsigned:true,default:0}) quantityPrecision!: number;
   @Column({name:'is_active',default:true}) isActive!: boolean;
   @OneToMany(() => Product, (product) => product.baseUnit) baseProducts!: Product[];
   @OneToMany(() => ProductUnit, (productUnit) => productUnit.unit) productUnits!: ProductUnit[];

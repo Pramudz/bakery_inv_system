@@ -33,7 +33,13 @@ import { PlatformSessionsModule } from './features/platform-sessions/platform-se
 import { SecurityModule } from './features/auth/security.module';
 import { UserLocationModule } from './features/user-locations/user-locations.module';
 import { TenantModulesModule } from './features/tenant-modules/tenant-modules.module';
-import { PurchasingModule } from './features/purchasing/purchasing.module';
+import { GoodsReceiptsModule } from './features/goods-receipts/goods-receipts.module';
+import { InventoryAgeLayerModule } from './features/inventory-age-layers/inventory-age-layer.module';
+import { InventoryBalanceModule } from './features/inventory-balance/inventory-balance.module';
+import { InventoryLedgerModule } from './features/inventory-ledger/inventory-ledger.module';
+import { PurchaseOrdersModule } from './features/purchase-orders/purchase-orders.module';
+import { ProductSupplierUnitsModule } from './features/product-supplier-units/product-supplier-units.module';
+import { PriceListItemDiscountModule } from './features/price-list-item-discounts/price-list-item-discounts.module';
 
 
 @Module({
@@ -60,7 +66,11 @@ import { PurchasingModule } from './features/purchasing/purchasing.module';
     SecurityModule,
     UserLocationModule,
     TenantModulesModule,
-    PurchasingModule,
+    PurchaseOrdersModule,
+    GoodsReceiptsModule,
+    InventoryBalanceModule,
+    InventoryLedgerModule,
+    InventoryAgeLayerModule,
     AuthModule,
     TenantsModule,
     UsersModule,
@@ -86,6 +96,8 @@ import { PurchasingModule } from './features/purchasing/purchasing.module';
     UserRoleModule,
     RolePermissionModule,
     UserSessionModule,
+    ProductSupplierUnitsModule,
+    PriceListItemDiscountModule,
   ],
 })
 export class AppModule {}

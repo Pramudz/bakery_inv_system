@@ -11,11 +11,14 @@ import { poLineTotal, PurchaseOrderLines } from "./PurchaseOrderLines";
 const today = new Date().toISOString().slice(0, 10);
 const blank = {
   productId: "",
+  productUnitId: "",
   unitId: "",
+  sourceSupplierPriceId: undefined,
   orderedQty: "1",
   unitCost: "0",
   discountAmount: "0",
   taxAmount: "0",
+  costOverrideReason: "",
 };
 export function PurchaseOrderForm({
   close,
@@ -45,7 +48,6 @@ export function PurchaseOrderForm({
           lines: initial.lines?.length ? initial.lines : [{ ...blank }],
         }
       : {
-          poNumber: "",
           supplierId: "",
           locationId: "",
           orderDate: today,
@@ -111,13 +113,6 @@ export function PurchaseOrderForm({
             </div>
             <div className="form-grid">
               <Field
-                label="PO Number"
-                value={form.poNumber}
-                onChange={(v) => setForm({ ...form, poNumber: v })}
-                required
-                disabled={!editable}
-              />
-              <Field
                 label="Supplier"
                 value={form.supplierId}
                 onChange={(v) => setForm({ ...form, supplierId: v })}
@@ -174,6 +169,9 @@ export function PurchaseOrderForm({
             <PurchaseOrderLines
               lines={form.lines}
               products={products.data ?? []}
+              supplierId={form.supplierId}
+              orderDate={form.orderDate}
+              currencyCode={form.currencyCode}
               onChange={(lines) => setForm({ ...form, lines })}
             />
           )}

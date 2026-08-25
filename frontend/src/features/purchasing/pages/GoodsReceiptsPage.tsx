@@ -120,6 +120,7 @@ export function GoodsReceiptsPage() {
                       permissions.includes("GRN_POST") && (
                         <button
                           className="btn btn-primary"
+                          disabled={post.isPending}
                           onClick={() =>
                             window.confirm(
                               "Posting this GRN will update inventory quantity, weighted average cost and inventory history. Continue?",
@@ -147,6 +148,9 @@ export function GoodsReceiptsPage() {
             )}
           </tbody>
         </table>
+        {post.error && (
+          <div className="error-box">{(post.error as Error).message}</div>
+        )}
       </div>
       {form && (
         <GoodsReceiptForm

@@ -1,11 +1,12 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Not, Repository } from 'typeorm';
 
 import { Tenant } from './tenant.entity';
 import { User } from '../users/user.entity';
@@ -16,6 +17,9 @@ import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { MediaStorageService } from '../../common/media-storage.service';
+import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
+import { assertSupportedIanaTimeZone, DEFAULT_TENANT_TIME_ZONE } from '../../common/business-date';
 
 const DEFAULT_ADMIN_USERNAME = 'Admin';
 const DEFAULT_ADMIN_PASSWORD = 'tenantadmin@123';
@@ -28,6 +32,7 @@ export class TenantsService {
     @InjectRepository(Tenant)
     private readonly repo: Repository<Tenant>,
     private readonly dataSource: DataSource,
+    private readonly mediaStorage: MediaStorageService,
   ) {}
 
   findAll() {
@@ -35,7 +40,7 @@ export class TenantsService {
   }
 
   async findOne(id: number) {
-    const row = await this.repo.findOneBy({ tenantId: id });
+    const row = await this.repo.findOne({ where: { tenantId: id }, relations: { locations: true } });
     if (!row) throw new NotFoundException('Tenant not found');
     return row;
   }
@@ -46,7 +51,7 @@ export class TenantsService {
    */
   async create(dto: CreateTenantDto) {
     const existing = await this.repo.findOneBy({
-      tenantCode: dto.tenantCode,
+      code: dto.code.trim().toUpperCase(),
     });
 
     if (existing) {
@@ -64,7 +69,7 @@ export class TenantsService {
       // Re-check inside the transaction.
       const existingInsideTransaction =
         await tenantRepository.findOneBy({
-          tenantCode: dto.tenantCode,
+          code: dto.code.trim().toUpperCase(),
         });
 
       if (existingInsideTransaction) {
@@ -73,9 +78,8 @@ export class TenantsService {
 
       // 1. Tenant
       const tenant = tenantRepository.create({
-        tenantCode: dto.tenantCode.trim(),
-        tenantName: dto.tenantName.trim(),
-        tenantIsActive: true,
+        ...this.cleanPayload(dto),
+        timeZone: assertSupportedIanaTimeZone(dto.timeZone ?? DEFAULT_TENANT_TIME_ZONE),
       });
 
       const savedTenant = await tenantRepository.save(tenant);
@@ -135,12 +139,7 @@ export class TenantsService {
       return {
         message: 'Tenant created successfully.',
         tenant: {
-          tenantId: savedTenant.tenantId,
-          tenantCode: savedTenant.tenantCode,
-          tenantName: savedTenant.tenantName,
-          tenantIsActive: savedTenant.tenantIsActive,
-          createdAt: savedTenant.createdAt,
-          updatedAt: savedTenant.updatedAt,
+          ...savedTenant,
         },
         bootstrap: {
           role: {
@@ -163,31 +162,65 @@ export class TenantsService {
   }
 
   async update(id: number, dto: UpdateTenantDto) {
+    if ('timeZone' in dto)
+      throw new BadRequestException('Tenant timezone cannot be changed through normal tenant administration.');
     await this.findOne(id);
 
-    if (dto.tenantCode) {
-      const same = await this.repo.findOneBy({
-        tenantCode: dto.tenantCode,
+    if (dto.code) {
+      const same = await this.repo.findOne({
+        where: { code: dto.code.trim().toUpperCase(), tenantId: Not(id) },
       });
-
-      if (same && same.tenantId !== id) {
+      if (same) {
         throw new ConflictException('Tenant code already exists');
       }
     }
 
-    await this.repo.update(id, dto);
+    await this.repo.update(id, this.cleanPayload(dto));
     return this.findOne(id);
+  }
+
+  async updateMyTenant(tenantId: number, dto: UpdateMyTenantDto) {
+    if ('timeZone' in dto)
+      throw new BadRequestException('Tenant timezone cannot be changed from My Tenant.');
+    await this.findOne(tenantId);
+    await this.repo.update(tenantId, this.cleanPayload(dto));
+    return this.findOne(tenantId);
   }
 
   async deactivate(id: number) {
     await this.findOne(id);
-    await this.repo.update(id, { tenantIsActive: false });
+    await this.repo.update(id, { isActive: false });
     return this.findOne(id);
   }
 
   async activate(id: number) {
     await this.findOne(id);
-    await this.repo.update(id, { tenantIsActive: true });
+    await this.repo.update(id, { isActive: true });
     return this.findOne(id);
+  }
+
+  async setLogo(id: number, file: { buffer: Buffer; originalname: string }) {
+    const tenant = await this.findOne(id);
+    const logoUrl = await this.mediaStorage.replaceTenantLogo(tenant.logoUrl, file);
+    await this.repo.update(id, { logoUrl });
+    return this.findOne(id);
+  }
+
+  async removeLogo(id: number) {
+    const tenant = await this.findOne(id);
+    await this.mediaStorage.removeTenantLogo(tenant.logoUrl);
+    await this.repo.update(id, { logoUrl: null });
+    return this.findOne(id);
+  }
+
+  private cleanPayload(dto: Partial<CreateTenantDto | UpdateTenantDto | UpdateMyTenantDto>): Partial<Tenant> {
+    const payload: Record<string, unknown> = { ...dto };
+    for (const key of Object.keys(payload)) {
+      const value = payload[key];
+      if (typeof value === 'string') payload[key] = value.trim() || null;
+    }
+    if (typeof payload.code === 'string') payload.code = payload.code.toUpperCase();
+    if (typeof payload.countryCode === 'string') payload.countryCode = payload.countryCode.toUpperCase();
+    return payload as Partial<Tenant>;
   }
 }

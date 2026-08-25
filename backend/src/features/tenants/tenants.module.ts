@@ -6,6 +6,8 @@ import { TenantsController } from './tenants.controller';
 import { TenantsService } from './tenants.service';
 import { TenantSelfController } from './tenant-self.controller';
 import { SecurityModule } from '../auth/security.module';
+import { MediaController } from '../../common/media.controller';
+import { MediaStorageService } from '../../common/media-storage.service';
 
 @Module({
   imports: [
@@ -14,9 +16,12 @@ import { SecurityModule } from '../auth/security.module';
   ],
   controllers: [
     TenantsController,
+    TenantSelfController,
+    MediaController,
   ],
   providers: [
     TenantsService,
+    MediaStorageService,
   ],
   exports: [
     TenantsService,
