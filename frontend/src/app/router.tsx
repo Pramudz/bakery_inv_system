@@ -35,6 +35,10 @@ import { UserSessionsPage } from "../features/user-sessions/pages/UserSessionsPa
 import { PurchaseOrdersPage } from "../features/purchasing/pages/PurchaseOrdersPage";
 import { GoodsReceiptsPage } from "../features/purchasing/pages/GoodsReceiptsPage";
 import { CustomersPage } from "../features/customers/pages/CustomersPage";
+import { BillingPage } from "../features/sales/pages/BillingPage";
+import { RefundsPage } from "../features/sales/pages/RefundsPage";
+import { PaymentMethodsPage } from "../features/sales/pages/PaymentMethodsPage";
+import { SalesPage } from "../features/sales/pages/SalesPage";
 
 const tenantChildren = [
   { path: "my-tenant", element: <TenantProfilePage /> },
@@ -63,6 +67,10 @@ const tenantChildren = [
   { path: "purchase-orders", element: <PurchaseOrdersPage /> },
   { path: "goods-receipts", element: <GoodsReceiptsPage /> },
   { path: "customers", element: <CustomersPage /> },
+  { path: "sales", element: <SalesPage /> },
+  { path: "billing", element: <BillingPage /> },
+  { path: "refunds", element: <RefundsPage /> },
+  { path: "payment-methods", element: <PaymentMethodsPage /> },
 ];
 
 export const router = createBrowserRouter([

@@ -14,6 +14,7 @@ import { Attribute } from '../attributes/attributes.entity';
 import { UserLocation } from '../user-locations/user-locations.entity';
 import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 import { GoodsReceipt, InventoryAgeLayer, InventoryBalance, InventoryLedger, PurchaseOrder } from '../purchasing/purchasing.entities';
+import { PaymentMethod } from '../payment-methods/payment-methods.entity';
 
 @Entity('tbl_tenant')
 export class Tenant extends AuditEntity {
@@ -42,4 +43,5 @@ export class Tenant extends AuditEntity {
   @OneToMany(() => InventoryBalance, (balance) => balance.tenant) inventoryBalances!: InventoryBalance[];
   @OneToMany(() => InventoryLedger, (ledger) => ledger.tenant) inventoryLedgers!: InventoryLedger[];
   @OneToMany(() => InventoryAgeLayer, (layer) => layer.tenant) inventoryAgeLayers!: InventoryAgeLayer[];
+  @OneToMany(() => PaymentMethod, (paymentMethod) => paymentMethod.tenant) paymentMethods!: PaymentMethod[];
 }

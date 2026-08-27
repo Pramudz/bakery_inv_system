@@ -1,0 +1,2 @@
+export function SalesBadge({status}:{status:string}){return <span className={`sales-badge ${status.toLowerCase().replace(" ","-")}`}><i/>{status}</span>}
+export function SalesStat({label,value,note,tone}:{label:string;value:string;note:string;tone:string}){return <div className={`sales-stat ${tone}`}><div className="sales-stat-icon">{tone==="green"?"✓":tone==="red"?"!":tone==="amber"?"◷":"↗"}</div><div><span>{label}</span><strong>{value}</strong><small>{note}</small></div></div>}

@@ -9,6 +9,7 @@ const platformGroups = [
 
 const tenantGroups = [
   { title:'Overview', items:[['Dashboard','/'],['My Tenant','/my-tenant']] },
+  { title:'Sales', items:[['Sales','/sales'],['Billing','/billing'],['Refunds','/refunds'],['Payment Methods','/payment-methods']] },
   { title:'Organization', items:[['Users','/users'],['Roles','/roles'],['Permissions','/permissions']] },
   { title:'Product Master', items:[['Products','/products'],['Categories','/categories'],['Brands','/brands'],['Units','/units'],['Identifiers','/identifier-types'],['Attributes','/attributes']] },
   { title:'Supply & Pricing', items:[['Suppliers','/suppliers'],['Product Suppliers','/product-suppliers'],['Product Costing','/product-costing'],['Price Lists','/price-lists']] },

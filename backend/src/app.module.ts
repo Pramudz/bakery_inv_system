@@ -35,6 +35,9 @@ import { UserLocationModule } from './features/user-locations/user-locations.mod
 import { TenantModulesModule } from './features/tenant-modules/tenant-modules.module';
 import { PurchasingModule } from './features/purchasing/purchasing.module';
 import { CustomerModule } from './features/customers/customers.module';
+import { PaymentMethodsModule } from './features/payment-methods/payment-methods.module';
+import { InvoicesModule } from './features/invoices/invoices.module';
+import { InvoiceRefundsModule } from './features/invoice-refunds/invoice-refunds.module';
 
 
 @Module({
@@ -67,6 +70,9 @@ import { CustomerModule } from './features/customers/customers.module';
     UsersModule,
     CategoryModule,
     CustomerModule,
+    PaymentMethodsModule,
+    InvoicesModule,
+    InvoiceRefundsModule,
     SupplierModule,
     LocationModule,
     UnitOfMeasureModule,
