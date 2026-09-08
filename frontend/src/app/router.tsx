@@ -31,6 +31,7 @@ import { ProductUnitsPage } from "../features/product-units/pages/ProductUnitsPa
 import { UserSessionsPage } from "../features/user-sessions/pages/UserSessionsPage";
 import { PurchaseOrdersPage } from "../features/purchasing/pages/PurchaseOrdersPage";
 import { GoodsReceiptsPage } from "../features/purchasing/pages/GoodsReceiptsPage";
+import { DirectGoodsReceiptPage } from "../features/purchasing/pages/DirectGoodsReceiptPage";
 
 const tenantChildren = [
   { path: "my-tenant", element: <TenantProfilePage /> },
@@ -55,6 +56,7 @@ const tenantChildren = [
   { path: "user-sessions", element: <UserSessionsPage /> },
   { path: "purchase-orders", element: <PurchaseOrdersPage /> },
   { path: "goods-receipts", element: <GoodsReceiptsPage /> },
+  { path: "goods-receipts/direct/new", element: <DirectGoodsReceiptPage /> },
 ];
 
 export const router = createBrowserRouter([

@@ -5,8 +5,10 @@ import { suppliersApi } from "../../suppliers/api/suppliersApi";
 import { locationsApi } from "../../locations/api/locationsApi";
 import { useAuth } from "../../auth/AuthContext";
 import { GoodsReceiptForm } from "../components/GoodsReceiptForm";
+import { useNavigate } from "react-router-dom";
 export function GoodsReceiptsPage() {
   const { permissions } = useAuth(),
+    navigate = useNavigate(),
     client = useQueryClient(),
     receipts = useQuery({
       queryKey: ["goods-receipts"],
@@ -50,9 +52,17 @@ export function GoodsReceiptsPage() {
           <p>Receive PO-based or direct supplier deliveries.</p>
         </div>
         {permissions.includes("GRN_CREATE") && (
-          <button className="btn btn-primary" onClick={() => setForm({})}>
-            Create Goods Receipt
-          </button>
+          <div className="actions">
+            <button className="btn btn-secondary" onClick={() => setForm({})}>
+              Create PO-based GRN
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate("/goods-receipts/direct/new")}
+            >
+              Create Direct GRN
+            </button>
+          </div>
         )}
       </div>
       <div className="card">
@@ -117,6 +127,7 @@ export function GoodsReceiptsPage() {
                         </button>
                       )}
                     {x.status === "DRAFT" &&
+                      x.receiptType === "PO_BASED" &&
                       permissions.includes("GRN_POST") && (
                         <button
                           className="btn btn-primary"

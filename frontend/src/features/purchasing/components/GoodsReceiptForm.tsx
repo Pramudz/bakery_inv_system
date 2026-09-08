@@ -55,7 +55,7 @@ export function GoodsReceiptForm({
           lines: initial.lines?.length ? initial.lines : [{ ...blank }],
         }
       : {
-          receiptType: "DIRECT",
+          receiptType: "PO_BASED",
           purchaseOrderId: "",
           supplierId: "",
           locationId: "",
@@ -133,33 +133,13 @@ export function GoodsReceiptForm({
       >
         <div className="modal-body purchase-modal-body">
           <section className="purchase-section">
-            <div className="receipt-type">
-              <button
-                type="button"
-                className={form.receiptType === "DIRECT" ? "active" : ""}
-                disabled={!!initial}
-                onClick={() =>
-                  setForm({
-                    ...form,
-                    receiptType: "DIRECT",
-                    purchaseOrderId: "",
-                    lines: [{ ...blank }],
-                  })
-                }
-              >
-                Direct GRN
-              </button>
-              <button
-                type="button"
-                className={poBased ? "active" : ""}
-                disabled={!!initial}
-                onClick={() =>
-                  setForm({ ...form, receiptType: "PO_BASED", lines: [] })
-                }
-              >
-                PO Based
-              </button>
-            </div>
+            {!initial && (
+              <div className="receipt-type">
+                <button type="button" className="active" disabled>
+                  PO Based
+                </button>
+              </div>
+            )}
             <div className="form-grid">
               {poBased ? (
                 <Field

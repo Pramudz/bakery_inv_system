@@ -213,7 +213,7 @@ export class GoodsReceiptsService {
     if (!row.sourceSupplierPriceId) return null;
     const price = await manager.getRepository(ProductSupplierPrice).findOneBy({ productSupplierPriceId: Number(row.sourceSupplierPriceId) });
     const effectiveDate = this.effectiveDate(receiptDate);
-    if (!price || Number(price.productSupplierUnitId) !== productSupplierUnitId || Number(price.minimumQuantity) > Number(row.receivedQty) || !price.isActive || Number(price.purchasePrice) <= 0 || price.currencyCode.toUpperCase() !== currencyCode.toUpperCase() || price.effectiveFrom > effectiveDate || Boolean(price.effectiveTo && price.effectiveTo < effectiveDate)) throw new BadRequestException('Selected supplier price is not valid for this goods receipt line on the receipt date.');
+    if (!price || Number(price.productSupplierUnitId) !== Number(productSupplierUnitId) || Number(price.minimumQuantity) > Number(row.receivedQty) || !price.isActive || Number(price.purchasePrice) <= 0 || price.currencyCode.toUpperCase() !== currencyCode.toUpperCase() || price.effectiveFrom > effectiveDate || Boolean(price.effectiveTo && price.effectiveTo < effectiveDate)) throw new BadRequestException('Selected supplier price is not valid for this goods receipt line on the receipt date.');
     return price;
   }
 

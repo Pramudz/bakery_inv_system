@@ -37,9 +37,7 @@ const tenantGroups = [
   },
   {
     title: "Supply & Pricing",
-    items: [
-      ["Suppliers", "/suppliers"],
-    ],
+    items: [["Suppliers", "/suppliers"]],
   },
   {
     title: "Purchasing",
@@ -50,9 +48,7 @@ const tenantGroups = [
   },
   {
     title: "Locations",
-    items: [
-      ["Locations", "/locations"],
-    ],
+    items: [["Locations", "/locations"]],
   },
   {
     title: "System",
@@ -143,14 +139,16 @@ export default function App() {
         : group.items,
   }));
   const title =
-    (
-      groups as ReadonlyArray<{
-        title: string;
-        items: ReadonlyArray<readonly [string, string]>;
-      }>
-    )
-      .flatMap((g) => g.items)
-      .find((x) => x[1] === location.pathname)?.[0] ?? "ERP";
+    (location.pathname.startsWith("/goods-receipts/")
+      ? "Goods Receipts"
+      : (
+          groups as ReadonlyArray<{
+            title: string;
+            items: ReadonlyArray<readonly [string, string]>;
+          }>
+        )
+          .flatMap((g) => g.items)
+          .find((x) => x[1] === location.pathname)?.[0]) ?? "ERP";
   const displayName =
     scope === "TENANT"
       ? [tenantUser?.firstName, tenantUser?.lastName]
