@@ -141,6 +141,7 @@ export default function App() {
   const title =
     (location.pathname.startsWith("/goods-receipts/")
       ? "Goods Receipts"
+      : location.pathname.startsWith("/purchase-orders/") ? "Purchase Orders"
       : (
           groups as ReadonlyArray<{
             title: string;

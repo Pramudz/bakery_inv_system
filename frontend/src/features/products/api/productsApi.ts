@@ -25,6 +25,7 @@ export type SupplierPriceHistoryPage = {
   totalPages: number;
 };
 export const productsApi = {
+  locations: () => apiClient.get<Array<{ productId: number | string; locationId: number | string; isActive: boolean; isPurchasable: boolean }>>("/product-locations"),
   list: () => apiClient.get<Product[]>("/products"),
   page: (params: {
     page: number;
