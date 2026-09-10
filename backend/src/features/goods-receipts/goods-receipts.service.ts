@@ -37,6 +37,53 @@ export class GoodsReceiptsService {
 
   list(user: TenantPrincipal) { return this.dataSource.getRepository(GoodsReceipt).findBy({ tenantId: user.tenantId }); }
 
+  async findPage(user: TenantPrincipal, page: number, limit: number, search: string, status: string, receiptType: string) {
+    const safePage = Math.max(1, Number.isFinite(page) ? page : 1);
+    const safeLimit = [20, 50, 100].includes(limit) ? limit : 20;
+    const query = this.dataSource.getRepository(GoodsReceipt)
+      .createQueryBuilder('grn')
+      .leftJoinAndSelect('grn.supplier', 'supplier')
+      .leftJoinAndSelect('grn.location', 'location')
+      .leftJoinAndSelect('grn.purchaseOrder', 'purchaseOrder')
+      .where('grn.tenantId = :tenantId', { tenantId: user.tenantId });
+
+    if (user.accessScope === 'LOCATION') {
+      if (!user.assignedLocationIds.length) query.andWhere('1 = 0');
+      else query.andWhere('grn.locationId IN (:...locationIds)', { locationIds: user.assignedLocationIds.map(Number) });
+    }
+    if (search.trim()) {
+      query.andWhere(`(
+        LOWER(COALESCE(grn.grnNumber, '')) LIKE :search OR
+        LOWER(COALESCE(supplier.supplierCode, '')) LIKE :search OR
+        LOWER(COALESCE(supplier.supplierName, '')) LIKE :search OR
+        LOWER(COALESCE(grn.supplierInvoiceNumber, '')) LIKE :search OR
+        LOWER(COALESCE(purchaseOrder.poNumber, '')) LIKE :search
+      )`, { search: `%${search.trim().toLowerCase()}%` });
+    }
+    if (['DRAFT', 'POSTED', 'CANCELLED'].includes(status.toUpperCase()))
+      query.andWhere('grn.status = :status', { status: status.toUpperCase() });
+    if (['DIRECT', 'PO_BASED'].includes(receiptType.toUpperCase()))
+      query.andWhere('grn.receiptType = :receiptType', { receiptType: receiptType.toUpperCase() });
+
+    const total = await query.getCount();
+    const result = await query
+      .addSelect(subQuery => subQuery
+        .select('COALESCE(SUM(line.lineTotal), 0)')
+        .from(GoodsReceiptLine, 'line')
+        .where('line.goodsReceiptId = grn.goodsReceiptId'), 'grn_total')
+      .orderBy('grn.goodsReceiptId', 'DESC')
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit)
+      .getRawAndEntities();
+    return {
+      items: result.entities.map((receipt, index) => ({ ...receipt, total: result.raw[index]?.grn_total ?? '0' })),
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+    };
+  }
+
   async get(id: number, user: TenantPrincipal) {
     const goodsReceipt = await this.find(id, user);
     const [lines, documentHeader] = await Promise.all([
@@ -112,6 +159,8 @@ export class GoodsReceiptsService {
       const goodsReceipt = await this.lockGoodsReceipt(manager, id, user.tenantId);
       await this.assertLocationAccess(manager, user, Number(goodsReceipt.locationId));
       if (goodsReceipt.status !== 'DRAFT') throw new BadRequestException('Only draft GRNs can be posted.');
+      if (!goodsReceipt.supplierId || !goodsReceipt.locationId || !goodsReceipt.receiptDate || Number.isNaN(new Date(goodsReceipt.receiptDate).getTime())) throw new BadRequestException('GRN supplier, location and receipt date must be valid before posting.');
+      await this.validateReferences(manager, user, Number(goodsReceipt.supplierId), Number(goodsReceipt.locationId));
 
       let purchaseOrder: PurchaseOrder | null = null;
       if (goodsReceipt.receiptType === 'PO_BASED') {
@@ -213,15 +262,17 @@ export class GoodsReceiptsService {
     if (!row.sourceSupplierPriceId) return null;
     const price = await manager.getRepository(ProductSupplierPrice).findOneBy({ productSupplierPriceId: Number(row.sourceSupplierPriceId) });
     const effectiveDate = this.effectiveDate(receiptDate);
-    if (!price || Number(price.productSupplierUnitId) !== productSupplierUnitId || Number(price.minimumQuantity) > Number(row.receivedQty) || !price.isActive || Number(price.purchasePrice) <= 0 || price.currencyCode.toUpperCase() !== currencyCode.toUpperCase() || price.effectiveFrom > effectiveDate || Boolean(price.effectiveTo && price.effectiveTo < effectiveDate)) throw new BadRequestException('Selected supplier price is not valid for this goods receipt line on the receipt date.');
+    if (!price || Number(price.productSupplierUnitId) !== Number(productSupplierUnitId) || Number(price.minimumQuantity) > Number(row.receivedQty) || !price.isActive || Number(price.purchasePrice) <= 0 || price.currencyCode.toUpperCase() !== currencyCode.toUpperCase() || price.effectiveFrom > effectiveDate || Boolean(price.effectiveTo && price.effectiveTo < effectiveDate)) throw new BadRequestException('Selected supplier price is not valid for this goods receipt line on the receipt date.');
     return price;
   }
 
   private async assertDirectLineStillEligible(manager: EntityManager, receipt: GoodsReceipt, line: GoodsReceiptLine) {
     const { supplierUnit } = await this.resolveDirectPurchasingContext(manager, Number(line.productId), Number(line.productUnitId), Number(line.unitId), receipt.tenantId, Number(receipt.supplierId), Number(receipt.locationId));
+    let sourcePrice: ProductSupplierPrice | null = null;
     if (line.sourceSupplierPriceId) {
-      await this.resolveDirectSupplierPrice(manager, { sourceSupplierPriceId: line.sourceSupplierPriceId, receivedQty: Number(line.receivedQty) }, supplierUnit.productSupplierUnitId, receipt.receiptDate, receipt.currencyCode);
+      sourcePrice = await this.resolveDirectSupplierPrice(manager, { sourceSupplierPriceId: line.sourceSupplierPriceId, receivedQty: Number(line.receivedQty) }, supplierUnit.productSupplierUnitId, receipt.receiptDate, receipt.currencyCode);
     }
+    this.costOverrideReason(line.costOverrideReason ?? undefined, !sourcePrice || Number(line.unitCost) !== Number(sourcePrice.purchasePrice), 'supplier price');
   }
 
   private async lockInventoryContext(manager: EntityManager, receipt: GoodsReceipt, line: GoodsReceiptLine) {
@@ -230,7 +281,7 @@ export class GoodsReceiptsService {
   }
 
   private assertPoHeader(po: PurchaseOrder, supplierId: number, locationId: number, currencyCode: string) {
-    if (!['APPROVED', 'SENT', 'PART_RECEIVED'].includes(po.status) || Number(po.supplierId) !== supplierId || Number(po.locationId) !== locationId || po.currencyCode.toUpperCase() !== currencyCode.toUpperCase()) throw new BadRequestException('PO supplier, location, tenant, currency, or status is not eligible for this receipt.');
+    if (!['APPROVED', 'PART_RECEIVED'].includes(po.status) || Number(po.supplierId) !== supplierId || Number(po.locationId) !== locationId || po.currencyCode.toUpperCase() !== currencyCode.toUpperCase()) throw new BadRequestException('PO supplier, location, tenant, currency, or status is not eligible for this receipt.');
   }
 
   private costOverrideReason(value: string | undefined, required: boolean, baseline: string) {
