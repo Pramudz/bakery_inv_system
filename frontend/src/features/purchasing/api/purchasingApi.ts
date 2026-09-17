@@ -36,6 +36,8 @@ export type PurchaseOrder = {
 export type PurchaseOrderPage = { items: PurchaseOrder[]; page: number; limit: number; total: number; totalPages: number };
 
 export type GoodsReceiptLine = {
+  lineTotal?: string;
+  unit?: { name?: string; code?: string };
   goodsReceiptLineId?: number | string;
   purchaseOrderLineId?: number | string | null;
   productId: number | string;
@@ -55,6 +57,14 @@ export type GoodsReceiptLine = {
 };
 
 export type GoodsReceipt = {
+  postedAt?: string | null;
+  postedByUserId?: number | string | null;
+  postedByName?: string | null;
+  reversalReason?: string | null;
+  reversedAt?: string | null;
+  reversedByUserId?: number | string | null;
+  reversedByName?: string | null;
+  reversalMovements?: ReversalMovement[];
   goodsReceiptId: number | string;
   grnNumber?: string | null;
   receiptType: "DIRECT" | "PO_BASED";
@@ -75,6 +85,48 @@ export type GoodsReceipt = {
 };
 
 export type GoodsReceiptPayload = Record<string, unknown>;
+export type ReversalMovement = {
+  sourceDocumentLineId: number | string;
+  valuationMethod: string;
+  originalDocumentValue: string;
+  inventoryReliefValue: string;
+  costVariance: string;
+};
+export type ReversalLine = GoodsReceiptLine & {
+  sku: string;
+  productName: string;
+  productDisplayName: string;
+  purchaseUnitCode: string;
+  purchaseUnitName: string;
+  baseUnitCode: string;
+  conversionFactor: string;
+  currentQuantity: string;
+  currentWavg: string;
+  projectedQuantity: string;
+  baseQuantity: string;
+  originalDocumentValue: string;
+  inventoryReliefValue: string;
+  costVariance: string;
+  quantityBefore: string;
+  quantityAfter: string;
+  averageCostBefore: string;
+  averageCostAfter: string;
+  valuationMethod: string;
+  createsNegativeStock: boolean;
+};
+export type ReversalPreview = {
+  receipt: GoodsReceipt;
+  lines: ReversalLine[];
+  eligible: boolean;
+  blockingReason: string | null;
+  totalReceivedUnits: string;
+  originalDocumentValue: string;
+  inventoryReliefValue: string;
+  costVariance: string;
+  negativeStockLineCount: number;
+  hasLaterMovements: boolean;
+  purchaseOrderImpact?: { statusBefore: string; statusAfter: string; lines: Array<{ purchaseOrderLineId: number | string; productId: number | string | null; sku: string; productName: string; productDisplayName: string; orderedQty: string; receivedQtyBefore: string; reversalQty: string; receivedQtyAfter: string; statusAfter: string }> } | null;
+};
 export type GoodsReceiptPage = {
   items: GoodsReceipt[];
   page: number;
@@ -84,6 +136,10 @@ export type GoodsReceiptPage = {
 };
 
 export const purchasingApi = {
+  reversalCandidates: (params: { page: number; limit: number; search: string; receiptType: string }) =>
+    apiClient.get<GoodsReceiptPage>(`/purchasing/goods-receipts/reversal-candidates?${new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))}`),
+  reversalPreview: (id: number) => apiClient.get<ReversalPreview>(`/purchasing/goods-receipts/${id}/reversal-preview`),
+  reverseReceipt: (id: number, reason: string, confirmNegativeStock: boolean) => apiClient.patch<GoodsReceipt>(`/purchasing/goods-receipts/${id}/reverse`, { reason, confirmNegativeStock }),
   pageOrders: (params: { page: number; limit: number; search: string; status: string }) =>
     apiClient.get<PurchaseOrderPage>(`/purchasing/purchase-orders?${new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))}`),
   listOrders: () => apiClient.get<PurchaseOrder[]>("/purchasing/purchase-orders"),

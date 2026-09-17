@@ -33,6 +33,7 @@ import { PurchaseOrdersPage } from "../features/purchasing/pages/PurchaseOrdersP
 import { PurchaseOrderScreen } from "../features/purchasing/pages/PurchaseOrderScreen";
 import { GoodsReceiptsPage } from "../features/purchasing/pages/GoodsReceiptsPage";
 import { GoodsReceiptScreen } from "../features/purchasing/pages/GoodsReceiptScreen";
+import { GoodsReceiptReversalScreen } from "../features/purchasing/pages/GoodsReceiptReversalScreen";
 
 const tenantChildren = [
   { path: "my-tenant", element: <TenantProfilePage /> },
@@ -60,6 +61,7 @@ const tenantChildren = [
   { path: "purchase-orders/:id", element: <PurchaseOrderScreen mode="view" /> },
   { path: "purchase-orders/:id/edit", element: <PurchaseOrderScreen mode="edit" /> },
   { path: "goods-receipts", element: <GoodsReceiptsPage /> },
+  { path: "goods-receipts/reverse", element: <GoodsReceiptReversalScreen /> },
   { path: "goods-receipts/direct/new", element: <GoodsReceiptScreen mode="create-direct" /> },
   { path: "goods-receipts/po/new", element: <GoodsReceiptScreen mode="create-po-based" /> },
   { path: "goods-receipts/:id/view", element: <GoodsReceiptScreen mode="view" /> },

@@ -6,6 +6,7 @@ import {
   OneToMany,
   PrimaryGeneratedColumn,
   Unique,
+  Index,
 } from "typeorm";
 import { AuditEntity } from "../../common/audit.entity";
 import { Tenant } from "../tenants/tenant.entity";
@@ -101,6 +102,12 @@ export class GoodsReceipt extends AuditEntity {
   cancelledByUser!: User | null;
   @Column({ name: "cancelled_at", type: "datetime", nullable: true })
   cancelledAt!: Date | null;
+  @Column({ name: 'reversal_reason', type: 'varchar', length: 1000, nullable: true }) reversalReason!: string | null;
+  @Index('idx_grn_reversed_user')
+  @Column({ name: 'reversed_by_user_id', type: 'bigint', nullable: true }) reversedByUserId!: number | null;
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'reversed_by_user_id' }) reversedByUser!: User | null;
+  @Column({ name: 'reversed_at', type: 'datetime', nullable: true }) reversedAt!: Date | null;
   @Column({ name: "is_active", default: true }) isActive!: boolean;
   @OneToMany(() => GoodsReceiptLine, (x) => x.goodsReceipt)
   lines!: GoodsReceiptLine[];

@@ -1,5 +1,11 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DataSource, EntityManager } from 'typeorm';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { DataSource, EntityManager, In, QueryFailedError } from 'typeorm';
+import { tenantBusinessClock } from '../../common/business-date';
+import { sum4, units } from '../../common/inventory-decimal';
+import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
+import { User } from '../users/user.entity';
+import { ReverseGoodsReceiptDto } from './dto/reverse-goods-receipt.dto';
+import { orderReceivedStatus, prepareReversal } from './goods-receipt-reversal';
 import { loadDocumentHeader } from '../../common/document-header';
 import { baseInventorySnapshot, purchaseOrderLineSnapshot, productUnitSnapshot } from '../../common/transaction-unit-snapshot';
 import { TenantPrincipal } from '../auth/auth.types';
@@ -35,10 +41,119 @@ export class GoodsReceiptsService {
     private readonly numberSequences: NumberSequencesService,
   ) {}
 
-  list(user: TenantPrincipal) { return this.dataSource.getRepository(GoodsReceipt).findBy({ tenantId: user.tenantId }); }
+  list(user: TenantPrincipal) { return this.dataSource.getRepository(GoodsReceipt).findBy({ tenantId: user.tenantId, ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}) }); }
+
+  async reversalPreview(id: number, user: TenantPrincipal) {
+    this.assertId(id);
+    return this.dataSource.transaction(async manager => {
+      const receipt = await manager.getRepository(GoodsReceipt).findOne({ where: { goodsReceiptId: id, tenantId: user.tenantId }, relations: { supplier: true, location: true, purchaseOrder: true } });
+      if (!receipt) throw new NotFoundException('GRN not found.');
+      await this.assertLocationAccess(manager, user, Number(receipt.locationId));
+      const lines = await manager.getRepository(GoodsReceiptLine).find({ where: { goodsReceiptId: id }, relations: { product: { baseUnit: true }, productUnit: { unit: true }, unit: true } });
+      const lineById = new Map(lines.map(line => [String(line.goodsReceiptLineId), line]));
+      const display = (line: GoodsReceiptLine) => {
+        const product = String(line.product?.tenantId) === String(receipt.tenantId) ? line.product : null;
+        const purchaseUnit = line.productUnit && String(line.productUnit.productId) === String(line.productId) && String(line.productUnit.unitId) === String(line.unitId) && String(line.productUnit.unit?.tenantId) === String(receipt.tenantId) ? line.productUnit.unit : null;
+        const unit = String(line.unit?.tenantId) === String(receipt.tenantId) ? line.unit : null;
+        const sku = product?.sku ?? '';
+        const productName = product?.productName ?? '';
+        return {
+          sku,
+          productName,
+          productDisplayName: [sku, productName].filter(Boolean).join(' — ') || 'Product unavailable',
+          purchaseUnitCode: purchaseUnit?.code ?? unit?.code ?? '',
+          purchaseUnitName: purchaseUnit?.name ?? unit?.name ?? '',
+          baseUnitCode: product && String(product.baseUnit?.tenantId) === String(receipt.tenantId) ? product.baseUnit.code : '',
+          conversionFactor: line.conversionFactorSnapshot ?? (purchaseUnit ? line.productUnit?.conversionFactor : null) ?? '',
+        };
+      };
+      try {
+        const { preview } = await prepareReversal(manager, receipt, this.balances, false);
+        const affectedIds = [...new Set(lines.filter(line => line.purchaseOrderLineId != null && units(line.receivedQty) > 0n).map(line => String(line.purchaseOrderLineId)))];
+        const poLines = affectedIds.length && receipt.purchaseOrderId != null
+          ? await manager.getRepository(PurchaseOrderLine).find({ where: { purchaseOrderId: receipt.purchaseOrderId, purchaseOrderLineId: In(affectedIds) }, relations: { product: true } })
+          : [];
+        const poLineById = new Map(poLines.map(line => [String(line.purchaseOrderLineId), line]));
+        const purchaseOrderImpact = preview.purchaseOrderImpact && {
+          ...preview.purchaseOrderImpact,
+          lines: preview.purchaseOrderImpact.lines.filter(line => affectedIds.includes(String(line.purchaseOrderLineId))).map(line => {
+            const poLine = poLineById.get(String(line.purchaseOrderLineId));
+            const product = poLine && String(poLine.product?.tenantId) === String(receipt.tenantId) ? poLine.product : null;
+            const sku = product?.sku ?? '';
+            const productName = product?.productName ?? '';
+            return {
+              ...line,
+              productId: poLine?.productId ?? null,
+              sku,
+              productName,
+              productDisplayName: [sku, productName].filter(Boolean).join(' — ') || 'Product unavailable',
+              orderedQty: poLine?.orderedQty ?? '0.0000',
+              reversalQty: sum4(lines.filter(receiptLine => String(receiptLine.purchaseOrderLineId) === String(line.purchaseOrderLineId)).map(receiptLine => receiptLine.receivedQty)),
+            };
+          }),
+        };
+        return { ...preview, receipt: { ...receipt, ...await this.auditNames(manager, receipt) }, lines: preview.lines.map(line => ({ ...line, ...display(lineById.get(String(line.goodsReceiptLineId))!) })), purchaseOrderImpact };
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+        return { receipt, lines: lines.map(line => {
+          const { product, productUnit, unit, ...values } = line;
+          return { ...values, ...display(line) };
+        }), eligible: false, blockingReason: error.message };
+      }
+    });
+  }
+
+  async reverse(id: number, dto: ReverseGoodsReceiptDto, user: TenantPrincipal) {
+    this.assertId(id);
+    if (typeof dto.reason !== 'string' || !dto.reason.trim() || dto.reason.trim().length > 1000 || (dto.confirmNegativeStock !== undefined && typeof dto.confirmNegativeStock !== 'boolean'))
+      throw new BadRequestException('A reversal reason of 1 to 1000 characters and a valid confirmation are required.');
+    try {
+      return await this.dataSource.transaction(async manager => {
+        const clock = await tenantBusinessClock(manager, user.tenantId);
+        const receipt = await this.lockGoodsReceipt(manager, id, user.tenantId);
+        await this.assertLocationAccess(manager, user, Number(receipt.locationId));
+        const plan = await prepareReversal(manager, receipt, this.balances, true);
+        if (plan.preview.negativeStockLineCount && dto.confirmNegativeStock !== true)
+          throw new BadRequestException('This reversal will create negative stock. Refresh the preview and explicitly confirm negative stock.');
+        for (const { original, balance, layers, snapshot } of plan.movements) {
+          await this.balances.applyRelief(manager, balance, snapshot, clock.now);
+          const ageLayerRelief = await this.ageLayers.relieve(manager, layers, { quantity: original.quantityIn, preferredSource: original, exact: snapshot.valuationMethod === 'EXACT_ORIGINAL' });
+          await this.ledgers.insert(manager, {
+            tenantId: user.tenantId, locationId: receipt.locationId, productId: original.productId,
+            movementDate: clock.now, businessDate: clock.businessDate, movementType: 'GRN_REVERSAL', sourceDocumentType: 'GRN',
+            sourceDocumentId: receipt.goodsReceiptId, sourceDocumentLineId: original.sourceDocumentLineId,
+            quantityIn: '0.0000', quantityOut: snapshot.baseQuantity, unitCost: snapshot.valuationMethod === 'EXACT_ORIGINAL' ? original.unitCost : snapshot.averageCostBefore,
+            movementValue: snapshot.inventoryReliefValue, quantityBefore: snapshot.quantityBefore, quantityAfter: snapshot.quantityAfter,
+            averageCostBefore: snapshot.averageCostBefore, averageCostAfter: snapshot.averageCostAfter,
+            valuationMethod: snapshot.valuationMethod, originalDocumentValue: snapshot.originalDocumentValue, inventoryReliefValue: snapshot.inventoryReliefValue,
+            costVariance: snapshot.costVariance, reversalOfLedgerId: original.inventoryLedgerId, ageLayerRelief, createdByUserId: user.userId,
+          });
+        }
+        if (plan.po) {
+          for (const line of plan.poLines) await manager.getRepository(PurchaseOrderLine).update(line.purchaseOrderLineId, { receivedQty: line.receivedQty, status: line.status });
+          plan.po.status = orderReceivedStatus(plan.poLines);
+          await manager.getRepository(PurchaseOrder).save(plan.po);
+        }
+        Object.assign(receipt, { status: 'REVERSED', reversalReason: dto.reason.trim(), reversedByUserId: user.userId, reversedAt: clock.now });
+        return manager.getRepository(GoodsReceipt).save(receipt);
+      });
+    } catch (error) {
+      if (error instanceof QueryFailedError && ['ER_DUP_ENTRY', 'ER_NO_REFERENCED_ROW_2', 'ER_ROW_IS_REFERENCED_2', 'ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT', 'ER_WARN_DATA_OUT_OF_RANGE'].includes(error.driverError?.code))
+        throw new ConflictException('Reversal conflicted with inventory integrity or another transaction. Refresh the GRN before retrying.');
+      throw error;
+    }
+  }
+
+  private assertId(id: number) { if (!Number.isSafeInteger(id) || id <= 0) throw new BadRequestException('Invalid GRN ID.'); }
+
+  private async auditNames(manager: EntityManager, receipt: GoodsReceipt) {
+    const ids = [receipt.postedByUserId, receipt.reversedByUserId].filter((id): id is number => id != null);
+    const users = ids.length ? await manager.getRepository(User).find({ where: { tenantId: receipt.tenantId, userId: In(ids) }, select: { userId: true, username: true } }) : [];
+    return { postedByName: users.find(user => String(user.userId) === String(receipt.postedByUserId))?.username ?? null, reversedByName: users.find(user => String(user.userId) === String(receipt.reversedByUserId))?.username ?? null };
+  }
 
   async findPage(user: TenantPrincipal, page: number, limit: number, search: string, status: string, receiptType: string) {
-    const safePage = Math.max(1, Number.isFinite(page) ? page : 1);
+    const safePage = Number.isSafeInteger(page) && page > 0 ? page : 1;
     const safeLimit = [20, 50, 100].includes(limit) ? limit : 20;
     const query = this.dataSource.getRepository(GoodsReceipt)
       .createQueryBuilder('grn')
@@ -60,10 +175,11 @@ export class GoodsReceiptsService {
         LOWER(COALESCE(purchaseOrder.poNumber, '')) LIKE :search
       )`, { search: `%${search.trim().toLowerCase()}%` });
     }
-    if (['DRAFT', 'POSTED', 'CANCELLED'].includes(status.toUpperCase()))
+    if (['DRAFT', 'POSTED', 'CANCELLED', 'REVERSED'].includes(status.toUpperCase()))
       query.andWhere('grn.status = :status', { status: status.toUpperCase() });
     if (['DIRECT', 'PO_BASED'].includes(receiptType.toUpperCase()))
       query.andWhere('grn.receiptType = :receiptType', { receiptType: receiptType.toUpperCase() });
+    else query.andWhere('grn.receiptType IN (:...types)', { types: ['DIRECT', 'PO_BASED'] });
 
     const total = await query.getCount();
     const result = await query
@@ -85,12 +201,15 @@ export class GoodsReceiptsService {
   }
 
   async get(id: number, user: TenantPrincipal) {
+    this.assertId(id);
     const goodsReceipt = await this.find(id, user);
+    await this.assertLocationAccess(this.dataSource.manager, user, Number(goodsReceipt.locationId));
     const [lines, documentHeader] = await Promise.all([
       this.dataSource.getRepository(GoodsReceiptLine).find({ where: { goodsReceiptId: id }, relations: { product: true, productUnit: { unit: true } } }),
       loadDocumentHeader(this.dataSource, user.tenantId, Number(goodsReceipt.locationId)),
     ]);
-    return { ...goodsReceipt, lines, documentHeader };
+    const reversalMovements = goodsReceipt.status === 'REVERSED' ? await this.dataSource.getRepository(InventoryLedger).findBy({ tenantId: user.tenantId, sourceDocumentType: 'GRN', sourceDocumentId: id, movementType: 'GRN_REVERSAL' }) : [];
+    return { ...goodsReceipt, lines, documentHeader, reversalMovements, ...await this.auditNames(this.dataSource.manager, goodsReceipt) };
   }
 
   async create(dto: CreateGoodsReceiptDto, user: TenantPrincipal) {
@@ -121,6 +240,7 @@ export class GoodsReceiptsService {
   async update(id: number, dto: UpdateGoodsReceiptDto, user: TenantPrincipal) {
     return this.dataSource.transaction(async manager => {
       const goodsReceipt = await this.lockGoodsReceipt(manager, id, user.tenantId);
+      await this.assertLocationAccess(manager, user, Number(goodsReceipt.locationId));
       if (goodsReceipt.status !== 'DRAFT') throw new BadRequestException('Only draft GRNs can be edited.');
       if (dto.receiptType && dto.receiptType !== goodsReceipt.receiptType) throw new BadRequestException('Receipt type cannot be changed after creation.');
       if (dto.purchaseOrderId !== undefined && Number(dto.purchaseOrderId) !== Number(goodsReceipt.purchaseOrderId)) throw new BadRequestException('Purchase order cannot be changed after GRN creation.');
@@ -147,8 +267,8 @@ export class GoodsReceiptsService {
   async cancel(id: number, user: TenantPrincipal) {
     return this.dataSource.transaction(async manager => {
       const goodsReceipt = await this.lockGoodsReceipt(manager, id, user.tenantId);
-      if (goodsReceipt.status === 'POSTED') throw new BadRequestException('Posted GRN cannot be cancelled directly. Use inventory reversal/return workflow.');
-      if (goodsReceipt.status === 'CANCELLED') throw new BadRequestException('GRN is already cancelled.');
+      await this.assertLocationAccess(manager, user, Number(goodsReceipt.locationId));
+      if (goodsReceipt.status !== 'DRAFT') throw new BadRequestException('Only draft GRNs can be cancelled.');
       Object.assign(goodsReceipt, { status: 'CANCELLED', cancelledByUserId: user.userId, cancelledAt: new Date() });
       return manager.getRepository(GoodsReceipt).save(goodsReceipt);
     });
@@ -170,6 +290,7 @@ export class GoodsReceiptsService {
       }
 
       const lines = await manager.getRepository(GoodsReceiptLine).createQueryBuilder('line').setLock('pessimistic_write').where('line.goodsReceiptId = :id', { id }).getMany();
+      lines.sort((a, b) => Number(a.productId) - Number(b.productId) || Number(a.goodsReceiptLineId) - Number(b.goodsReceiptLineId));
       if (!lines.length) throw new BadRequestException('GRN requires at least one line.');
       const year = String(new Date().getFullYear());
       const nextNumber = await this.numberSequences.getTenantNextNumber(manager, user.tenantId, NumberSequenceKeys.GOODS_RECEIPT, year);
@@ -232,7 +353,7 @@ export class GoodsReceiptsService {
 
   private async refreshPoStatus(manager: EntityManager, purchaseOrder: PurchaseOrder) {
     const lines = await manager.getRepository(PurchaseOrderLine).findBy({ purchaseOrderId: purchaseOrder.purchaseOrderId });
-    purchaseOrder.status = lines.every(line => Number(line.receivedQty) >= Number(line.orderedQty)) ? 'RECEIVED' : 'PART_RECEIVED';
+    purchaseOrder.status = orderReceivedStatus(lines);
     await manager.getRepository(PurchaseOrder).save(purchaseOrder);
   }
 
@@ -295,16 +416,17 @@ export class GoodsReceiptsService {
 
   private async validateReferences(manager: EntityManager, user: TenantPrincipal, supplierId: number, locationId: number) {
     if (!await manager.getRepository(Supplier).findOneBy({ supplierId, tenantId: user.tenantId, isActive: true })) throw new NotFoundException('Supplier not found.');
-    await this.assertLocationAccess(manager, user, locationId);
+    await this.assertLocationAccess(manager, user, locationId, true);
   }
 
-  private async assertLocationAccess(manager: EntityManager, user: TenantPrincipal, locationId: number) {
-    const location = await manager.getRepository(Location).findOneBy({ locationId, tenantId: user.tenantId, isActive: true });
-    if (!location) throw new NotFoundException('Location not found.');
+  private async assertLocationAccess(manager: EntityManager, user: TenantPrincipal, locationId: number, requireActive = false) {
     if (user.accessScope === 'LOCATION' && !user.assignedLocationIds.map(Number).includes(locationId)) throw new ForbiddenException('User is not assigned to this location.');
+    const location = await manager.getRepository(Location).findOneBy({ locationId, tenantId: user.tenantId, ...(requireActive ? { isActive: true } : {}) });
+    if (!location) throw new NotFoundException('Location not found.');
   }
 
   private async lockGoodsReceipt(manager: EntityManager, id: number, tenantId: number) {
+    this.assertId(id);
     const receipt = await manager.getRepository(GoodsReceipt).createQueryBuilder('grn').setLock('pessimistic_write').where('grn.goodsReceiptId = :id AND grn.tenantId = :tenantId', { id, tenantId }).getOne();
     if (!receipt) throw new NotFoundException('GRN not found.');
     return receipt;
@@ -317,7 +439,7 @@ export class GoodsReceiptsService {
   }
 
   private async find(id: number, user: TenantPrincipal) {
-    const grn = await this.dataSource.getRepository(GoodsReceipt).findOneBy({ goodsReceiptId: id, tenantId: user.tenantId });
+    const grn = await this.dataSource.getRepository(GoodsReceipt).findOne({ where: { goodsReceiptId: id, tenantId: user.tenantId }, relations: { supplier: true, location: true, purchaseOrder: true } });
     if (!grn) throw new NotFoundException('GRN not found.');
     return grn;
   }

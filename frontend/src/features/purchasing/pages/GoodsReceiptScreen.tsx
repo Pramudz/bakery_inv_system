@@ -151,7 +151,7 @@ function formFromReceipt(receipt: GoodsReceipt): GrnForm {
   return {
     receiptType: receipt.receiptType,
     purchaseOrderId: String(receipt.purchaseOrderId ?? ""),
-    poNumber: "",
+    poNumber: receipt.purchaseOrder?.poNumber ?? "",
     supplierId: String(receipt.supplierId ?? ""),
     locationId: String(receipt.locationId ?? ""),
     receiptDate: String(receipt.receiptDate ?? "").slice(0, 10),
@@ -220,13 +220,14 @@ export function GoodsReceiptScreen({ mode }: { mode: GoodsReceiptMode }) {
     queryFn: () => purchasingApi.getReceipt(receiptId!),
     enabled: !isCreate && Number.isInteger(receiptId),
   });
-  const suppliers = useQuery({ queryKey: ["suppliers"], queryFn: suppliersApi.list });
-  const locations = useQuery({ queryKey: ["locations"], queryFn: locationsApi.list });
-  const products = useQuery({ queryKey: ["products"], queryFn: productsApi.list });
+  const loadEditableReferences = mode !== "view" && (isCreate || receipt.data?.status === "DRAFT");
+  const suppliers = useQuery({ queryKey: ["suppliers"], queryFn: suppliersApi.list, enabled: loadEditableReferences });
+  const locations = useQuery({ queryKey: ["locations"], queryFn: locationsApi.list, enabled: loadEditableReferences });
+  const products = useQuery({ queryKey: ["products"], queryFn: productsApi.list, enabled: loadEditableReferences });
   const orders = useQuery({
     queryKey: ["purchase-orders"],
     queryFn: purchasingApi.listOrders,
-    enabled: mode === "create-po-based" || form.receiptType === "PO_BASED",
+    enabled: loadEditableReferences && (mode === "create-po-based" || form.receiptType === "PO_BASED"),
   });
   const productSearch = usePurchasingProductSearch(deferredSearch, form.receiptType === "DIRECT");
 
@@ -670,6 +671,12 @@ export function GoodsReceiptScreen({ mode }: { mode: GoodsReceiptMode }) {
 
       <div className="direct-grn-layout">
         <div className="direct-grn-main">
+          {receipt.data?.status === "REVERSED" && <section className="direct-grn-card">
+            <h2>Reversal audit</h2>
+            <p><strong>Reason:</strong> {receipt.data.reversalReason}</p>
+            <p><strong>Reversed by:</strong> {receipt.data.reversedByName ?? receipt.data.reversedByUserId ?? "—"} · <strong>Reversed at:</strong> {receipt.data.reversedAt ? new Date(receipt.data.reversedAt).toLocaleString() : "—"}</p>
+            <div className="table-wrap"><table className="table"><thead><tr><th>Original line</th><th>Valuation method</th><th>Original value</th><th>Inventory relief value</th><th>Reversal variance</th></tr></thead><tbody>{receipt.data.reversalMovements?.map(movement => <tr key={movement.sourceDocumentLineId}><td>{movement.sourceDocumentLineId}</td><td>{statusLabel(movement.valuationMethod)}</td><td>{form.currencyCode} {movement.originalDocumentValue}</td><td>{form.currencyCode} {movement.inventoryReliefValue}</td><td>{form.currencyCode} {movement.costVariance}</td></tr>)}</tbody></table></div>
+          </section>}
           <section className="direct-grn-card receipt-details-card">
             <h2>Receipt Details</h2>
             <div className="direct-grn-fields">
@@ -693,6 +700,7 @@ export function GoodsReceiptScreen({ mode }: { mode: GoodsReceiptMode }) {
               <SearchableSelect
                 label="Supplier"
                 value={form.supplierId}
+                selectedLabel={receipt.data?.supplier?.supplierName}
                 onChange={(value) => updateForm({ supplierId: value, lines: [] })}
                 options={(suppliers.data ?? []).filter((item: any) => item.isActive !== false).map((item: any) => ({ value: item.supplierId, label: item.supplierName, code: item.supplierCode }))}
                 placeholder="Search supplier"
@@ -703,6 +711,7 @@ export function GoodsReceiptScreen({ mode }: { mode: GoodsReceiptMode }) {
               <SearchableSelect
                 label="Location"
                 value={form.locationId}
+                selectedLabel={receipt.data?.location?.name}
                 onChange={(value) => updateForm({ locationId: value })}
                 options={(locations.data ?? []).filter((item: any) => item.isActive !== false).filter((item: any) => accessScope !== "LOCATION" || String(item.locationId) === String(currentLocationId)).map((item: any) => ({ value: item.locationId, label: item.name, code: item.code }))}
                 placeholder="Search location"

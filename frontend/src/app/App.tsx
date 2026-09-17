@@ -44,6 +44,7 @@ const tenantGroups = [
     items: [
       ["Purchase Orders", "/purchase-orders"],
       ["Goods Receipts", "/goods-receipts"],
+      ["Reverse GRN", "/goods-receipts/reverse"],
     ],
   },
   {
@@ -81,6 +82,7 @@ const moduleForPath: Record<string, string> = {
   "/locations": "LOCATION",
   "/purchase-orders": "PURCHASING",
   "/goods-receipts": "PURCHASING",
+  "/goods-receipts/reverse": "PURCHASING",
 };
 
 const viewPermissionForPath: Record<string, string> = {
@@ -103,6 +105,7 @@ const viewPermissionForPath: Record<string, string> = {
   "/locations": "LOCATION_VIEW",
   "/purchase-orders": "PURCHASE_ORDER_VIEW",
   "/goods-receipts": "GRN_VIEW",
+  "/goods-receipts/reverse": "GRN_REVERSE",
 };
 
 export default function App() {
@@ -178,7 +181,7 @@ export default function App() {
   };
 
   return (
-    <div className="shell">
+    <div className={`shell${location.pathname === '/goods-receipts/reverse' ? ' shell-grn-reversal' : ''}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">E</div>
@@ -223,7 +226,7 @@ export default function App() {
                   to={to}
                   end={to === "/"}
                   className={({ isActive }) =>
-                    isActive ? "nav active" : "nav"
+                    isActive && !(to === "/goods-receipts" && location.pathname === "/goods-receipts/reverse") ? "nav active" : "nav"
                   }
                 >
                   <span className="nav-dot" />

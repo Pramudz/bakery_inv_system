@@ -18,6 +18,10 @@ type Props = {
   clearLabel?: string;
   selectedLabel?: string;
   disabled?: boolean;
+  onSearchChange?: (query: string) => void;
+  serverFiltered?: boolean;
+  menuFooter?: React.ReactNode;
+  renderOption?: (option: SearchableSelectOption) => React.ReactNode;
 };
 
 export function SearchableSelect({
@@ -31,6 +35,10 @@ export function SearchableSelect({
   clearLabel,
   selectedLabel,
   disabled = false,
+  onSearchChange,
+  serverFiltered = false,
+  menuFooter,
+  renderOption,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -44,11 +52,11 @@ export function SearchableSelect({
   const selectedText = selected?.label ?? selectedLabel ?? "";
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return options;
+    if (!needle || serverFiltered) return options;
     return options.filter((option) =>
       `${option.label} ${option.code ?? ""}`.toLocaleLowerCase().includes(needle),
     );
-  }, [options, query]);
+  }, [options, query, serverFiltered]);
   const choices: Array<SearchableSelectOption & { clear?: boolean }> = [
     ...(clearLabel ? [{ value: "", label: clearLabel, clear: true }] : []),
     ...filtered,
@@ -74,6 +82,7 @@ export function SearchableSelect({
 
     if (disabled) return;
     setQuery("");
+    onSearchChange?.("");
     setActiveIndex(0);
     setOpen(true);
   };
@@ -126,7 +135,7 @@ export function SearchableSelect({
         autoComplete="off"
         onClick={() => { if (!open) openMenu(); }}
         onFocus={() => { if (!open) openMenu(); }}
-        onChange={(event) => { if (!open) setOpen(true); setQuery(event.target.value); setActiveIndex(0); }}
+        onChange={(event) => { if (!open) setOpen(true); setQuery(event.target.value); onSearchChange?.(event.target.value); setActiveIndex(0); }}
         onKeyDown={(event) => {
           if (event.key === "Escape") { event.preventDefault(); setOpen(false); setQuery(""); return; }
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -154,9 +163,10 @@ export function SearchableSelect({
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => choose(option)}
         >
-          <span>{option.label}</span>{option.code && <small>{option.code}</small>}
+          {renderOption && !option.clear ? renderOption(option) : <><span>{option.label}</span>{option.code && <small>{option.code}</small>}</>}
         </button>)}
         {filtered.length === 0 && <div className="searchable-select-empty">{emptyMessage}</div>}
+        {menuFooter}
       </div>,
       document.body,
     )}

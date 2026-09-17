@@ -100,6 +100,7 @@ test('cancelling a draft makes it CANCELLED and prevents posting', async () => {
   const manager: any = { getRepository: (entity: any) => entity === GoodsReceipt ? { save: async (row: any) => row } : {} };
   const cancelService = new GoodsReceiptsService({ transaction: (work: any) => work(manager) } as any, {} as any, {} as any, {} as any, {} as any) as any;
   cancelService.lockGoodsReceipt = async () => receipt;
+  cancelService.assertLocationAccess = async () => undefined;
   await cancelService.cancel(13, { tenantId: 3, userId: 5 });
   assert.equal(receipt.status, 'CANCELLED');
   cancelService.assertLocationAccess = async () => undefined;

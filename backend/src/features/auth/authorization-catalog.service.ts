@@ -42,7 +42,7 @@ export class AuthorizationCatalogService implements OnModuleInit {
       }
     }
     const purchasing = byCode.get('PURCHASING')!;
-    const purchasingPermissions = ['PURCHASE_ORDER_VIEW','PURCHASE_ORDER_CREATE','PURCHASE_ORDER_UPDATE','PURCHASE_ORDER_APPROVE','PURCHASE_ORDER_CANCEL','GRN_VIEW','GRN_CREATE','GRN_UPDATE','GRN_POST','GRN_CANCEL'];
+    const purchasingPermissions = ['PURCHASE_ORDER_VIEW','PURCHASE_ORDER_CREATE','PURCHASE_ORDER_UPDATE','PURCHASE_ORDER_APPROVE','PURCHASE_ORDER_CANCEL','GRN_VIEW','GRN_CREATE','GRN_UPDATE','GRN_POST','GRN_CANCEL','GRN_REVERSE'];
     for (const code of purchasingPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: purchasing.moduleId, code, name: code.replace(/_/g,' ').toLowerCase(), isActive: true }));
     const tenantProfilePermission = 'TENANT_PROFILE_UPDATE';
     const masterData = byCode.get('MASTER_DATA')!;
