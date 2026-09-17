@@ -88,6 +88,7 @@ export function GoodsReceiptsPage() {
           <h1>Goods Receipts</h1>
           <p>Receive PO-based or direct supplier deliveries.</p>
         </div>
+        {permissions.includes("GRN_REVERSE") && <button className="btn btn-danger-soft" onClick={() => navigate('/goods-receipts/reverse')}>Reverse GRN</button>}
         {permissions.includes("GRN_CREATE") && (
           <div className="actions">
             <button
@@ -127,6 +128,7 @@ export function GoodsReceiptsPage() {
             <option value="">All Status</option>
             <option value="DRAFT">Draft</option>
             <option value="POSTED">Posted</option>
+            <option value="REVERSED">Reversed</option>
             <option value="CANCELLED">Cancelled</option>
           </select>
           <select
@@ -197,6 +199,7 @@ export function GoodsReceiptsPage() {
                     <td>{receipt.currencyCode || "LKR"} {Number(receipt.total || 0).toFixed(2)}</td>
                     <td className="actions">
                       <button className="btn btn-ghost" onClick={() => navigate(`/goods-receipts/${receipt.goodsReceiptId}/view`, { state: { returnTo } })}>View</button>
+                      {receipt.status === "POSTED" && permissions.includes("GRN_REVERSE") && <button className="btn btn-danger-soft" onClick={() => navigate(`/goods-receipts/reverse?goodsReceiptId=${receipt.goodsReceiptId}`)}>Reverse</button>}
                       {receipt.status === "DRAFT" && permissions.includes("GRN_UPDATE") && (
                         <button className="btn btn-ghost" onClick={() => navigate(`/goods-receipts/${receipt.goodsReceiptId}/edit`, { state: { returnTo } })}>Edit</button>
                       )}

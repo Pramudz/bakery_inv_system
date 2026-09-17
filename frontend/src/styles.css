@@ -2366,3 +2366,38 @@ button {
     padding: 12px 22px;
   }
 }
+
+/* GRN reversal reuses the receipt cards, summary and fixed action bar. */
+.grn-status-reversed { color: #67409a; border-color: #cbb6e8; background: #f6efff; }
+.grn-reversal-search { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 16px; }
+.grn-candidate { display: grid; gap: 7px; white-space: normal; text-align: left; }
+.grn-candidate .grn-status-badge { padding: 2px 5px; }
+.grn-candidate-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px; border-top: 1px solid #dfe3e8; }
+.grn-reversal-details { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.grn-reversal-details dt { color: #64748b; font-size: 11px; }
+.grn-reversal-details dd { margin: 6px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.grn-reversal-page .direct-grn-main > * + * { margin-top: 14px; }
+.grn-reversal-lines { min-width: 1380px; font-variant-numeric: tabular-nums; }
+.grn-reversal-lines small { display: block; color: #64748b; margin-top: 4px; }
+.grn-reversal-lines td, .grn-reversal-lines th { white-space: normal; }
+.grn-reversal-warning { padding: 14px; border: 1px solid #e8c979; background: #fff9e9; border-radius: 8px; color: #775010; }
+.grn-reversal-negative { border: 2px solid #d96a63; }
+.grn-negative-line { background: #fff3f3; }
+.grn-negative-count { color: #b42318; font-weight: 700; }
+.grn-reversal-summary { display: block; font-variant-numeric: tabular-nums; }
+.grn-reversal-summary > b { font-size: 18px; overflow-wrap: anywhere; }
+.grn-reversal-page .direct-grn-actions { flex-wrap: wrap; }
+@media (max-width: 900px) {
+  body:has(.shell-grn-reversal) { min-width: 0; }
+  .shell-grn-reversal .sidebar { display: none; }
+  .shell-grn-reversal .content { padding: 22px; }
+  .shell-grn-reversal .topbar { padding: 0 16px; }
+  .shell-grn-reversal .crumb > span { display: none; }
+  .grn-reversal-page .direct-grn-title-row { flex-wrap: wrap; gap: 10px; }
+  .grn-reversal-page .direct-grn-title-row h1 { font-size: 26px; }
+}
+@media (max-width: 700px) {
+  .grn-reversal-search, .grn-reversal-details { grid-template-columns: 1fr; }
+  .grn-reversal-page .direct-grn-actions { gap: 8px; }
+  .grn-reversal-page .direct-grn-actions .btn { min-width: 0; }
+}

@@ -5,6 +5,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
   Unique,
+  Index,
 } from "typeorm";
 import { AuditEntity } from "../../common/audit.entity";
 import { Tenant } from "../tenants/tenant.entity";
@@ -13,7 +14,21 @@ import { Product } from "../products/products.entity";
 import { User } from "../users/user.entity";
 @Entity("tbl_inventory_ledger")
 @Unique("uq_inventory_ledger_source_movement", ["tenantId", "sourceDocumentType", "sourceDocumentId", "sourceDocumentLineId", "movementType"])
+@Index('uq_inventory_ledger_reversal', ['reversalOfLedgerId'], { unique: true })
 export class InventoryLedger extends AuditEntity {
+  @Column({ name: 'valuation_method', type: 'varchar', length: 40, nullable: true }) valuationMethod?: string | null;
+  @Column({ name: 'original_document_value', type: 'decimal', precision: 18, scale: 4, nullable: true }) originalDocumentValue?: string | null;
+  @Column({ name: 'inventory_relief_value', type: 'decimal', precision: 18, scale: 4, nullable: true }) inventoryReliefValue?: string | null;
+  @Column({ name: 'cost_variance', type: 'decimal', precision: 18, scale: 4, nullable: true }) costVariance?: string | null;
+  @Column({ name: 'reversal_of_ledger_id', type: 'bigint', nullable: true }) reversalOfLedgerId?: number | null;
+  @ManyToOne(() => InventoryLedger, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'reversal_of_ledger_id' }) reversalOfLedger?: InventoryLedger | null;
+  @Column({ name: 'business_date', type: 'date', nullable: true }) businessDate?: string | null;
+  // Quantities are decimal strings. Unallocated stock-outs never invent a receipt age.
+  @Column({ name: 'age_layer_relief', type: 'json', nullable: true }) ageLayerRelief?: {
+    allocations: Array<{ layerId: number; quantity: string; before: string; after: string }>;
+    unallocatedQuantity: string;
+  } | null;
   @PrimaryGeneratedColumn({ name: "inventory_ledger_id", type: "bigint" })
   inventoryLedgerId!: number;
   @Column({ name: "tenant_id", type: "bigint" }) tenantId!: number;

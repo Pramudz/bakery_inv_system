@@ -7,11 +7,17 @@ import { TenantPrincipal } from '../auth/auth.types';
 import { CreateGoodsReceiptDto } from './dto/create-goods-receipt.dto';
 import { UpdateGoodsReceiptDto } from './dto/update-goods-receipt.dto';
 import { GoodsReceiptsService } from './goods-receipts.service';
+import { ReverseGoodsReceiptDto } from './dto/reverse-goods-receipt.dto';
 
 @Controller('purchasing/goods-receipts')
 @UseGuards(TenantAuthGuard, PermissionGuard)
 export class GoodsReceiptsController {
   constructor(private readonly service: GoodsReceiptsService) {}
+  @Get('reversal-candidates') @RequirePermission('GRN_REVERSE') candidates(
+    @CurrentUser() user: TenantPrincipal, @Query('page') page = '1', @Query('limit') limit = '20', @Query('search') search = '', @Query('receiptType') receiptType = '',
+  ) { return this.service.findPage(user, Number(page), Number(limit), search, 'POSTED', receiptType); }
+  @Get(':id/reversal-preview') @RequirePermission('GRN_REVERSE') preview(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.reversalPreview(id, user); }
+  @Patch(':id/reverse') @RequirePermission('GRN_REVERSE') reverse(@Param('id', ParseIntPipe) id: number, @Body() dto: ReverseGoodsReceiptDto, @CurrentUser() user: TenantPrincipal) { return this.service.reverse(id, dto, user); }
   @Get() @RequirePermission('GRN_VIEW') list(
     @CurrentUser() user: TenantPrincipal,
     @Query('page') page?: string,
