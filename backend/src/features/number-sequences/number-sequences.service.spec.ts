@@ -7,6 +7,7 @@ import {
   formatSku,
   formatSupplierCode,
   formatCustomerCode,
+  formatInventoryAdjustmentNumber,
 } from './number-sequence-formatters';
 import { NumberSequenceKeys } from './number-sequence-keys';
 import { NumberSequencesService } from './number-sequences.service';
@@ -35,10 +36,11 @@ class FakeMysqlManager {
 const manager = (counters: Map<string, number>) =>
   new FakeMysqlManager(counters) as unknown as EntityManager;
 
-test('formats first SKU, PO and GRN numbers', () => {
+test('formats first SKU, PO, GRN and adjustment numbers', () => {
   assert.equal(formatSku(1), 'SKU-000001');
   assert.equal(formatPurchaseOrderNumber(1515, '2026', 1), 'PO-1515-2026-000001');
   assert.equal(formatGoodsReceiptNumber(1515, '2026', 1), 'GRN-1515-2026-000001');
+  assert.equal(formatInventoryAdjustmentNumber(1515, '2026', 1), 'ADJ-1515-2026-000001');
   assert.equal(formatSupplierCode(1), 'SUP-000001');
   assert.equal(formatCustomerCode(1), 'CUS-000001');
 });
@@ -79,12 +81,13 @@ test('concurrent callers receive unique numbers', async () => {
   assert.deepEqual([...values].sort((a, b) => a - b), Array.from({ length: 20 }, (_, i) => i + 1));
 });
 
-test('failed Product, PO and GRN transactions do not commit counter increments', async () => {
+test('failed Product, PO, GRN and adjustment transactions do not commit counter increments', async () => {
   const service = new NumberSequencesService();
   for (const [sequenceKey, periodKey] of [
     [NumberSequenceKeys.SKU, 'NEVER'],
     [NumberSequenceKeys.PURCHASE_ORDER, '2026'],
     [NumberSequenceKeys.GOODS_RECEIPT, '2026'],
+    [NumberSequenceKeys.STOCK_ADJUSTMENT, '2026'],
   ] as const) {
     const committed = new Map<string, number>();
     const transactionState = new Map(committed);

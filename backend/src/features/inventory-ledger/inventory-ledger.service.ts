@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { InventoryLedger } from './inventory-ledger.entity';
 
-export type InventoryLedgerEntry = Omit<InventoryLedger, keyof import('../../common/audit.entity').AuditEntity | 'inventoryLedgerId' | 'tenant' | 'location' | 'product' | 'createdByUser'>;
+export type InventoryLedgerEntry = Omit<InventoryLedger, keyof import('../../common/audit.entity').AuditEntity | 'inventoryLedgerId' | 'tenant' | 'location' | 'product' | 'createdByUser' | 'reversalOfLedger' | 'inventoryAdjustmentReason'>;
 
 @Injectable()
 export class InventoryLedgerService {

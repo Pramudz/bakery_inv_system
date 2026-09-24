@@ -1,11 +1,43 @@
 import { ConflictException, Injectable } from '@nestjs/common';
-import { checked, multiply, units } from '../../common/inventory-decimal';
+import { checked, divide4, multiply, units } from '../../common/inventory-decimal';
 import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
 import { EntityManager } from 'typeorm';
 import { InventoryBalance } from './inventory-balance.entity';
 
 @Injectable()
 export class InventoryBalanceService {
+  async lock(manager: EntityManager, tenantId: number, locationId: number, productId: number) {
+    return manager.getRepository(InventoryBalance).createQueryBuilder('balance')
+      .setLock('pessimistic_write')
+      .where('balance.tenantId = :tenantId AND balance.locationId = :locationId AND balance.productId = :productId', { tenantId, locationId, productId })
+      .getOne();
+  }
+
+  adjustmentSnapshot(balance: Pick<InventoryBalance, 'quantityOnHand' | 'averageCost'> | null, quantity: string, unitCost: string, direction: 'IN' | 'OUT') {
+    const before = units(balance?.quantityOnHand ?? '0');
+    const averageBefore = units(balance?.averageCost ?? '0');
+    const magnitude = units(quantity);
+    const cost = units(unitCost);
+    if (magnitude <= 0n || cost < 0n) throw new ConflictException('Adjustment quantity and cost are invalid.');
+    const after = direction === 'IN' ? before + magnitude : before - magnitude;
+    let averageAfter = averageBefore;
+    if (direction === 'IN' && cost !== averageBefore) {
+      averageAfter = before <= 0n ? cost : units(divide4(multiply(before, averageBefore) + multiply(magnitude, cost), after));
+    }
+    return {
+      quantityBefore: checked(before), quantityAfter: checked(after),
+      averageCostBefore: checked(averageBefore), averageCostAfter: checked(averageAfter),
+      movementValue: checked(multiply(magnitude, cost)), createsNegativeStock: after < 0n,
+    };
+  }
+
+  async applyAdjustment(manager: EntityManager, balance: InventoryBalance | null, scope: { tenantId: number; locationId: number; productId: number }, snapshot: ReturnType<InventoryBalanceService['adjustmentSnapshot']>, now: Date) {
+    const repository = manager.getRepository(InventoryBalance);
+    const row = balance ?? repository.create(scope);
+    Object.assign(row, { quantityOnHand: snapshot.quantityAfter, averageCost: snapshot.averageCostAfter, lastMovementAt: now });
+    return repository.save(row);
+  }
+
   reversalSnapshot(balance: Pick<InventoryBalance, 'quantityOnHand' | 'averageCost'>, original: InventoryLedger, exact: boolean, keepAverageAtZero = false) {
     const before = units(balance.quantityOnHand), average = units(balance.averageCost);
     const quantity = units(original.quantityIn), value = units(original.movementValue);

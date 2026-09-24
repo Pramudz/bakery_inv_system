@@ -2401,3 +2401,106 @@ button {
   .grn-reversal-page .direct-grn-actions { gap: 8px; }
   .grn-reversal-page .direct-grn-actions .btn { min-width: 0; }
 }
+.adjustment-list-toolbar,
+.adjustment-reason-toolbar {
+  display: grid;
+  grid-template-columns: minmax(230px, 2fr) repeat(6, minmax(130px, 1fr));
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.adjustment-reason-toolbar {
+  grid-template-columns: minmax(260px, 2fr) repeat(3, minmax(150px, 1fr));
+}
+
+.adjustment-header-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.adjustment-policy-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f4f7fb;
+  color: #4d5b70;
+}
+
+.adjustment-lines-table {
+  width: 100%;
+  min-width: 1380px;
+  border-collapse: collapse;
+}
+
+.adjustment-lines-table th,
+.adjustment-lines-table td {
+  padding: 10px;
+  border-bottom: 1px solid #dfe3e8;
+  vertical-align: top;
+  text-align: left;
+}
+
+.adjustment-lines-table th {
+  color: #64748b;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.adjustment-lines-table .control {
+  min-width: 105px;
+}
+
+.direct-product-results button.active,
+.direct-product-results button[aria-selected="true"] {
+  background: #e8f0ff;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.reason-system-badge {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #edf1f6;
+  color: #42526a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reason-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.reason-form .error {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1200px) {
+  .adjustment-list-toolbar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .adjustment-reason-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
+  body:has(.inventory-adjustments-page) { min-width: 0; }
+  body:has(.inventory-adjustments-page) .sidebar { display: none; }
+  body:has(.inventory-adjustments-page) .content { padding: 22px; }
+  body:has(.inventory-adjustments-page) .topbar { padding: 0 16px; }
+}
+
+@media (max-width: 760px) {
+  .adjustment-list-toolbar,
+  .adjustment-reason-toolbar,
+  .adjustment-header-fields,
+  .reason-form { grid-template-columns: 1fr; }
+  .adjustment-policy-note { display: block; }
+  .adjustment-policy-note span { display: block; margin-top: 6px; }
+  .adjustment-page .direct-grn-actions { flex-wrap: wrap; }
+  .adjustment-page .direct-grn-actions .btn { flex: 1 1 150px; }
+}

@@ -8,7 +8,7 @@ import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 const MODULES = [
   ['MASTER_DATA', 'Master Data'], ['PRODUCT', 'Products'], ['SUPPLIER', 'Suppliers'],
   ['LOCATION', 'Locations'], ['PRICING', 'Pricing'], ['USER_MANAGEMENT', 'User Management'],
-  ['PURCHASING', 'Purchasing' ],['CUSTOMER', 'Customer' ]
+  ['PURCHASING', 'Purchasing'], ['INVENTORY', 'Inventory'], ['CUSTOMER', 'Customer']
 ] as const;
 const PERMISSIONS = [
   ['MASTER_DATA', 'CATEGORY'], ['MASTER_DATA', 'BRAND'], ['MASTER_DATA', 'UNIT'], ['MASTER_DATA', 'ATTRIBUTE'], ['MASTER_DATA', 'IDENTIFIER_TYPE'],
@@ -44,6 +44,9 @@ export class AuthorizationCatalogService implements OnModuleInit {
     const purchasing = byCode.get('PURCHASING')!;
     const purchasingPermissions = ['PURCHASE_ORDER_VIEW','PURCHASE_ORDER_CREATE','PURCHASE_ORDER_UPDATE','PURCHASE_ORDER_APPROVE','PURCHASE_ORDER_CANCEL','GRN_VIEW','GRN_CREATE','GRN_UPDATE','GRN_POST','GRN_CANCEL','GRN_REVERSE'];
     for (const code of purchasingPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: purchasing.moduleId, code, name: code.replace(/_/g,' ').toLowerCase(), isActive: true }));
+    const inventory = byCode.get('INVENTORY')!;
+    const inventoryPermissions = ['INVENTORY_ADJUSTMENT_VIEW', 'INVENTORY_ADJUSTMENT_CREATE', 'INVENTORY_ADJUSTMENT_UPDATE', 'INVENTORY_ADJUSTMENT_POST', 'INVENTORY_ADJUSTMENT_CANCEL', 'INVENTORY_ADJUSTMENT_REASON_MANAGE', 'INVENTORY_OPENING_POST'];
+    for (const code of inventoryPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: inventory.moduleId, code, name: code.replace(/_/g, ' ').toLowerCase(), isActive: true }));
     const tenantProfilePermission = 'TENANT_PROFILE_UPDATE';
     const masterData = byCode.get('MASTER_DATA')!;
     if (!await permissions.findOneBy({ code: tenantProfilePermission })) await permissions.save(permissions.create({ moduleId: masterData.moduleId, code: tenantProfilePermission, name: 'Update own tenant profile', description: 'Update the authenticated tenant company profile and logo.', isActive: true }));

@@ -40,6 +40,7 @@ import { InventoryLedgerModule } from './features/inventory-ledger/inventory-led
 import { PurchaseOrdersModule } from './features/purchase-orders/purchase-orders.module';
 import { ProductSupplierUnitsModule } from './features/product-supplier-units/product-supplier-units.module';
 import { PriceListItemDiscountModule } from './features/price-list-item-discounts/price-list-item-discounts.module';
+import { InventoryAdjustmentsModule } from './features/inventory-adjustments/inventory-adjustments.module';
 
 
 @Module({
@@ -71,6 +72,7 @@ import { PriceListItemDiscountModule } from './features/price-list-item-discount
     InventoryBalanceModule,
     InventoryLedgerModule,
     InventoryAgeLayerModule,
+    InventoryAdjustmentsModule,
     AuthModule,
     TenantsModule,
     UsersModule,

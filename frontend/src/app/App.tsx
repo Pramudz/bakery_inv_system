@@ -48,6 +48,13 @@ const tenantGroups = [
     ],
   },
   {
+    title: "Inventory",
+    items: [
+      ["Inventory Adjustments", "/inventory/adjustments"],
+      ["Adjustment Reasons", "/inventory/adjustment-reasons"],
+    ],
+  },
+  {
     title: "Locations",
     items: [["Locations", "/locations"]],
   },
@@ -83,6 +90,8 @@ const moduleForPath: Record<string, string> = {
   "/purchase-orders": "PURCHASING",
   "/goods-receipts": "PURCHASING",
   "/goods-receipts/reverse": "PURCHASING",
+  "/inventory/adjustments": "INVENTORY",
+  "/inventory/adjustment-reasons": "INVENTORY",
 };
 
 const viewPermissionForPath: Record<string, string> = {
@@ -106,6 +115,8 @@ const viewPermissionForPath: Record<string, string> = {
   "/purchase-orders": "PURCHASE_ORDER_VIEW",
   "/goods-receipts": "GRN_VIEW",
   "/goods-receipts/reverse": "GRN_REVERSE",
+  "/inventory/adjustments": "INVENTORY_ADJUSTMENT_VIEW",
+  "/inventory/adjustment-reasons": "INVENTORY_ADJUSTMENT_VIEW",
 };
 
 export default function App() {
@@ -142,7 +153,9 @@ export default function App() {
         : group.items,
   }));
   const title =
-    (location.pathname.startsWith("/goods-receipts/")
+    (location.pathname.startsWith("/inventory/adjustments/")
+      ? "Inventory Adjustments"
+      : location.pathname.startsWith("/goods-receipts/")
       ? "Goods Receipts"
       : location.pathname.startsWith("/purchase-orders/") ? "Purchase Orders"
       : (

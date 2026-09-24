@@ -34,6 +34,9 @@ import { PurchaseOrderScreen } from "../features/purchasing/pages/PurchaseOrderS
 import { GoodsReceiptsPage } from "../features/purchasing/pages/GoodsReceiptsPage";
 import { GoodsReceiptScreen } from "../features/purchasing/pages/GoodsReceiptScreen";
 import { GoodsReceiptReversalScreen } from "../features/purchasing/pages/GoodsReceiptReversalScreen";
+import { InventoryAdjustmentsPage } from "../features/inventory-adjustments/pages/InventoryAdjustmentsPage";
+import { InventoryAdjustmentScreen } from "../features/inventory-adjustments/pages/InventoryAdjustmentScreen";
+import { InventoryAdjustmentReasonsPage } from "../features/inventory-adjustments/pages/InventoryAdjustmentReasonsPage";
 
 const tenantChildren = [
   { path: "my-tenant", element: <TenantProfilePage /> },
@@ -66,6 +69,11 @@ const tenantChildren = [
   { path: "goods-receipts/po/new", element: <GoodsReceiptScreen mode="create-po-based" /> },
   { path: "goods-receipts/:id/view", element: <GoodsReceiptScreen mode="view" /> },
   { path: "goods-receipts/:id/edit", element: <GoodsReceiptScreen mode="edit" /> },
+  { path: "inventory/adjustments", element: <InventoryAdjustmentsPage /> },
+  { path: "inventory/adjustments/new", element: <InventoryAdjustmentScreen mode="create" /> },
+  { path: "inventory/adjustments/:id", element: <InventoryAdjustmentScreen mode="view" /> },
+  { path: "inventory/adjustments/:id/edit", element: <InventoryAdjustmentScreen mode="edit" /> },
+  { path: "inventory/adjustment-reasons", element: <InventoryAdjustmentReasonsPage /> },
 ];
 
 export const router = createBrowserRouter([
