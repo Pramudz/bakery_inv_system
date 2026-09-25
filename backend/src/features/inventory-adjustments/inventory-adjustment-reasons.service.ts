@@ -13,6 +13,7 @@ export const SYSTEM_ADJUSTMENT_REASONS = [
   ['INVENTORY_CORRECTION', 'Inventory Correction', 'BOTH', 'CURRENT_WAVG'],
   ['CYCLE_RECONCILIATION', 'Cycle Reconciliation', 'BOTH', 'CURRENT_WAVG'],
   ['OPENING_INVENTORY', 'Opening Inventory', 'IN', 'MANUAL_REQUIRED'],
+  ['ADJUSTMENT_CORRECTION', 'Adjustment Correction', 'BOTH', 'CURRENT_WAVG'],
   ['OTHER', 'Other', 'BOTH', 'CURRENT_WAVG'],
 ] as const;
 

@@ -31,6 +31,27 @@ export class InventoryBalanceService {
     };
   }
 
+  inboundValueSnapshot(balance: Pick<InventoryBalance, 'quantityOnHand' | 'averageCost'> | null, quantity: string, movementValue: string) {
+    const before = units(balance?.quantityOnHand ?? '0');
+    const averageBefore = units(balance?.averageCost ?? '0');
+    const magnitude = units(quantity);
+    const value = units(movementValue);
+    if (magnitude <= 0n || value < 0n) throw new ConflictException('Inbound quantity and value are invalid.');
+    if (averageBefore < 0n || (before > 0n && (balance?.averageCost == null || averageBefore === 0n)))
+      throw new ConflictException('Existing positive stock has no usable WAVG.');
+    const after = before + magnitude;
+    if (after <= 0n) throw new ConflictException('Inbound movement must result in positive stock.');
+    const unitCost = divide4(value, magnitude);
+    const averageAfter = before <= 0n
+      ? units(unitCost)
+      : units(divide4(multiply(before, averageBefore) + value, after));
+    return {
+      quantityBefore: checked(before), quantityAfter: checked(after),
+      averageCostBefore: checked(averageBefore), averageCostAfter: checked(averageAfter),
+      unitCost, movementValue: checked(value), createsNegativeStock: false,
+    };
+  }
+
   async applyAdjustment(manager: EntityManager, balance: InventoryBalance | null, scope: { tenantId: number; locationId: number; productId: number }, snapshot: ReturnType<InventoryBalanceService['adjustmentSnapshot']>, now: Date) {
     const repository = manager.getRepository(InventoryBalance);
     const row = balance ?? repository.create(scope);

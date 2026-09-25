@@ -10,7 +10,8 @@
     "migration:run": "npm run build && typeorm migration:run -d dist/data-source.js",
     "test": "npm run build && node --test dist/features/**/*.spec.js",
     "test:grn:mysql": "npm run build && node --test dist/features/goods-receipts/goods-receipt-reversal.mysql.js",
-    "test:adjustments:mysql": "npm run build && node --test dist/features/inventory-adjustments/inventory-adjustments.mysql.js"
+    "test:adjustments:mysql": "npm run build && node --test dist/features/inventory-adjustments/inventory-adjustments.mysql.js",
+    "test:conversions:mysql": "npm run build && node --test dist/features/inventory-conversions/inventory-conversions.mysql.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",

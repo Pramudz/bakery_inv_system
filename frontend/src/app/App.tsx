@@ -51,6 +51,7 @@ const tenantGroups = [
     title: "Inventory",
     items: [
       ["Inventory Adjustments", "/inventory/adjustments"],
+      ["Value Adjustments / Conversions", "/inventory/value-adjustments"],
       ["Adjustment Reasons", "/inventory/adjustment-reasons"],
     ],
   },
@@ -91,6 +92,7 @@ const moduleForPath: Record<string, string> = {
   "/goods-receipts": "PURCHASING",
   "/goods-receipts/reverse": "PURCHASING",
   "/inventory/adjustments": "INVENTORY",
+  "/inventory/value-adjustments": "INVENTORY",
   "/inventory/adjustment-reasons": "INVENTORY",
 };
 
@@ -116,6 +118,7 @@ const viewPermissionForPath: Record<string, string> = {
   "/goods-receipts": "GRN_VIEW",
   "/goods-receipts/reverse": "GRN_REVERSE",
   "/inventory/adjustments": "INVENTORY_ADJUSTMENT_VIEW",
+  "/inventory/value-adjustments": "INVENTORY_VALUE_ADJUSTMENT_VIEW",
   "/inventory/adjustment-reasons": "INVENTORY_ADJUSTMENT_VIEW",
 };
 
@@ -153,7 +156,9 @@ export default function App() {
         : group.items,
   }));
   const title =
-    (location.pathname.startsWith("/inventory/adjustments/")
+    (location.pathname.startsWith("/inventory/value-adjustments/")
+      ? "Value Adjustments / Conversions"
+      : location.pathname.startsWith("/inventory/adjustments/")
       ? "Inventory Adjustments"
       : location.pathname.startsWith("/goods-receipts/")
       ? "Goods Receipts"

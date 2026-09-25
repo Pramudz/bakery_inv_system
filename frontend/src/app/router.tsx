@@ -37,6 +37,8 @@ import { GoodsReceiptReversalScreen } from "../features/purchasing/pages/GoodsRe
 import { InventoryAdjustmentsPage } from "../features/inventory-adjustments/pages/InventoryAdjustmentsPage";
 import { InventoryAdjustmentScreen } from "../features/inventory-adjustments/pages/InventoryAdjustmentScreen";
 import { InventoryAdjustmentReasonsPage } from "../features/inventory-adjustments/pages/InventoryAdjustmentReasonsPage";
+import { InventoryConversionsPage } from "../features/inventory-conversions/pages/InventoryConversionsPage";
+import { InventoryConversionScreen } from "../features/inventory-conversions/pages/InventoryConversionScreen";
 
 const tenantChildren = [
   { path: "my-tenant", element: <TenantProfilePage /> },
@@ -74,6 +76,10 @@ const tenantChildren = [
   { path: "inventory/adjustments/:id", element: <InventoryAdjustmentScreen mode="view" /> },
   { path: "inventory/adjustments/:id/edit", element: <InventoryAdjustmentScreen mode="edit" /> },
   { path: "inventory/adjustment-reasons", element: <InventoryAdjustmentReasonsPage /> },
+  { path: "inventory/value-adjustments", element: <InventoryConversionsPage /> },
+  { path: "inventory/value-adjustments/new", element: <InventoryConversionScreen mode="create" /> },
+  { path: "inventory/value-adjustments/:id", element: <InventoryConversionScreen mode="view" /> },
+  { path: "inventory/value-adjustments/:id/edit", element: <InventoryConversionScreen mode="edit" /> },
 ];
 
 export const router = createBrowserRouter([
