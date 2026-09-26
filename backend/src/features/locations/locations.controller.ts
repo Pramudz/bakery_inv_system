@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { LocationService } from './locations.service';
 import { CreateLocationDto } from './dto/create-locations.dto';
 import { UpdateLocationDto } from './dto/update-locations.dto';
@@ -15,8 +15,23 @@ export class LocationController {
 
   @Get()
   @RequirePermission('LOCATION_VIEW')
-  findAll(@CurrentUser() user: AuthPrincipal) {
-    return this.service.findAll(user.tenantId);
+  findAll(
+    @CurrentUser() user: AuthPrincipal,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+  ) {
+    if (!page && !limit && search === undefined && status === undefined) {
+      return this.service.findAll(user.tenantId);
+    }
+    return this.service.findPage(
+      user.tenantId,
+      Number(page || 1),
+      Number(limit || 20),
+      search || '',
+      status || '',
+    );
   }
 
   @Get(':id')
@@ -41,5 +56,11 @@ export class LocationController {
   @RequirePermission('LOCATION_DEACTIVATE')
   deactivate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthPrincipal) {
     return this.service.deactivate(id, user.tenantId);
+  }
+
+  @Patch(':id/activate')
+  @RequirePermission('LOCATION_UPDATE')
+  activate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthPrincipal) {
+    return this.service.activate(id, user.tenantId);
   }
 }

@@ -57,7 +57,7 @@ export class TenantAuthGuard implements CanActivate {
       throw new UnauthorizedException('User is inactive.');
     }
 
-    if (!session.user.tenant?.tenantIsActive) {
+    if (!session.user.tenant?.isActive) {
       throw new UnauthorizedException('Tenant is inactive.');
     }
 

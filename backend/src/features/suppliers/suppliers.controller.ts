@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { SupplierService } from './suppliers.service';
 import { CreateSupplierDto } from './dto/create-suppliers.dto';
 import { UpdateSupplierDto } from './dto/update-suppliers.dto';
@@ -15,8 +15,23 @@ export class SupplierController {
 
   @Get()
   @RequirePermission('SUPPLIER_VIEW')
-  findAll(@CurrentUser() user: AuthPrincipal) {
-    return this.service.findAll(user.tenantId);
+  findAll(
+    @CurrentUser() user: AuthPrincipal,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+  ) {
+    if (!page && !limit && search === undefined && status === undefined) {
+      return this.service.findAll(user.tenantId);
+    }
+    return this.service.findPage(
+      user.tenantId,
+      Number(page || 1),
+      Number(limit || 20),
+      search || '',
+      status || '',
+    );
   }
 
   @Get(':id')

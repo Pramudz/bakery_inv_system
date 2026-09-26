@@ -15,12 +15,9 @@ import { CategoriesPage } from "../features/categories/pages/CategoriesPage";
 import { SuppliersPage } from "../features/suppliers/pages/SuppliersPage";
 import { LocationsPage } from "../features/locations/pages/LocationsPage";
 import { ProductsPage } from "../features/products/pages/ProductsPage";
-import { ProductSuppliersPage } from "../features/product-suppliers/pages/ProductSuppliersPage";
-import { ProductCostingPage } from "../features/product-costing/pages/ProductCostingPage";
 import { BrandsPage } from "../features/brands/pages/BrandsPage";
 import { IdentifierTypesPage } from "../features/identifier-types/pages/IdentifierTypesPage";
 import { ProductIdentifiersPage } from "../features/product-identifiers/pages/ProductIdentifiersPage";
-import { ProductLocationsPage } from "../features/product-locations/pages/ProductLocationsPage";
 import { AttributesPage } from "../features/attributes/pages/AttributesPage";
 import { ProductAttributesPage } from "../features/product-attributes/pages/ProductAttributesPage";
 import { PriceListsPage } from "../features/price-lists/pages/PriceListsPage";
@@ -33,12 +30,15 @@ import { UnitsPage } from "../features/units/pages/UnitsPage";
 import { ProductUnitsPage } from "../features/product-units/pages/ProductUnitsPage";
 import { UserSessionsPage } from "../features/user-sessions/pages/UserSessionsPage";
 import { PurchaseOrdersPage } from "../features/purchasing/pages/PurchaseOrdersPage";
+import { PurchaseOrderScreen } from "../features/purchasing/pages/PurchaseOrderScreen";
 import { GoodsReceiptsPage } from "../features/purchasing/pages/GoodsReceiptsPage";
 import { CustomersPage } from "../features/customers/pages/CustomersPage";
 import { BillingPage } from "../features/sales/pages/BillingPage";
 import { RefundsPage } from "../features/sales/pages/RefundsPage";
 import { PaymentMethodsPage } from "../features/sales/pages/PaymentMethodsPage";
 import { SalesPage } from "../features/sales/pages/SalesPage";
+import { GoodsReceiptScreen } from "../features/purchasing/pages/GoodsReceiptScreen";
+import { GoodsReceiptReversalScreen } from "../features/purchasing/pages/GoodsReceiptReversalScreen";
 
 const tenantChildren = [
   { path: "my-tenant", element: <TenantProfilePage /> },
@@ -47,12 +47,9 @@ const tenantChildren = [
   { path: "suppliers", element: <SuppliersPage /> },
   { path: "locations", element: <LocationsPage /> },
   { path: "products", element: <ProductsPage /> },
-  { path: "product-suppliers", element: <ProductSuppliersPage /> },
-  { path: "product-costing", element: <ProductCostingPage /> },
   { path: "brands", element: <BrandsPage /> },
   { path: "identifier-types", element: <IdentifierTypesPage /> },
   { path: "product-identifiers", element: <ProductIdentifiersPage /> },
-  { path: "product-locations", element: <ProductLocationsPage /> },
   { path: "attributes", element: <AttributesPage /> },
   { path: "product-attributes", element: <ProductAttributesPage /> },
   { path: "price-lists", element: <PriceListsPage /> },
@@ -65,12 +62,20 @@ const tenantChildren = [
   { path: "product-units", element: <ProductUnitsPage /> },
   { path: "user-sessions", element: <UserSessionsPage /> },
   { path: "purchase-orders", element: <PurchaseOrdersPage /> },
+  { path: "purchase-orders/new", element: <PurchaseOrderScreen mode="create" /> },
+  { path: "purchase-orders/:id", element: <PurchaseOrderScreen mode="view" /> },
+  { path: "purchase-orders/:id/edit", element: <PurchaseOrderScreen mode="edit" /> },
   { path: "goods-receipts", element: <GoodsReceiptsPage /> },
   { path: "customers", element: <CustomersPage /> },
   { path: "sales", element: <SalesPage /> },
   { path: "billing", element: <BillingPage /> },
   { path: "refunds", element: <RefundsPage /> },
   { path: "payment-methods", element: <PaymentMethodsPage /> },
+  { path: "goods-receipts/reverse", element: <GoodsReceiptReversalScreen /> },
+  { path: "goods-receipts/direct/new", element: <GoodsReceiptScreen mode="create-direct" /> },
+  { path: "goods-receipts/po/new", element: <GoodsReceiptScreen mode="create-po-based" /> },
+  { path: "goods-receipts/:id/view", element: <GoodsReceiptScreen mode="view" /> },
+  { path: "goods-receipts/:id/edit", element: <GoodsReceiptScreen mode="edit" /> },
 ];
 
 export const router = createBrowserRouter([

@@ -2,7 +2,8 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { DataSource, EntityManager } from 'typeorm';
 import { TenantPrincipal } from '../auth/auth.types';
 import { Customer } from '../customers/customers.entity';
-import { InventoryBalance, InventoryLedger } from '../purchasing/purchasing.entities';
+import { InventoryBalance } from '../inventory-balance/inventory-balance.entity';
+import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
 import { Location } from '../locations/locations.entity';
 import { PaymentMethod } from '../payment-methods/payment-methods.entity';
 import { Product } from '../products/products.entity';

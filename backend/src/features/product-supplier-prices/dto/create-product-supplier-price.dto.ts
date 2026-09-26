@@ -1,10 +1,28 @@
-import { IsDateString, IsInt, IsNumber, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsDateString,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+
 export class CreateProductSupplierPriceDto {
-  @IsInt() productSupplierId!: number;
-  @IsInt() productUnitId!: number;
-  @IsNumber() purchasePrice!: number;
-  @IsOptional() @IsString() @MaxLength(3) currencyCode?: string;
-  @IsNumber() minimumQuantity!: number;
-  @IsDateString() effectiveFrom!: string;
-  @IsOptional() @IsDateString() effectiveTo?: string;
+  @IsInt()
+  productSupplierUnitId!: number;
+
+  @IsNumber()
+  purchasePrice!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  currencyCode?: string;
+
+  @IsDateString()
+  effectiveFrom!: string;
+
+  @IsOptional()
+  @IsDateString()
+  effectiveTo?: string | null;
 }

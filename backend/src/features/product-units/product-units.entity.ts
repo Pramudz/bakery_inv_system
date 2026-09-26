@@ -1,10 +1,9 @@
-import { Column, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, Unique } from 'typeorm';
 import { AuditEntity } from '../../common/audit.entity';
 import { Product } from '../products/products.entity';
 import { UnitOfMeasure } from '../units/units.entity';
-import { ProductSupplier } from '../product-suppliers/product-suppliers.entity';
-import { ProductSupplierPrice } from '../product-supplier-prices/product-supplier-price.entity';
 @Entity('tbl_product_unit')
+@Unique('uq_product_unit_product_unit', ['productId', 'unitId'])
 export class ProductUnit extends AuditEntity {
   @PrimaryGeneratedColumn({name:'product_unit_id',type:'bigint'}) productUnitId!: number;
   @Column({name:'product_id',type:'bigint'}) productId!: number;
@@ -16,6 +15,4 @@ export class ProductUnit extends AuditEntity {
   @Column({name:'is_purchase_unit',default:false}) isPurchaseUnit!: boolean;
   @Column({name:'is_sales_unit',default:false}) isSalesUnit!: boolean;
   @Column({name:'is_active',default:true}) isActive!: boolean;
-  @OneToMany(() => ProductSupplier, (supplier) => supplier.purchaseUnit) purchaseProducts!: ProductSupplier[];
-  @OneToMany(() => ProductSupplierPrice, (price) => price.productUnit) supplierPrices!: ProductSupplierPrice[];
 }

@@ -4,7 +4,9 @@ import { Tenant } from '../tenants/tenant.entity';
 import { UserRole } from '../user-roles/user-roles.entity';
 import { UserSession } from '../user-sessions/user-sessions.entity';
 import { UserLocation } from '../user-locations/user-locations.entity';
-import { GoodsReceipt, InventoryLedger, PurchaseOrder } from '../purchasing/purchasing.entities';
+import { GoodsReceipt } from '../goods-receipts/goods-receipt.entity';
+import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
+import { PurchaseOrder } from '../purchase-orders/purchase-order.entity';
 
 @Entity('tbl_user')
 export class User extends AuditEntity {

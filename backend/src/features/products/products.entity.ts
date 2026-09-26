@@ -1,4 +1,4 @@
-import { Column, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn , Unique } from 'typeorm';
 import { AuditEntity } from '../../common/audit.entity';
 import { Tenant } from '../tenants/tenant.entity';
 import { Category } from '../categories/categories.entity';
@@ -10,8 +10,15 @@ import { ProductSupplier } from '../product-suppliers/product-suppliers.entity';
 import { PriceListItem } from '../price-list-items/price-list-items.entity';
 import { ProductLocation } from '../product-locations/product-locations.entity';
 import { ProductAttributes } from '../product-attributes/product-attributes.entity';
-import { GoodsReceiptLine, InventoryAgeLayer, InventoryBalance, InventoryLedger, PurchaseOrderLine } from '../purchasing/purchasing.entities';
+import { GoodsReceiptLine } from '../goods-receipts/goods-receipt-line.entity';
+import { InventoryAgeLayer } from '../inventory-age-layers/inventory-age-layer.entity';
+import { InventoryBalance } from '../inventory-balance/inventory-balance.entity';
+import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
+import { PurchaseOrderLine } from '../purchase-orders/purchase-order-line.entity';
+import { ProductImage } from '../product-images/product-image.entity';
+
 @Entity('tbl_product')
+@Unique('uq_product_tenant_sku', ['tenantId', 'sku'])
 export class Product extends AuditEntity {
   @PrimaryGeneratedColumn({name:'product_id',type:'bigint'}) productId!: number;
   @Column({name:'tenant_id',type:'bigint'}) tenantId!: number;
@@ -39,6 +46,7 @@ export class Product extends AuditEntity {
   @OneToMany(() => PriceListItem, (item) => item.product) priceListItems!: PriceListItem[];
   @OneToMany(() => ProductLocation, (location) => location.product) productLocations!: ProductLocation[];
   @OneToMany(() => ProductAttributes, (attribute) => attribute.product) productAttributes!: ProductAttributes[];
+  @OneToMany(() => ProductImage, (image) => image.product) productImages!: ProductImage[];
   @OneToMany(() => PurchaseOrderLine, (line) => line.product) purchaseOrderLines!: PurchaseOrderLine[];
   @OneToMany(() => GoodsReceiptLine, (line) => line.product) goodsReceiptLines!: GoodsReceiptLine[];
   @OneToMany(() => InventoryBalance, (balance) => balance.product) inventoryBalances!: InventoryBalance[];

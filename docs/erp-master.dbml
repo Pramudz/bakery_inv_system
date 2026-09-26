@@ -1,4 +1,5 @@
 // ERP MASTER DATABASE
+//Not a Valid Document Don't Consider this for AI tasks
 // Based on the uploaded dbdiagram design.
 // Foundation + Authentication/RBAC + Product Master + Supplier + Location + Costing.
 
