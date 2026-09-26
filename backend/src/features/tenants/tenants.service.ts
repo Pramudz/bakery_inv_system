@@ -20,6 +20,7 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { MediaStorageService } from '../../common/media-storage.service';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 import { assertSupportedIanaTimeZone, DEFAULT_TENANT_TIME_ZONE } from '../../common/business-date';
+import { ensureSystemAdjustmentReasons } from '../inventory-adjustments/inventory-adjustment-reasons.service';
 
 const DEFAULT_ADMIN_USERNAME = 'Admin';
 const DEFAULT_ADMIN_PASSWORD = 'tenantadmin@123';
@@ -83,9 +84,11 @@ export class TenantsService {
       });
 
       const savedTenant = await tenantRepository.save(tenant);
+      await ensureSystemAdjustmentReasons(manager, Number(savedTenant.tenantId));
       const defaultModules = [
         ['MASTER_DATA', 'Master Data'], ['PRODUCT', 'Products'], ['SUPPLIER', 'Suppliers'],
         ['LOCATION', 'Locations'], ['PRICING', 'Pricing'], ['USER_MANAGEMENT', 'User Management'],
+        ['INVENTORY', 'Inventory'],
       ];
       for (const [code, name] of defaultModules) {
         let module = await moduleRepository.findOneBy({ code });

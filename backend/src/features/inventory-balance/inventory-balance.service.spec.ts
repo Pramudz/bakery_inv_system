@@ -24,3 +24,24 @@ test('a new balance snapshots the first receipt cost', async () => {
   assert.equal(saved.quantityOnHand, '4');
   assert.equal(saved.averageCost, '7.5');
 });
+
+test('exact-value inbound snapshot establishes WAVG without recomputing posted value from rounded unit cost', () => {
+  const snapshot = new InventoryBalanceService().inboundValueSnapshot(null, '3.0000', '10.0000');
+  assert.equal(snapshot.unitCost, '3.3333');
+  assert.equal(snapshot.movementValue, '10.0000');
+  assert.equal(snapshot.averageCostAfter, '3.3333');
+});
+
+test('exact-value inbound snapshot recalculates WAVG from the authoritative inbound value', () => {
+  const snapshot = new InventoryBalanceService().inboundValueSnapshot({ quantityOnHand: '20.0000', averageCost: '120.0000' }, '5.0000', '400.0000');
+  assert.equal(snapshot.unitCost, '80.0000');
+  assert.equal(snapshot.quantityAfter, '25.0000');
+  assert.equal(snapshot.averageCostAfter, '112.0000');
+});
+
+test('exact-value inbound permits missing WAVG at zero stock but rejects invalid existing-stock valuation', () => {
+  assert.equal(new InventoryBalanceService().inboundValueSnapshot({ quantityOnHand: '0', averageCost: null as any }, '2', '10').averageCostAfter, '5.0000');
+  assert.throws(() => new InventoryBalanceService().inboundValueSnapshot({ quantityOnHand: '1', averageCost: null as any }, '2', '10'), /no usable WAVG/);
+  assert.throws(() => new InventoryBalanceService().inboundValueSnapshot({ quantityOnHand: '1', averageCost: '0' }, '2', '10'), /no usable WAVG/);
+  assert.throws(() => new InventoryBalanceService().inboundValueSnapshot({ quantityOnHand: '1', averageCost: '-1' }, '2', '10'), /no usable WAVG/);
+});

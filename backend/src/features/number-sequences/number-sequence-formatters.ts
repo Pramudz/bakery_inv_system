@@ -13,6 +13,18 @@ export const formatGoodsReceiptNumber = (
   nextNumber: number,
 ) => `GRN-${tenantId}-${year}-${String(nextNumber).padStart(6, '0')}`;
 
+export const formatInventoryAdjustmentNumber = (
+  tenantId: number,
+  year: string,
+  nextNumber: number,
+) => `ADJ-${tenantId}-${year}-${String(nextNumber).padStart(6, '0')}`;
+
+export const formatInventoryConversionNumber = (
+  tenantId: number,
+  year: string,
+  nextNumber: number,
+) => `IVA-${tenantId}-${year}-${String(nextNumber).padStart(6, '0')}`;
+
 export const formatSupplierCode = (nextNumber: number) =>
   `SUP-${String(nextNumber).padStart(6, '0')}`;
 

@@ -12,10 +12,14 @@ import { Tenant } from "../tenants/tenant.entity";
 import { Location } from "../locations/locations.entity";
 import { Product } from "../products/products.entity";
 import { User } from "../users/user.entity";
+import { InventoryAdjustmentReason } from "../inventory-adjustments/inventory-adjustment-reason.entity";
 @Entity("tbl_inventory_ledger")
 @Unique("uq_inventory_ledger_source_movement", ["tenantId", "sourceDocumentType", "sourceDocumentId", "sourceDocumentLineId", "movementType"])
 @Index('uq_inventory_ledger_reversal', ['reversalOfLedgerId'], { unique: true })
 export class InventoryLedger extends AuditEntity {
+  @Column({ name: 'inventory_adjustment_reason_id', type: 'bigint', nullable: true }) inventoryAdjustmentReasonId?: number | null;
+  @ManyToOne(() => InventoryAdjustmentReason, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'inventory_adjustment_reason_id' }) inventoryAdjustmentReason?: InventoryAdjustmentReason | null;
   @Column({ name: 'valuation_method', type: 'varchar', length: 40, nullable: true }) valuationMethod?: string | null;
   @Column({ name: 'original_document_value', type: 'decimal', precision: 18, scale: 4, nullable: true }) originalDocumentValue?: string | null;
   @Column({ name: 'inventory_relief_value', type: 'decimal', precision: 18, scale: 4, nullable: true }) inventoryReliefValue?: string | null;
