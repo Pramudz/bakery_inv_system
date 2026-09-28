@@ -16,6 +16,58 @@ export class CustomerService {
     });
   }
 
+  async findPage(
+    tenantId: number,
+    page: number,
+    limit: number,
+    search: string,
+    status: string,
+  ) {
+    const safePage = Math.max(1, Number.isFinite(page) ? Math.floor(page) : 1);
+    const safeLimit = [20, 50, 100].includes(limit) ? limit : 20;
+    const searchText = search.trim();
+    const query = this.repo
+      .createQueryBuilder('customer')
+      .where('customer.tenantId = :tenantId', { tenantId });
+
+    if (searchText) {
+      query.andWhere(
+        `(LOWER(customer.customerCode) LIKE LOWER(:search)
+          OR LOWER(customer.customerName) LIKE LOWER(:search)
+          OR LOWER(customer.contactName) LIKE LOWER(:search)
+          OR LOWER(customer.phone) LIKE LOWER(:search)
+          OR LOWER(customer.mobile) LIKE LOWER(:search)
+          OR LOWER(customer.email) LIKE LOWER(:search)
+          OR LOWER(customer.city) LIKE LOWER(:search))`,
+        { search: `%${searchText}%` },
+      );
+    }
+    if (status === 'active') {
+      query.andWhere('customer.isActive = :active', { active: true });
+    }
+    if (status === 'inactive') {
+      query.andWhere('customer.isActive = :active', { active: false });
+    }
+
+    const [rows, total] = await query
+      .orderBy('customer.customerName', 'ASC')
+      .addOrderBy('customer.customerId', 'ASC')
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit)
+      .getManyAndCount();
+    const items = rows.map((row) => {
+      const { tenantId: _tenantId, ...item } = row;
+      return item;
+    });
+    return {
+      items,
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+    };
+  }
+
   async findOne(id: number, tenantId: number) {
     const row = await this.repo.findOne({
       where: { customerId: id, tenantId } as any,
@@ -44,7 +96,7 @@ export class CustomerService {
       const same = await this.repo.findOne({
         where: { tenantId, customerCode: payload.customerCode } as any,
       });
-      if (same && (same as any).customerId !== id) {
+      if (same && Number(same.customerId) !== Number(id)) {
         throw new ConflictException('Code already exists for this tenant.');
       }
     }

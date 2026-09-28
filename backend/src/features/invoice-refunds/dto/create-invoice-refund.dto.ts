@@ -3,7 +3,7 @@ import { ArrayMinSize, IsArray, IsBoolean, IsInt, IsNotEmpty, IsNumber, IsOption
 
 export class CreateRefundDetailDto {
   @Type(() => Number) @IsInt() @IsPositive() invoiceDetailId!: number;
-  @Type(() => Number) @IsNumber() @IsPositive() quantity!: number;
+  @Type(() => Number) @IsInt() @IsPositive() quantity!: number;
   @IsOptional() @IsBoolean() returnToStock?: boolean;
 }
 export class CreateRefundPaymentDto {

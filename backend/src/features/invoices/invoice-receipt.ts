@@ -1,0 +1,18 @@
+import { Invoice } from './invoice.entity';
+
+export function snapshotInvoiceReceipt(invoice: Invoice) {
+  return {
+    version: 1,
+    invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate, saleType: invoice.saleType,
+    subtotal: invoice.subtotal, discountTotal: invoice.discountTotal, grandTotal: invoice.grandTotal,
+    tenderedAmount: invoice.tenderedAmount, paidAmount: invoice.paidAmount, balanceAmount: invoice.balanceAmount,
+    changeAmount: invoice.changeAmount, paymentStatus: invoice.paymentStatus,
+    customer: invoice.customer ? { customerName: invoice.customer.customerName } : null,
+    details: [...invoice.details].sort((a, b) => Number(a.invoiceDetailId) - Number(b.invoiceDetailId)).map((line) => ({
+      invoiceDetailId: line.invoiceDetailId, quantity: line.quantity, unitPrice: line.unitPrice,
+      discountAmount: line.discountAmount, netTotal: line.netTotal,
+      product: { sku: line.product.sku, productName: line.product.productName },
+    })),
+    payments: invoice.payments.map((payment) => ({ amount: payment.amount, tenderedAmount: payment.tenderedAmount, paymentMethod: { paymentMethodName: payment.paymentMethod.paymentMethodName } })),
+  };
+}

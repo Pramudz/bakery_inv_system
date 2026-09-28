@@ -20,6 +20,7 @@ const tenantGroups = [
     items: [
       ["Sales", "/sales"],
       ["Billing", "/billing"],
+      ["Pending Payments", "/pending-payments"],
       ["Refunds", "/refunds"],
       ["Payment Methods", "/payment-methods"],
     ],

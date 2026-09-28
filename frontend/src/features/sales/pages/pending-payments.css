@@ -1,0 +1,37 @@
+.pending-tabs { display:flex; gap:8px; padding:18px 20px 0; border-bottom:1px solid #e5eaf1; }
+.pending-tabs button { border:0; border-bottom:3px solid transparent; background:transparent; padding:10px 14px 14px; color:#66758a; font:inherit; font-weight:600; cursor:pointer; }
+.pending-tabs button.active { border-bottom-color:#2563eb; color:#2563eb; }
+.pending-balance { color:#a65f12; font-weight:700; white-space:nowrap; }
+.pending-empty { text-align:center; padding:40px 20px!important; color:#66758a; }
+.pending-note { margin:0; padding:16px 20px; color:#758195; font-size:12px; border-top:1px solid #edf0f4; }
+.pending-dialog { padding:0; border:1px solid #e1e7f0; border-radius:16px; width:min(560px,calc(100vw - 32px)); max-height:90vh; overflow:auto; color:#25344c; background:white; box-shadow:0 24px 80px #17243a33; }
+.pending-dialog::backdrop { background:#10213a80; }
+.pending-dialog .modal-head h2 { margin:0; }
+.pending-dialog .modal-head p { margin:4px 0 0; color:#758195; }
+.pending-fields { border:0; padding:0; margin:20px 0 0; display:grid; gap:16px; }
+.pending-due { background:#f0f5ff; padding:18px; border-radius:10px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.pending-due strong { font-size:22px; color:#245fbf; }
+.pending-after { padding-top:12px; color:#526176; }
+.pending-receipt { padding:26px; background:#fff; color:#17243a; font-size:13px; }
+.pending-receipt header { text-align:center; border-bottom:1px dashed #aeb8c5; padding-bottom:18px; }
+.pending-receipt header h3 { margin:0 0 12px; font-size:20px; }
+.pending-receipt header p { letter-spacing:.12em; }
+.pending-receipt dl { margin:18px 0; }
+.pending-receipt dl>div { display:flex; justify-content:space-between; gap:20px; padding:6px 0; }
+.pending-receipt dt { color:#66758a; }
+.pending-receipt dd { text-align:right; margin:0; overflow-wrap:anywhere; }
+.pending-receipt-totals { border-top:1px dashed #aeb8c5; padding-top:14px; }
+.pending-receipt-totals>div:last-child { font-weight:700; font-size:16px; }
+.pending-receipt-status { text-align:center; font-weight:800; padding:12px; background:#edf8f1; color:#1a7145; }
+.pending-reversed { padding:12px; margin-top:16px; border:2px solid #b42318; color:#b42318; font-weight:700; }
+.pending-receipt footer { text-align:center; line-height:1.7; font-size:11px; color:#66758a; }
+@media (max-width:600px) { .pending-dialog .modal-foot { flex-wrap:wrap; } .pending-due strong { font-size:18px; } }
+@media print {
+  body:has(.pending-receipt) > :not(.pending-dialog) { display:none!important; }
+  .pending-dialog:has(.pending-receipt) { display:block!important; position:absolute!important; inset:0 auto auto 0!important; width:80mm!important; max-height:none!important; margin:0!important; padding:0!important; border:0!important; overflow:visible!important; box-shadow:none!important; }
+  .pending-dialog::backdrop { background:transparent!important; }
+  .pending-dialog .modal-head,.pending-dialog .modal-foot { display:none!important; }
+  .pending-receipt,.pending-receipt * { visibility:visible!important; }
+  .pending-receipt { padding:4mm; font-size:10px; }
+  .pending-receipt-totals>div:last-child { font-size:12px; }
+}

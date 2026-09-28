@@ -3,6 +3,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { customersApi } from "../../customers/api/customersApi";
 import { locationsApi } from "../../locations/api/locationsApi";
 import { invoicesApi } from "../api/invoicesApi";
+import { InvoiceReceiptContent } from "./InvoiceReceiptContent";
+import { downloadInvoiceReceipt } from "./invoiceReceiptPdf";
 import { PaymentMethod, paymentMethodsApi } from "../api/paymentMethodsApi";
 
 type SaleType = "Retail" | "Wholesale";
@@ -128,6 +130,7 @@ export function BillingPage() {
   const add = (p: Product) =>
     setCart((v) => {
       const found = v.find((x) => x.code === p.code);
+      if (!((found?.qty ?? 0) + 1 <= p.stock)) return v;
       if (found) {
         const qty = found.qty + 1;
         const updated = {
@@ -326,195 +329,8 @@ export function BillingPage() {
     return () => window.removeEventListener("keydown", shortcuts);
   }, []);
   const outputReceipt = (printOnly = false) => {
-    const paidAmount = paidTotal,
-      balance = Math.max(0, total - paidAmount),
-      change = Math.max(0, paidAmount - total);
-    const escapePdf = (value: string) =>
-      value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-    const pageWidth = 226.77,
-      pageHeight = 500 + cart.length * 25;
-    let y = pageHeight - 24;
-    const commands: string[] = [];
-    const text = (
-      value: string,
-      x: number,
-      size = 6,
-      bold = false,
-      align: "left" | "center" | "right" = "left",
-      color = "0 0 0",
-    ) => {
-      const width = value.length * size * 0.6;
-      const drawX =
-        align === "center"
-          ? (pageWidth - width) / 2
-          : align === "right"
-            ? x - width
-            : x;
-      commands.push(
-        `${color} rg BT /${bold ? "F2" : "F1"} ${size} Tf ${drawX.toFixed(2)} ${y.toFixed(2)} Td (${escapePdf(value)}) Tj ET`,
-      );
-    };
-    const rule = (strong = false) => {
-      commands.push(
-        `${strong ? "0.8" : "0.35"} w [${strong ? "" : "2 2"}] 0 d 14 ${y.toFixed(2)} m 212 ${y.toFixed(2)} l S [] 0 d`,
-      );
-    };
-    text("ERP CORE BAKERY", 0, 13, true, "center");
-    y -= 15;
-    text("Main Bakery Outlet - Colombo, Sri Lanka", 0, 5.5, true, "center");
-    y -= 8;
-    text("Tel: 011 234 5678 - bakery@example.com", 0, 5, false, "center");
-    y -= 7;
-    text("Fresh bakery products made daily", 0, 5, false, "center");
-    y -= 15;
-    text("SALES INVOICE", 0, 10, true, "center");
-    y -= 13;
-    rule();
-    y -= 12;
-    text("Bill No", 14, 5);
-    text(completedInvoice?.invoiceNumber ?? "NEW INVOICE", 105, 5.5, true, "right");
-    text("Date", 119, 5);
-    text("17 Aug 2026 - 03:45 PM", 212, 5.2, true, "right");
-    y -= 11;
-    text("Cashier", 14, 5);
-    text("Counter User", 105, 5.5, true, "right");
-    text("Customer", 119, 5);
-    text(
-      (selectedCustomer?.name ?? "No customer").slice(0, 18),
-      212,
-      5.2,
-      true,
-      "right",
-    );
-    y -= 11;
-    text("Payment", 14, 5);
-    text(method, 105, 5.5, true, "right");
-    y -= 11;
-    rule();
-    y -= 12;
-    text("CODE", 14, 6, true);
-    text("ITEM NAME", 62, 6, true);
-    y -= 10;
-    text("QTY", 44, 6, true, "right");
-    text("RATE", 104, 6, true, "right");
-    text("DISCOUNT", 158, 5.5, true, "right");
-    text("AMOUNT", 212, 5.5, true, "right");
-    y -= 8;
-    rule(true);
-    y -= 13;
-    cart.forEach((item) => {
-      text(item.code, 14, 6, true);
-      text(item.name.slice(0, 25), 62, 6, true);
-      y -= 11;
-      text(item.qty.toFixed(3), 44, 6, true, "right");
-      text(unitPrice(item).toFixed(2), 104, 6, false, "right");
-      text(item.discountRs.toFixed(2), 158, 6, false, "right");
-      text(lineNet(item).toFixed(2), 212, 6, true, "right");
-      y -= 10;
-      rule();
-      y -= 12;
-    });
-    const summary = (
-      label: string,
-      value: string,
-      bold = false,
-      color = "0 0 0",
-    ) => {
-      text(label, 14, bold ? 6.5 : 5.8, bold);
-      text(value, 212, bold ? 7 : 6, bold, "right", color);
-      y -= 14;
-    };
-    summary("Items count", String(cart.reduce((n, x) => n + x.qty, 0)));
-    summary("Subtotal", `LKR ${subtotal.toFixed(2)}`);
-    summary("Total discount", `- LKR ${discount.toFixed(2)}`);
-    rule();
-    y -= 13;
-    summary("Grand Total", `LKR ${total.toFixed(2)}`, true);
-    rule();
-    y -= 13;
-    summary("Paid amount", `LKR ${paidAmount.toFixed(2)}`);
-    summary(
-      change > 0 ? "Change" : "Balance",
-      `LKR ${(change || balance).toFixed(2)}`,
-    );
-    summary("Payment method", method);
-    summary(
-      "Payment status",
-      paymentStatus,
-      true,
-      paymentStatus === "Full Paid" ? "0.05 0.5 0.2" : "0.72 0.38 0.02",
-    );
-    rule();
-    y -= 18;
-    text("Thank you for shopping with us!", 0, 7, true, "center");
-    y -= 10;
-    text(
-      "We appreciate your business and hope to see you again.",
-      0,
-      4.5,
-      false,
-      "center",
-    );
-    y -= 17;
-    rule();
-    y -= 12;
-    text(
-      "Software By: Prosinc - 07111111111",
-      0,
-      4.5,
-      false,
-      "center",
-      "0.45 0.5 0.58",
-    );
-    const content = commands.join("\n");
-    const objects = [
-      "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-      "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-      `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>\nendobj\n`,
-      `4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`,
-      "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n",
-      "6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold >>\nendobj\n",
-    ];
-    let pdf = "%PDF-1.4\n",
-      offsets = [0];
-    objects.forEach((object) => {
-      offsets.push(pdf.length);
-      pdf += object;
-    });
-    const xref = pdf.length;
-    pdf += `xref\n0 7\n0000000000 65535 f \n${offsets
-      .slice(1)
-      .map((x) => String(x).padStart(10, "0") + " 00000 n ")
-      .join(
-        "\n",
-      )}\ntrailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
-    const url = URL.createObjectURL(
-      new Blob([pdf], { type: "application/pdf" }),
-    );
-    if (printOnly) {
-      const frame = document.createElement("iframe");
-      frame.style.position = "fixed";
-      frame.style.width = "1px";
-      frame.style.height = "1px";
-      frame.style.opacity = "0";
-      frame.style.pointerEvents = "none";
-      frame.src = url;
-      frame.onload = () => {
-        frame.contentWindow?.focus();
-        frame.contentWindow?.print();
-        setTimeout(() => {
-          frame.remove();
-          URL.revokeObjectURL(url);
-        }, 60000);
-      };
-      document.body.appendChild(frame);
-      return;
-    }
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${completedInvoice?.invoiceNumber ?? "invoice"}-receipt.pdf`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (printOnly) window.print();
+    else if (completedInvoice) downloadInvoiceReceipt(completedInvoice);
   };
   const resetSale = () => {
     setComplete(false);
@@ -680,6 +496,8 @@ export function BillingPage() {
                   .map((p, index) => {
                     const quantity =
                       cart.find((x) => x.code === p.code)?.qty ?? 0;
+                    const available = Math.max(0, p.stock - quantity);
+                    const canAdd = available >= 1;
                     return (
                       <div
                         data-enter-flow
@@ -705,14 +523,16 @@ export function BillingPage() {
                         <span>
                           <strong>{p.name}</strong>
                           <small>
-                            {p.code} · {p.category} · {p.stock} available
+                            {p.code} · {p.category} · {available} available
                           </small>
                         </span>
                         <span className="product-sale-price">
                           <b>LKR {unitPrice(p).toLocaleString()}</b>
                           <small>
-                            {quantity ? `${quantity} in cart · ` : ""}Click or
-                            keyboard + / −
+                            {quantity ? `${quantity} in cart · ` : ""}
+                            {canAdd
+                              ? "Click or keyboard + / −"
+                              : "No more available"}
                           </small>
                         </span>
                       </div>
@@ -1102,114 +922,7 @@ export function BillingPage() {
               {completedInvoice?.invoiceNumber} · {saleType} · {method} · LKR{" "}
               {total.toLocaleString()}
             </p>
-            <div className="receipt-preview">
-              <div className="receipt-business">
-                <h3>ERP CORE BAKERY</h3>
-                <strong>Main Bakery Outlet · Colombo, Sri Lanka</strong>
-                <small>Tel: 011 234 5678 · bakery@example.com</small>
-                <small>Fresh bakery products made daily</small>
-                <h4>SALES INVOICE</h4>
-              </div>
-              <div className="receipt-meta">
-                <div>
-                  <span>Bill No</span>
-                  <b>{completedInvoice?.invoiceNumber}</b>
-                </div>
-                <div>
-                  <span>Date</span>
-                  <b>17 Aug 2026 · 03:45 PM</b>
-                </div>
-                <div>
-                  <span>Cashier</span>
-                  <b>Counter User</b>
-                </div>
-                <div>
-                  <span>Customer</span>
-                  <b>{selectedCustomer?.name ?? "No customer selected"}</b>
-                </div>
-                <div>
-                  <span>Sale Type</span>
-                  <b>{saleType}</b>
-                </div>
-                <div>
-                  <span>Payment</span>
-                  <b>{method}</b>
-                </div>
-              </div>
-              <div className="receipt-two-line-head">
-                <div className="receipt-identity-row">
-                  <span>Code</span>
-                  <span>Item Name</span>
-                </div>
-                <div className="receipt-values-row">
-                  <span>Qty</span>
-                  <span>Rate</span>
-                  <span>Discount</span>
-                  <span>Amount</span>
-                </div>
-              </div>
-              {cart.map((x) => (
-                <div className="receipt-two-line-item" key={x.code}>
-                  <div className="receipt-identity-row">
-                    <b>{x.code}</b>
-                    <strong>{x.name}</strong>
-                  </div>
-                  <div className="receipt-values-row">
-                    <b>{x.qty.toFixed(3)}</b>
-                    <span>{unitPrice(x).toFixed(2)}</span>
-                    <span>{x.discountRs.toFixed(2)}</span>
-                    <strong>{lineNet(x).toFixed(2)}</strong>
-                  </div>
-                </div>
-              ))}
-              <div className="receipt-calculation">
-                <div>
-                  <span>Items count</span>
-                  <b>{cart.reduce((n, x) => n + x.qty, 0)}</b>
-                </div>
-                <div>
-                  <span>Subtotal</span>
-                  <b>LKR {subtotal.toLocaleString()}</b>
-                </div>
-                <div>
-                  <span>Total discount</span>
-                  <b>- LKR {discount.toLocaleString()}</b>
-                </div>
-                <div className="receipt-total">
-                  <span>Grand Total</span>
-                  <b>LKR {total.toLocaleString()}</b>
-                </div>
-                <div>
-                  <span>Paid amount</span>
-                  <b>LKR {paidTotal.toLocaleString()}</b>
-                </div>
-                <div>
-                  <span>{paidTotal > total ? "Change" : "Balance"}</span>
-                  <b>LKR {Math.abs(total - paidTotal).toLocaleString()}</b>
-                </div>
-                <div>
-                  <span>Payment method</span>
-                  <b>{method}</b>
-                </div>
-                <div>
-                  <span>Payment status</span>
-                  <b
-                    className={`receipt-status ${paymentStatus.toLowerCase()}`}
-                  >
-                    {paymentStatus}
-                  </b>
-                </div>
-              </div>
-              <div className="receipt-thanks">
-                <strong>Thank you for shopping with us!</strong>
-                <small>
-                  We appreciate your business and hope to see you again.
-                </small>
-              </div>
-              <div className="receipt-software">
-                Software By: <b>Prosinc</b> · 07111111111
-              </div>
-            </div>
+            {completedInvoice && <InvoiceReceiptContent invoice={completedInvoice} />}
             <div className="modal-foot receipt-actions">
               <button
                 autoFocus

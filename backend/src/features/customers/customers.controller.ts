@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { CustomerService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customers.dto';
 import { UpdateCustomerDto } from './dto/update-customers.dto';
@@ -15,8 +15,9 @@ export class CustomerController {
 
   @Get()
   @RequirePermission('CUSTOMER_VIEW')
-  findAll(@CurrentUser() user: AuthPrincipal) {
-    return this.service.findAll(user.tenantId);
+  findAll(@CurrentUser() user: AuthPrincipal, @Query('page') page?: string, @Query('limit') limit?: string, @Query('search') search?: string, @Query('status') status?: string) {
+    if (!page && !limit && search === undefined && status === undefined) return this.service.findAll(user.tenantId);
+    return this.service.findPage(user.tenantId, Number(page || 1), Number(limit || 20), search || '', status || '');
   }
 
   @Get(':id')

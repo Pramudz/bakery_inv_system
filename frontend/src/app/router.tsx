@@ -34,6 +34,7 @@ import { PurchaseOrderScreen } from "../features/purchasing/pages/PurchaseOrderS
 import { GoodsReceiptsPage } from "../features/purchasing/pages/GoodsReceiptsPage";
 import { CustomersPage } from "../features/customers/pages/CustomersPage";
 import { BillingPage } from "../features/sales/pages/BillingPage";
+import { PendingPaymentsPage } from "../features/sales/pages/PendingPaymentsPage";
 import { RefundsPage } from "../features/sales/pages/RefundsPage";
 import { PaymentMethodsPage } from "../features/sales/pages/PaymentMethodsPage";
 import { SalesPage } from "../features/sales/pages/SalesPage";
@@ -74,6 +75,7 @@ const tenantChildren = [
   { path: "customers", element: <CustomersPage /> },
   { path: "sales", element: <SalesPage /> },
   { path: "billing", element: <BillingPage /> },
+  { path: "pending-payments", element: <PendingPaymentsPage /> },
   { path: "refunds", element: <RefundsPage /> },
   { path: "payment-methods", element: <PaymentMethodsPage /> },
   { path: "goods-receipts/reverse", element: <GoodsReceiptReversalScreen /> },

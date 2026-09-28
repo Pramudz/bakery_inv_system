@@ -1,0 +1,18 @@
+.original-bill-dialog { width:min(480px,calc(100vw - 24px)); max-height:90vh; padding:0; border:1px solid #e1e7f0; border-radius:16px; background:#fff; color:#25344c; overflow:auto; box-shadow:0 24px 80px #17243a33; }
+.original-bill-dialog::backdrop { background:#10213a80; }
+.original-bill-dialog .receipt-preview { max-width:calc(100% - 32px); box-sizing:border-box; }
+.original-bill-dialog .modal-head h2 { margin:0; }
+.original-bill-dialog .modal-head p { margin:4px 0 0; }
+.original-bill-dialog .modal-foot { flex-wrap:wrap; }
+.original-bill-message { margin:16px 20px; font-size:12px; color:#66758a; }
+@media print {
+  body:has(.pos-success .receipt-preview) .modal-bg { position:absolute!important; inset:0 auto auto 0!important; display:block!important; background:none!important; backdrop-filter:none!important; padding:0!important; }
+  body:has(.pos-success .receipt-preview) .pos-success { width:80mm!important; max-width:none!important; max-height:none!important; overflow:visible!important; margin:0!important; padding:0!important; border:0!important; box-shadow:none!important; }
+  .pos-success:has(.receipt-preview) > :not(.receipt-preview) { display:none!important; }
+  .pos-success .receipt-preview { position:static!important; width:80mm!important; margin:0!important; }
+  body:has(.original-bill-dialog[open]) > :not(.original-bill-dialog) { display:none!important; }
+  .original-bill-dialog[open] { position:absolute!important; inset:0 auto auto 0!important; width:80mm!important; max-width:none!important; max-height:none!important; margin:0!important; padding:0!important; border:0!important; overflow:visible!important; box-shadow:none!important; }
+  .original-bill-dialog::backdrop { background:transparent!important; }
+  .original-bill-dialog .modal-head,.original-bill-dialog .modal-foot,.original-bill-message { display:none!important; }
+  .original-bill-dialog .receipt-preview { max-width:none!important; }
+}

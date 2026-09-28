@@ -1929,10 +1929,7 @@ button {
 .payment-method-check { display:flex; align-items:center; gap:9px; padding-top:4px; color:#526176; font-size:12px; }
 .payment-method-check input { width:16px; height:16px; accent-color:#2864c0; }
 .payment-method-actions { display:flex; justify-content:flex-end; align-items:center; gap:8px; }
-.payment-method-actions .btn { display:inline-flex; justify-content:center; align-items:center; height:31px; margin:0; }
-.payment-method-actions .btn-edit-soft { width:64px; }
-.payment-method-actions .btn-success-soft,
-.payment-method-actions .btn-danger-soft { width:92px; }
+.payment-method-actions .btn { display:inline-flex; justify-content:center; align-items:center; flex-shrink:0; width:112px; min-height:32px; margin:0; }
 .pos-workspace .billing-location-section { order:1; }
 .pos-workspace .pos-product-picker { order:2; }
 .pos-workspace .sale-type-section { order:3; }

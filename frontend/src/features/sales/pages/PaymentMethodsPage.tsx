@@ -1,13 +1,23 @@
 import { FormEvent, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PaymentMethod, paymentMethodsApi } from '../api/paymentMethodsApi';
+import './sales-history.css';
 
 export function PaymentMethodsPage() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<PaymentMethod | null>(null);
   const [paymentMethodName, setPaymentMethodName] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
   const methods = useQuery({ queryKey: ['payment-methods'], queryFn: paymentMethodsApi.list });
+  const rows = methods.data ?? [];
+  const totalPages = Math.max(1, Math.ceil(rows.length / limit));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = rows.slice((currentPage - 1) * limit, currentPage * limit);
+  const visiblePages = [...new Set([1, currentPage - 1, currentPage, currentPage + 1, totalPages])]
+    .filter((number) => number >= 1 && number <= totalPages)
+    .sort((a, b) => a - b);
   const close = () => { setOpen(false); setEditing(null); setPaymentMethodName(''); save.reset(); };
   const save = useMutation({
     mutationFn: () => editing
@@ -29,13 +39,29 @@ export function PaymentMethodsPage() {
       <tbody>
         {methods.isLoading && <tr><td colSpan={5}>Loading...</td></tr>}
         {methods.isError && <tr><td colSpan={5}>Unable to load payment methods.</td></tr>}
-        {(methods.data ?? []).map((method) => <tr key={method.paymentMethodId}>
+        {!methods.isLoading && !methods.isError && !rows.length && <tr><td colSpan={5}><div className="empty">No payment methods found.</div></td></tr>}
+        {pagedRows.map((method) => <tr key={method.paymentMethodId}>
           <td>{method.paymentMethodId}</td><td>{method.tenantId}</td><td><strong>{method.paymentMethodName}</strong></td>
           <td><span className={method.isActive ? 'status status-on' : 'status status-off'}><i /> {method.isActive ? 'Active' : 'Inactive'}</span></td>
           <td className="right actions"><div className="payment-method-actions"><button className="btn btn-edit-soft" onClick={() => edit(method)}>Edit</button><button className={method.isActive ? 'btn btn-danger-soft' : 'btn btn-success-soft'} disabled={changeStatus.isPending} onClick={() => changeStatus.mutate({ id: method.paymentMethodId, active: !method.isActive })}>{method.isActive ? 'Deactivate' : 'Activate'}</button></div></td>
         </tr>)}
       </tbody>
-    </table></div>
+    </table>
+      <div className="toolbar sales-history-pagination">
+        <span aria-live="polite">{methods.isLoading ? 'Loading payment methods...' : `Showing ${rows.length ? (currentPage - 1) * limit + 1 : 0}–${Math.min(currentPage * limit, rows.length)} of ${rows.length} payment methods`}</span>
+        <nav className="sales-history-page-controls" aria-label="Payment methods pagination">
+          <button className="btn btn-secondary" disabled={methods.isLoading || currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Previous</button>
+          {visiblePages.map((number, index) => <span className="sales-history-page-number" key={number}>
+            {index > 0 && number - visiblePages[index - 1] > 1 && <span aria-hidden="true">…</span>}
+            <button className={number === currentPage ? 'btn btn-primary' : 'btn btn-secondary'} aria-label={`Page ${number}`} aria-current={number === currentPage ? 'page' : undefined} disabled={methods.isLoading} onClick={() => setPage(number)}>{number}</button>
+          </span>)}
+          <button className="btn btn-secondary" disabled={methods.isLoading || currentPage >= totalPages} onClick={() => setPage(currentPage + 1)}>Next</button>
+          <select className="control" aria-label="Rows per page" value={limit} onChange={(event) => { setLimit(Number(event.target.value)); setPage(1); }}>
+            <option value={20}>20</option><option value={50}>50</option><option value={100}>100</option>
+          </select>
+        </nav>
+      </div>
+    </div>
     {open && <div className="modal-bg"><div className="modal"><form onSubmit={submit}>
       <div className="modal-head"><h2>{editing ? 'Edit' : 'Create'} Payment Method</h2></div>
       <div className="modal-body"><div className="form-grid">

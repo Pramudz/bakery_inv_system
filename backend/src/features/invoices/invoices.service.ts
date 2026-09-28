@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, In, MoreThan, Not, IsNull } from 'typeorm';
 import { TenantPrincipal } from '../auth/auth.types';
 import { Customer } from '../customers/customers.entity';
 import { InventoryBalance } from '../inventory-balance/inventory-balance.entity';
@@ -11,6 +11,8 @@ import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceDetail } from './invoice-detail.entity';
 import { InvoicePayment } from './invoice-payment.entity';
 import { Invoice } from './invoice.entity';
+import { ReceiveInvoicePaymentDto } from './dto/receive-invoice-payment.dto';
+import { snapshotInvoiceReceipt } from './invoice-receipt';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
@@ -18,10 +20,72 @@ const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 10
 export class InvoicesService {
   constructor(private readonly dataSource: DataSource) {}
 
+  pendingPayments(user: TenantPrincipal) {
+    return this.dataSource.getRepository(Invoice).find({
+      where: {
+        tenantId: user.tenantId, invoiceStatus: 'COMPLETED', balanceAmount: MoreThan('0'),
+        ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}),
+      },
+      relations: { customer: true, location: true },
+      order: { invoiceDate: 'ASC', invoiceId: 'ASC' },
+    });
+  }
+
+  collectionHistory(user: TenantPrincipal) {
+    return this.dataSource.getRepository(InvoicePayment).find({
+      where: {
+        collectionKey: Not(IsNull()),
+        invoice: { tenantId: user.tenantId, ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}) },
+      },
+      relations: { invoice: { customer: true, location: true }, paymentMethod: true },
+      order: { invoicePaymentId: 'DESC' },
+    });
+  }
+
+  async receivePayment(id: number, dto: ReceiveInvoicePaymentDto, user: TenantPrincipal) {
+    if (!Number.isFinite(dto.amount) || dto.amount <= 0 || money(dto.amount) !== dto.amount) {
+      throw new BadRequestException('Payment amount must be positive with at most two decimal places.');
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const invoiceRepo = manager.getRepository(Invoice);
+      const invoice = await invoiceRepo.findOne({ where: { invoiceId: id, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } });
+      if (!invoice) throw new NotFoundException('Invoice not found.');
+      if (user.accessScope === 'LOCATION' && !user.assignedLocationIds.map(Number).includes(Number(invoice.locationId))) {
+        throw new ForbiddenException('You do not have access to this location.');
+      }
+      const repo = manager.getRepository(InvoicePayment);
+      const existing = await repo.findOneBy({ invoiceId: invoice.invoiceId, collectionKey: dto.collectionKey });
+      if (existing) {
+        if (Number(existing.amount) !== dto.amount || Number(existing.paymentMethodId) !== dto.paymentMethodId || existing.referenceNumber !== (dto.referenceNumber?.trim() || null)) {
+          throw new BadRequestException('This receipt request was already used for a different payment. Refresh and try again.');
+        }
+        return existing;
+      }
+      if (invoice.invoiceStatus !== 'COMPLETED') throw new BadRequestException('Only completed invoices without refunds can receive payments here.');
+      const before = money(Number(invoice.balanceAmount));
+      if (before <= 0 || dto.amount > before) throw new BadRequestException(`Payment cannot exceed the remaining balance of ${before.toFixed(2)}.`);
+      const method = await manager.getRepository(PaymentMethod).findOneBy({ paymentMethodId: dto.paymentMethodId, tenantId: user.tenantId, isActive: true });
+      if (!method) throw new NotFoundException('Active payment method not found.');
+      const after = money(before - dto.amount);
+      const payment = await repo.save(repo.create({
+        invoiceId: invoice.invoiceId, paymentMethodId: method.paymentMethodId, amount: dto.amount.toFixed(2),
+        tenderedAmount: dto.amount.toFixed(2), changeAmount: '0.00', referenceNumber: dto.referenceNumber?.trim() || null,
+        paidAt: new Date(), createdByUserId: user.userId, isReversed: false, reversedAt: null,
+        collectionKey: dto.collectionKey, balanceBefore: before.toFixed(2), balanceAfter: after.toFixed(2),
+      }));
+      invoice.paidAmount = money(Number(invoice.paidAmount) + dto.amount).toFixed(2);
+      invoice.tenderedAmount = money(Number(invoice.tenderedAmount) + dto.amount).toFixed(2);
+      invoice.balanceAmount = after.toFixed(2);
+      invoice.paymentStatus = after === 0 ? 'PAID' : 'PARTIALLY_PAID';
+      await invoiceRepo.save(invoice);
+      return payment;
+    });
+  }
+
   list(user: TenantPrincipal) {
     return this.dataSource.getRepository(Invoice).find({
       where: { tenantId: user.tenantId },
-      relations: { customer: true, location: true },
+      relations: { customer: true, location: true, payments: { paymentMethod: true } },
       order: { invoiceId: 'DESC' },
     });
   }
@@ -99,7 +163,10 @@ export class InvoicesService {
           referenceNumber: payment.referenceNumber?.trim() || null, paidAt: new Date(), createdByUserId: user.userId,
         }));
       }
-      return this.getWithManager(manager, invoice.invoiceId, user.tenantId);
+      const completed = (await this.getWithManager(manager, invoice.invoiceId, user.tenantId))!;
+      completed.receiptSnapshot = snapshotInvoiceReceipt(completed);
+      await invoiceRepo.update(invoice.invoiceId, { receiptSnapshot: completed.receiptSnapshot });
+      return completed;
     });
   }
 

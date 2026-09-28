@@ -1,10 +1,11 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { AuditEntity } from '../../common/audit.entity';
 import { PaymentMethod } from '../payment-methods/payment-methods.entity';
 import { User } from '../users/user.entity';
 import { Invoice } from './invoice.entity';
 
 @Entity('tbl_invoice_payment')
+@Index('uq_invoice_payment_collection', ['invoiceId', 'collectionKey'], { unique: true })
 export class InvoicePayment extends AuditEntity {
   @PrimaryGeneratedColumn({ name: 'invoice_payment_id', type: 'bigint' }) invoicePaymentId!: number;
   @Column({ name: 'invoice_id', type: 'bigint' }) invoiceId!: number;
@@ -20,4 +21,7 @@ export class InvoicePayment extends AuditEntity {
   @ManyToOne(() => User, { nullable: false, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'created_by_user_id' }) createdByUser!: User;
   @Column({ name: 'is_reversed', default: false }) isReversed!: boolean;
   @Column({ name: 'reversed_at', type: 'datetime', nullable: true }) reversedAt!: Date | null;
+  @Column({ name: 'collection_key', type: 'varchar', length: 36, nullable: true }) collectionKey!: string | null;
+  @Column({ name: 'balance_before', type: 'decimal', precision: 18, scale: 2, nullable: true }) balanceBefore!: string | null;
+  @Column({ name: 'balance_after', type: 'decimal', precision: 18, scale: 2, nullable: true }) balanceAfter!: string | null;
 }

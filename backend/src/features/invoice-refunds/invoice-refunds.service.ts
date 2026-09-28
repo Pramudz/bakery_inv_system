@@ -64,7 +64,7 @@ export class InvoiceRefundsService {
     const invoice = await this.dataSource.getRepository(Invoice).findOne({ where: { invoiceId: id, tenantId: user.tenantId }, relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true } } });
     if (!invoice) throw new NotFoundException('Invoice not found.');
     const sums = await this.refundedQuantities(invoice.details.map((x) => x.invoiceDetailId));
-    return { ...invoice, details: invoice.details.map((line) => ({ ...line, refundedQuantity: sums.get(line.invoiceDetailId) ?? 0, refundableQuantity: Math.max(0, Number(line.quantity) - (sums.get(line.invoiceDetailId) ?? 0)) })) };
+    return { ...invoice, refundablePaymentAmount: await this.remainingPayment(invoice), details: invoice.details.map((line) => ({ ...line, refundedQuantity: sums.get(Number(line.invoiceDetailId)) ?? 0, refundableQuantity: Math.max(0, Number(line.quantity) - (sums.get(Number(line.invoiceDetailId)) ?? 0)) })) };
   }
 
   async create(dto: CreateInvoiceRefundDto, user: TenantPrincipal) {
@@ -74,12 +74,12 @@ export class InvoiceRefundsService {
       if (invoice.invoiceStatus === 'FULLY_REFUNDED') throw new BadRequestException('Invoice is already fully refunded.');
       const requestedIds = dto.details.map((x) => x.invoiceDetailId);
       if (new Set(requestedIds).size !== requestedIds.length) throw new BadRequestException('A refund line cannot be selected more than once.');
-      const originalLines = invoice.details.filter((x) => requestedIds.includes(x.invoiceDetailId));
+      const originalLines = invoice.details.filter((x) => requestedIds.includes(Number(x.invoiceDetailId)));
       if (originalLines.length !== requestedIds.length) throw new BadRequestException('One or more invoice lines are invalid.');
-      const previous = await this.refundedQuantities(requestedIds, manager);
+      const previous = await this.refundedQuantities(invoice.details.map((line) => line.invoiceDetailId), manager);
       const prepared = dto.details.map((request) => {
-        const line = originalLines.find((x) => x.invoiceDetailId === request.invoiceDetailId)!;
-        const refundable = Number(line.quantity) - (previous.get(line.invoiceDetailId) ?? 0);
+        const line = originalLines.find((x) => Number(x.invoiceDetailId) === request.invoiceDetailId)!;
+        const refundable = Number(line.quantity) - (previous.get(Number(line.invoiceDetailId)) ?? 0);
         if (request.quantity > refundable) throw new BadRequestException(`Refund quantity exceeds the available quantity for ${line.product.productName}.`);
         const ratio = request.quantity / Number(line.quantity);
         const gross = money(Number(line.grossTotal) * ratio);
@@ -91,6 +91,8 @@ export class InvoiceRefundsService {
       const refundTotal = money(prepared.reduce((sum, x) => sum + x.total, 0));
       const paymentTotal = money((dto.payments ?? []).reduce((sum, x) => sum + Number(x.amount), 0));
       if (paymentTotal > refundTotal) throw new BadRequestException('Refund payments cannot exceed the refund total.');
+      const remainingPayment = await this.remainingPayment(invoice, manager);
+      if (paymentTotal > remainingPayment) throw new BadRequestException(`Refund payment exceeds the remaining paid amount of ${remainingPayment.toFixed(2)}.`);
 
       const repo = manager.getRepository(InvoiceRefund);
       const refund = await repo.save(repo.create({ tenantId: user.tenantId, locationId: invoice.locationId, invoiceId: invoice.invoiceId, refundNumber: `PENDING-${Date.now()}-${user.userId}`, refundDate: new Date(), reason: dto.reason.trim(), subtotal: subtotal.toFixed(2), discountTotal: discountTotal.toFixed(2), refundTotal: refundTotal.toFixed(2), status: 'COMPLETED', createdByUserId: user.userId, approvedByUserId: null }));
@@ -105,9 +107,8 @@ export class InvoiceRefundsService {
         if (!method) throw new NotFoundException('Refund payment method not found.');
         await manager.getRepository(InvoiceRefundPayment).save(manager.getRepository(InvoiceRefundPayment).create({ invoiceRefundId: refund.invoiceRefundId, paymentMethodId: payment.paymentMethodId, amount: money(payment.amount).toFixed(2), referenceNumber: payment.referenceNumber?.trim() || null, refundedAt: new Date(), createdByUserId: user.userId }));
       }
-      const allRefunds: any[] = await manager.getRepository(InvoiceRefund).findBy({ invoiceId: invoice.invoiceId, status: 'COMPLETED' });
-      const refundedTotal = money(allRefunds.reduce((sum, x) => sum + Number(x.refundTotal), 0));
-      invoice.invoiceStatus = refundedTotal >= Number(invoice.grandTotal) ? 'FULLY_REFUNDED' : 'PARTIALLY_REFUNDED';
+      const fullyReturned = invoice.details.every((line) => (previous.get(Number(line.invoiceDetailId)) ?? 0) + (dto.details.find((item) => item.invoiceDetailId === Number(line.invoiceDetailId))?.quantity ?? 0) >= Number(line.quantity));
+      invoice.invoiceStatus = fullyReturned ? 'FULLY_REFUNDED' : 'PARTIALLY_REFUNDED';
       await manager.getRepository(Invoice).save(invoice);
       return this.getWithManager(manager, refund.invoiceRefundId, user.tenantId);
     });
@@ -135,6 +136,19 @@ export class InvoiceRefundsService {
       await this.recalculateInvoicePayments(manager, invoice);
       return manager.getRepository(Invoice).findOne({ where: { invoiceId }, relations: { payments: { paymentMethod: true } } });
     });
+  }
+
+  private async remainingPayment(invoice: Invoice, manager = this.dataSource.manager) {
+    const refunds = await manager.getRepository(InvoiceRefund).find({
+      where: { invoiceId: invoice.invoiceId, tenantId: invoice.tenantId, status: 'COMPLETED' },
+      relations: { payments: true },
+    });
+    const adjustments = await manager.getRepository(InvoiceAdjustment).find({
+      where: { invoiceId: invoice.invoiceId, tenantId: invoice.tenantId, status: 'SETTLED' },
+    });
+    const paidBack = refunds.reduce((sum, refund) => sum + refund.payments.reduce((total, payment) => total + Number(payment.amount), 0), 0);
+    const adjusted = adjustments.reduce((sum, adjustment) => sum + (adjustment.adjustmentType === 'DEBIT' ? 1 : -1) * Number(adjustment.adjustmentAmount), 0);
+    return Math.max(0, money(Number(invoice.paidAmount) + adjusted - paidBack));
   }
 
   private async refundedQuantities(ids: number[], manager?: EntityManager) {

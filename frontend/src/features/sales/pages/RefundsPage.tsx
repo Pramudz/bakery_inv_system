@@ -6,6 +6,7 @@ import { invoiceRefundsApi } from '../api/invoiceRefundsApi';
 import { invoicesApi } from '../api/invoicesApi';
 import { paymentMethodsApi } from '../api/paymentMethodsApi';
 import { SalesBadge } from './SalesUi';
+import './sales-history.css';
 
 type CorrectionMode = 'ITEM' | 'DISCOUNT';
 const money = (value: unknown) => Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -26,6 +27,8 @@ export function RefundsPage() {
   const [paymentMethodId, setPaymentMethodId] = useState('');
   const [settlementAmount, setSettlementAmount] = useState('');
   const [message, setMessage] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
   const [historyMode, setHistoryMode] = useState<'REFUNDS' | 'ADJUSTMENTS'>('REFUNDS');
 
   const invoices = useQuery({ queryKey: ['invoices'], queryFn: invoicesApi.list });
@@ -33,6 +36,17 @@ export function RefundsPage() {
   const methods = useQuery({ queryKey: ['payment-methods'], queryFn: paymentMethodsApi.list });
   const refunds = useQuery({ queryKey: ['invoice-refunds'], queryFn: invoiceRefundsApi.list });
   const adjustments = useQuery({ queryKey: ['invoice-adjustments'], queryFn: invoiceAdjustmentsApi.list });
+  const historyQuery = historyMode === 'REFUNDS' ? refunds : adjustments;
+  const total = historyQuery.data?.length ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * limit;
+  const pagedRefunds = (refunds.data ?? []).slice(start, start + limit);
+  const pagedAdjustments = (adjustments.data ?? []).slice(start, start + limit);
+  const visiblePages = [...new Set([1, currentPage - 1, currentPage, currentPage + 1, totalPages])]
+    .filter((number) => number >= 1 && number <= totalPages)
+    .sort((a, b) => a - b);
+
 
   useEffect(() => {
     const id = Number(params.get('invoiceId'));
@@ -50,16 +64,31 @@ export function RefundsPage() {
 
   const selectedLine = (invoice.data?.details ?? []).find((line: any) => line.invoiceDetailId === selectedLineId);
   const itemRefundTotal = useMemo(() => (invoice.data?.details ?? []).reduce((sum: number, line: any) => {
-    const unitNet = Number(line.netTotal) / Number(line.quantity);
-    return sum + (quantities[line.invoiceDetailId] ?? 0) * unitNet;
+    const ratio = (quantities[line.invoiceDetailId] ?? 0) / Number(line.quantity);
+    const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+    return round(sum + round(Number(line.grossTotal) * ratio) - round(Number(line.discountAmount) * ratio));
   }, 0), [invoice.data, quantities]);
+  const remainingLines = (invoice.data?.details ?? []).filter((line: any) => Number(line.refundableQuantity) > 0);
+  const fullRefund = mode === 'ITEM' && remainingLines.length > 0 && remainingLines.every((line: any) => quantities[line.invoiceDetailId] === Number(line.refundableQuantity));
+  const selectedQuantity = Object.values(quantities).reduce((sum, quantity) => sum + quantity, 0);
+  const selectFullRefund = () => {
+    if (remainingLines.some((line: any) => !Number.isInteger(Number(line.refundableQuantity)))) {
+      setMessage('This invoice contains fractional quantities and cannot be fully refunded using whole-number quantities.');
+      return;
+    }
+    resetWork();
+    setMode('ITEM');
+    setReason('Customer return');
+    setQuantities(Object.fromEntries(remainingLines.map((line: any) => [line.invoiceDetailId, Number(line.refundableQuantity)])));
+  };
   const originalDiscount = Number(selectedLine?.discountAmount ?? 0);
   const correctedDiscount = Number(correctedAmount || 0);
   const adjustmentTotal = selectedLine ? Math.abs(correctedDiscount - originalDiscount) : 0;
   const correctionTotal = mode === 'ITEM' ? itemRefundTotal : adjustmentTotal;
   const adjustmentType = correctedDiscount >= originalDiscount ? 'Customer refund' : 'Additional payment';
 
-  useEffect(() => setSettlementAmount(correctionTotal > 0 ? correctionTotal.toFixed(2) : ''), [correctionTotal]);
+  const settlementLimit = mode === 'ITEM' ? Math.min(correctionTotal, Number(invoice.data?.refundablePaymentAmount ?? 0)) : correctionTotal;
+  useEffect(() => setSettlementAmount(settlementLimit > 0 ? settlementLimit.toFixed(2) : '0'), [settlementLimit]);
 
   const resetWork = () => {
     setQuantities({}); setStockReturns({}); setSelectedLineId(null); setCorrectedPercentage(''); setCorrectedAmount(''); setMessage('');
@@ -100,7 +129,18 @@ export function RefundsPage() {
   const refreshData = () => {
     queryClient.invalidateQueries({ queryKey: ['invoices'] }); queryClient.invalidateQueries({ queryKey: ['refundable-invoice', selectedId] }); queryClient.invalidateQueries({ queryKey: ['invoice-refunds'] }); queryClient.invalidateQueries({ queryKey: ['invoice-adjustments'] });
   };
-  const submit = () => mode === 'ITEM' ? createRefund.mutate() : createAdjustment.mutate();
+  const submit = () => {
+    if (pending) return;
+    if (mode === 'ITEM') {
+      const payout = paymentMethodId ? Number(settlementAmount) : 0;
+      if (!Number.isFinite(payout) || payout < 0 || payout > settlementLimit) {
+        setMessage(`Settlement must be between 0 and LKR ${money(settlementLimit)}.`);
+        return;
+      }
+      if (fullRefund && !window.confirm(`Fully refund all remaining items on ${invoice.data?.invoiceNumber}?\nItem refund total: LKR ${money(correctionTotal)}\nMoney returned now: LKR ${money(payout)}\nStock will be restored only for checked Return Stock items.`)) return;
+      createRefund.mutate();
+    } else createAdjustment.mutate();
+  };
   const pending = createRefund.isPending || createAdjustment.isPending;
   const error = createRefund.error || createAdjustment.error;
   const receiptHtml = (documentType: 'REFUND' | 'ADJUSTMENT', record: any) => {
@@ -174,12 +214,28 @@ export function RefundsPage() {
       {invoice.data && <>
         <div className="correction-invoice-info"><div><span>Invoice</span><strong>{invoice.data.invoiceNumber}</strong></div><div><span>Date</span><strong>{new Date(invoice.data.invoiceDate).toLocaleString()}</strong></div><div><span>Customer</span><strong>{invoice.data.customer?.customerName ?? 'Walk-in Customer'}</strong></div><div><span>Location</span><strong>{invoice.data.location?.name}</strong></div><div><span>Status</span><SalesBadge status={invoice.data.invoiceStatus.replaceAll('_', ' ')}/></div></div>
         <div className="correction-mode"><button className={mode === 'ITEM' ? 'active' : ''} onClick={() => { setMode('ITEM'); resetWork(); }}><b>Item / Quantity</b><small>Extra items, excess quantity or returns</small></button><button className={mode === 'DISCOUNT' ? 'active' : ''} onClick={() => { setMode('DISCOUNT'); resetWork(); }}><b>Discount % / Rs</b><small>Financial correction without stock movement</small></button></div>
-        <div className="correction-body"><div className="correction-lines"><table className="table"><thead>{mode === 'ITEM' ? <tr><th>Product</th><th>Sold</th><th>Available</th><th>Refund Qty</th><th>Return Stock</th><th className="right">Refund</th></tr> : <tr><th></th><th>Product</th><th>Gross</th><th>Original %</th><th>Original Rs</th><th>Correct %</th><th>Correct Rs</th><th className="right">Difference</th></tr>}</thead><tbody>{invoice.data.details.map((line: any) => mode === 'ITEM' ? <tr key={line.invoiceDetailId}><td><strong>{line.product.productName}</strong><small className="refund-code">{line.product.sku}</small></td><td>{Number(line.quantity)}</td><td>{Number(line.refundableQuantity)}</td><td><input className="control correction-number" type="number" min="0" max={Number(line.refundableQuantity)} step="0.0001" value={quantities[line.invoiceDetailId] || ''} onChange={(event) => setQuantities((values) => ({ ...values, [line.invoiceDetailId]: Math.min(Number(line.refundableQuantity), Math.max(0, Number(event.target.value))) }))}/></td><td><label className="check"><input type="checkbox" checked={stockReturns[line.invoiceDetailId] !== false} onChange={(event) => setStockReturns((values) => ({ ...values, [line.invoiceDetailId]: event.target.checked }))}/> Yes</label></td><td className="right"><strong>LKR {money((quantities[line.invoiceDetailId] ?? 0) * Number(line.netTotal) / Number(line.quantity))}</strong></td></tr> : <tr className={selectedLineId === line.invoiceDetailId ? 'selected-row' : ''} key={line.invoiceDetailId}><td><input type="radio" checked={selectedLineId === line.invoiceDetailId} onChange={() => selectDiscountLine(line)}/></td><td><strong>{line.product.productName}</strong><small className="refund-code">{line.product.sku}</small></td><td>{money(line.grossTotal)}</td><td>{Number(line.discountPercentage)}%</td><td>{money(line.discountAmount)}</td><td>{selectedLineId === line.invoiceDetailId ? <input className="control correction-number" type="number" min="0" max="100" step="0.01" value={correctedPercentage} onChange={(event) => changeDiscountPercentage(event.target.value)}/> : '—'}</td><td>{selectedLineId === line.invoiceDetailId ? <input className="control correction-number" type="number" min="0" max={Number(line.grossTotal)} step="0.01" value={correctedAmount} onChange={(event) => changeDiscountAmount(event.target.value)}/> : '—'}</td><td className="right"><strong>{selectedLineId === line.invoiceDetailId ? `LKR ${money(adjustmentTotal)}` : '—'}</strong></td></tr>)}</tbody></table></div>
-          <aside className="correction-summary"><h3>Correction Summary</h3><div><span>Invoice total</span><b>LKR {money(invoice.data.grandTotal)}</b></div>{mode === 'ITEM' ? <><div><span>Selected quantity</span><b>{Object.values(quantities).reduce((sum, value) => sum + value, 0)}</b></div><div><span>Correction</span><b>Item refund</b></div></> : <><div><span>Original discount</span><b>LKR {money(originalDiscount)}</b></div><div><span>Corrected discount</span><b>LKR {money(correctedDiscount)}</b></div><div><span>Correction</span><b>{adjustmentType}</b></div></>}<div className="correction-grand"><span>{mode === 'ITEM' ? 'Refund Total' : 'Adjustment Total'}</span><strong>LKR {money(correctionTotal)}</strong></div></aside></div>
-        <div className="correction-settlement"><label className="field"><span>Reason <b className="required">*</b></span><select className="control" value={reason} onChange={(event) => setReason(event.target.value)}>{mode === 'ITEM' ? <><option>Incorrect billing</option><option>Extra item</option><option>Excess quantity</option><option>Wrong product</option><option>Customer return</option><option>Damaged return</option></> : <><option>Wrong discount</option><option>Incorrect discount percentage</option><option>Incorrect discount amount</option></>}</select></label><label className="field"><span>{mode === 'ITEM' || adjustmentType === 'Customer refund' ? 'Refund method' : 'Payment method'}</span><select className="control" value={paymentMethodId} onChange={(event) => setPaymentMethodId(event.target.value)}><option value="">Settle later</option>{(methods.data ?? []).filter((method) => method.isActive).map((method) => <option key={method.paymentMethodId} value={method.paymentMethodId}>{method.paymentMethodName}</option>)}</select></label><label className="field"><span>Settlement amount</span><input className="control" type="number" min="0" max={correctionTotal} step="0.01" value={settlementAmount} onChange={(event) => setSettlementAmount(event.target.value)}/></label><button className="btn btn-primary correction-confirm" disabled={correctionTotal <= 0 || !reason || pending} onClick={submit}>{pending ? 'Processing...' : 'Confirm Correction'}</button></div>
+        <div className="sales-card-head"><button type="button" className="btn btn-danger-soft" disabled={pending || invoice.isFetching || !remainingLines.length} onClick={selectFullRefund}>Full Refund</button><span>Select all remaining items, then review and confirm below.</span></div>
+        <div className="correction-body"><div className="correction-lines"><table className="table"><thead>{mode === 'ITEM' ? <tr><th>Product</th><th>Sold</th><th>Available</th><th>Refund Qty</th><th>Return Stock</th><th className="right">Refund</th></tr> : <tr><th></th><th>Product</th><th>Gross</th><th>Original %</th><th>Original Rs</th><th>Correct %</th><th>Correct Rs</th><th className="right">Difference</th></tr>}</thead><tbody>{invoice.data.details.map((line: any) => mode === 'ITEM' ? <tr key={line.invoiceDetailId}><td><strong>{line.product.productName}</strong><small className="refund-code">{line.product.sku}</small></td><td>{Number(line.quantity)}</td><td>{Number(line.refundableQuantity)}</td><td><input className="control correction-number" type="number" min="0" max={Math.floor(Number(line.refundableQuantity))} step="1" inputMode="numeric" value={quantities[line.invoiceDetailId] || ''} onChange={(event) => setQuantities((values) => ({ ...values, [line.invoiceDetailId]: Math.min(Math.floor(Number(line.refundableQuantity)), Math.max(0, Math.floor(Number(event.target.value) || 0))) }))}/></td><td><label className="check"><input type="checkbox" checked={stockReturns[line.invoiceDetailId] !== false} onChange={(event) => setStockReturns((values) => ({ ...values, [line.invoiceDetailId]: event.target.checked }))}/> Yes</label></td><td className="right"><strong>LKR {money((quantities[line.invoiceDetailId] ?? 0) * Number(line.netTotal) / Number(line.quantity))}</strong></td></tr> : <tr className={selectedLineId === line.invoiceDetailId ? 'selected-row' : ''} key={line.invoiceDetailId}><td><input type="radio" checked={selectedLineId === line.invoiceDetailId} onChange={() => selectDiscountLine(line)}/></td><td><strong>{line.product.productName}</strong><small className="refund-code">{line.product.sku}</small></td><td>{money(line.grossTotal)}</td><td>{Number(line.discountPercentage)}%</td><td>{money(line.discountAmount)}</td><td>{selectedLineId === line.invoiceDetailId ? <input className="control correction-number" type="number" min="0" max="100" step="0.01" value={correctedPercentage} onChange={(event) => changeDiscountPercentage(event.target.value)}/> : '—'}</td><td>{selectedLineId === line.invoiceDetailId ? <input className="control correction-number" type="number" min="0" max={Number(line.grossTotal)} step="0.01" value={correctedAmount} onChange={(event) => changeDiscountAmount(event.target.value)}/> : '—'}</td><td className="right"><strong>{selectedLineId === line.invoiceDetailId ? `LKR ${money(adjustmentTotal)}` : '—'}</strong></td></tr>)}</tbody></table></div>
+          <aside className="correction-summary"><h3>Correction Summary</h3><div><span>Invoice total</span><b>LKR {money(invoice.data.grandTotal)}</b></div>{mode === 'ITEM' ? <><div><span>Selected quantity</span><b>{Object.values(quantities).reduce((sum, value) => sum + value, 0)}</b></div><div><span>Correction</span><b>{fullRefund ? 'Full refund' : 'Item refund'}</b></div></> : <><div><span>Original discount</span><b>LKR {money(originalDiscount)}</b></div><div><span>Corrected discount</span><b>LKR {money(correctedDiscount)}</b></div><div><span>Correction</span><b>{adjustmentType}</b></div></>}{mode === 'ITEM' && <div><span>Maximum money to return</span><b>LKR {money(settlementLimit)}</b></div>}<div className="correction-grand"><span>{mode === 'ITEM' ? 'Refund Total' : 'Adjustment Total'}</span><strong>LKR {money(correctionTotal)}</strong></div></aside></div>
+        <div className="correction-settlement"><label className="field"><span>Reason <b className="required">*</b></span><select className="control" value={reason} onChange={(event) => setReason(event.target.value)}>{mode === 'ITEM' ? <><option>Incorrect billing</option><option>Extra item</option><option>Excess quantity</option><option>Wrong product</option><option>Customer return</option><option>Damaged return</option></> : <><option>Wrong discount</option><option>Incorrect discount percentage</option><option>Incorrect discount amount</option></>}</select></label><label className="field"><span>{mode === 'ITEM' || adjustmentType === 'Customer refund' ? 'Refund method' : 'Payment method'}</span><select className="control" value={paymentMethodId} onChange={(event) => setPaymentMethodId(event.target.value)}><option value="">Settle later</option>{(methods.data ?? []).filter((method) => method.isActive).map((method) => <option key={method.paymentMethodId} value={method.paymentMethodId}>{method.paymentMethodName}</option>)}</select></label><label className="field"><span>Settlement amount</span><input className="control" type="number" min="0" max={settlementLimit} step="0.01" value={settlementAmount} onChange={(event) => setSettlementAmount(event.target.value)}/></label><button className="btn btn-primary correction-confirm" disabled={(mode === 'ITEM' ? selectedQuantity <= 0 : correctionTotal <= 0) || !reason || pending || invoice.isFetching} onClick={submit}>{pending ? 'Processing...' : fullRefund ? 'Confirm Full Refund' : 'Confirm Correction'}</button></div>
         {error && <div className="error-box">{(error as Error).message}</div>}
       </>}
     </div>
-    <div className="card correction-history"><div className="sales-card-head"><div><h2>Correction History</h2><p>Previous quantity refunds and discount adjustments.</p></div><div className="correction-tabs"><button className={historyMode === 'REFUNDS' ? 'active' : ''} onClick={() => setHistoryMode('REFUNDS')}>Item Refunds</button><button className={historyMode === 'ADJUSTMENTS' ? 'active' : ''} onClick={() => setHistoryMode('ADJUSTMENTS')}>Discount Corrections</button></div></div>{historyMode === 'REFUNDS' ? <table className="table"><thead><tr><th>Refund</th><th>Invoice</th><th>Customer</th><th>Reason</th><th>Date</th><th className="right">Total</th><th className="right">Receipt</th></tr></thead><tbody>{(refunds.data ?? []).map((row) => <tr key={row.invoiceRefundId}><td><strong className="sales-id">{row.refundNumber}</strong></td><td>{row.invoice?.invoiceNumber}</td><td>{row.invoice?.customer?.customerName ?? 'Walk-in Customer'}</td><td>{row.reason}</td><td>{new Date(row.refundDate).toLocaleString()}</td><td className="right"><strong>LKR {money(row.refundTotal)}</strong></td><td className="right actions"><button className="btn btn-edit-soft" onClick={() => outputReceipt('REFUND', row, true)}>Print</button><button className="btn btn-secondary" onClick={() => outputReceipt('REFUND', row, false)}>Download</button></td></tr>)}</tbody></table> : <table className="table"><thead><tr><th>Adjustment</th><th>Invoice</th><th>Product</th><th>Type</th><th>Corrected Discount</th><th>Status</th><th className="right">Amount</th><th className="right">Receipt</th></tr></thead><tbody>{(adjustments.data ?? []).map((row) => <tr key={row.invoiceAdjustmentId}><td><strong className="sales-id">{row.adjustmentNumber}</strong></td><td>{row.invoice?.invoiceNumber}</td><td>{row.invoiceDetail?.product?.productName}</td><td><SalesBadge status={row.adjustmentType}/></td><td>{Number(row.correctedDiscountPercentage)}% / LKR {money(row.correctedDiscountAmount)}</td><td><SalesBadge status={row.status}/></td><td className="right"><strong>LKR {money(row.adjustmentAmount)}</strong></td><td className="right actions"><button className="btn btn-edit-soft" onClick={() => outputReceipt('ADJUSTMENT', row, true)}>Print</button><button className="btn btn-secondary" onClick={() => outputReceipt('ADJUSTMENT', row, false)}>Download</button></td></tr>)}</tbody></table>}</div>
+    <div className="card correction-history"><div className="sales-card-head"><div><h2>Correction History</h2><p>Previous quantity refunds and discount adjustments.</p></div><div className="correction-tabs"><button className={historyMode === 'REFUNDS' ? 'active' : ''} onClick={() => { setHistoryMode('REFUNDS'); setPage(1); }}>Item Refunds</button><button className={historyMode === 'ADJUSTMENTS' ? 'active' : ''} onClick={() => { setHistoryMode('ADJUSTMENTS'); setPage(1); }}>Discount Corrections</button></div></div>{historyMode === 'REFUNDS' ? <table className="table"><thead><tr><th>Refund</th><th>Invoice</th><th>Customer</th><th>Reason</th><th>Date</th><th className="right">Total</th><th className="right">Receipt</th></tr></thead><tbody>{historyQuery.isLoading ? <tr><td colSpan={7}>Loading history...</td></tr> : historyQuery.isError ? <tr><td colSpan={7}>Unable to load correction history.</td></tr> : !total ? <tr><td colSpan={7}><div className="empty">No records found.</div></td></tr> : pagedRefunds.map((row) => <tr key={row.invoiceRefundId}><td><strong className="sales-id">{row.refundNumber}</strong></td><td>{row.invoice?.invoiceNumber}</td><td>{row.invoice?.customer?.customerName ?? 'Walk-in Customer'}</td><td>{row.reason}</td><td>{new Date(row.refundDate).toLocaleString()}</td><td className="right"><strong>LKR {money(row.refundTotal)}</strong></td><td className="right"><div className="sales-history-actions"><button className="btn btn-edit-soft" onClick={() => outputReceipt('REFUND', row, true)}>Print</button><button className="btn btn-secondary" onClick={() => outputReceipt('REFUND', row, false)}>Download</button></div></td></tr>)}</tbody></table> : <table className="table"><thead><tr><th>Adjustment</th><th>Invoice</th><th>Product</th><th>Type</th><th>Corrected Discount</th><th>Status</th><th className="right">Amount</th><th className="right">Receipt</th></tr></thead><tbody>{historyQuery.isLoading ? <tr><td colSpan={8}>Loading history...</td></tr> : historyQuery.isError ? <tr><td colSpan={8}>Unable to load correction history.</td></tr> : !total ? <tr><td colSpan={8}><div className="empty">No records found.</div></td></tr> : pagedAdjustments.map((row) => <tr key={row.invoiceAdjustmentId}><td><strong className="sales-id">{row.adjustmentNumber}</strong></td><td>{row.invoice?.invoiceNumber}</td><td>{row.invoiceDetail?.product?.productName}</td><td><SalesBadge status={row.adjustmentType}/></td><td>{Number(row.correctedDiscountPercentage)}% / LKR {money(row.correctedDiscountAmount)}</td><td><SalesBadge status={row.status}/></td><td className="right"><strong>LKR {money(row.adjustmentAmount)}</strong></td><td className="right"><div className="sales-history-actions"><button className="btn btn-edit-soft" onClick={() => outputReceipt('ADJUSTMENT', row, true)}>Print</button><button className="btn btn-secondary" onClick={() => outputReceipt('ADJUSTMENT', row, false)}>Download</button></div></td></tr>)}</tbody></table>}
+      <div className="toolbar sales-history-pagination">
+        <span aria-live="polite">{historyQuery.isLoading ? 'Loading history...' : `Showing ${total ? (currentPage - 1) * limit + 1 : 0}–${Math.min(currentPage * limit, total)} of ${total} records`}</span>
+        <nav className="sales-history-page-controls" aria-label="Correction history pagination">
+          <button className="btn btn-secondary" disabled={historyQuery.isLoading || currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Previous</button>
+          {visiblePages.map((number, index) => <span className="sales-history-page-number" key={number}>
+            {index > 0 && number - visiblePages[index - 1] > 1 && <span aria-hidden="true">…</span>}
+            <button className={number === currentPage ? 'btn btn-primary' : 'btn btn-secondary'} aria-label={`Page ${number}`} aria-current={number === currentPage ? 'page' : undefined} disabled={historyQuery.isLoading} onClick={() => setPage(number)}>{number}</button>
+          </span>)}
+          <button className="btn btn-secondary" disabled={historyQuery.isLoading || currentPage >= totalPages} onClick={() => setPage(currentPage + 1)}>Next</button>
+          <select className="control" aria-label="Rows per page" value={limit} onChange={(event) => { setLimit(Number(event.target.value)); setPage(1); }}>
+            <option value={20}>20</option><option value={50}>50</option><option value={100}>100</option>
+          </select>
+        </nav>
+      </div>
+    </div>
   </div>;
 }
