@@ -85,6 +85,11 @@ const tenantGroups = [
 ] as const;
 
 const moduleForPath: Record<string, string> = {
+  "/sales": "SALES",
+  "/billing": "SALES",
+  "/pending-payments": "SALES",
+  "/refunds": "SALES",
+  "/payment-methods": "SALES",
   "/users": "USER_MANAGEMENT",
   "/roles": "USER_MANAGEMENT",
   "/permissions": "USER_MANAGEMENT",
@@ -111,6 +116,11 @@ const moduleForPath: Record<string, string> = {
 };
 
 const viewPermissionForPath: Record<string, string> = {
+  "/sales": "SALES_INVOICE_VIEW",
+  "/billing": "SALES_BILLING",
+  "/pending-payments": "SALES_PAYMENT_COLLECT",
+  "/refunds": "SALES_REFUND_VIEW",
+  "/payment-methods": "SALES_PAYMENT_METHOD_VIEW",
   "/users": "USER_VIEW",
   "/roles": "ROLE_VIEW",
   "/permissions": "PERMISSION_VIEW",

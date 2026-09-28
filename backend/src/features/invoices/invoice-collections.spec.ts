@@ -30,7 +30,7 @@ function fixture(overrides = {}) {
     if (entity === PaymentMethod) return { findOneBy: async (where: any) => where.paymentMethodId === 1 && where.tenantId === 1 && where.isActive ? { paymentMethodId: 1, paymentMethodName: 'Cash' } : null };
     throw new Error('Collection must not change stock or invoice lines.');
   } };
-  const service = new InvoicesService({ transaction: (fn: any) => fn(manager) } as any);
+  const service = new InvoicesService({ transaction: (fn: any) => fn(manager) } as any, {} as any);
   const receive = (data = request, principal = user) => (service as any).receivePayment(7, data, principal);
   return { receive, payments, invoice: () => invoice };
 }

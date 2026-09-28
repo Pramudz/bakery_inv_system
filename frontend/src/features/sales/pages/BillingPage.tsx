@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { customersApi } from "../../customers/api/customersApi";
-import { locationsApi } from "../../locations/api/locationsApi";
-import { invoicesApi } from "../api/invoicesApi";
+import { InvoiceQuote, invoicesApi } from "../api/invoicesApi";
 import { InvoiceReceiptContent } from "./InvoiceReceiptContent";
 import { downloadInvoiceReceipt } from "./invoiceReceiptPdf";
 import { PaymentMethod, paymentMethodsApi } from "../api/paymentMethodsApi";
+import { ApiError } from "../../../services/apiClient";
 
 type SaleType = "Retail" | "Wholesale";
 type Product = {
@@ -44,30 +44,41 @@ export function BillingPage() {
   const [method, setMethod] = useState("Cash");
   const [paid, setPaid] = useState("");
   const [locationId, setLocationId] = useState(0);
+  const [checkoutKey, setCheckoutKey] = useState(() => crypto.randomUUID());
   const [splitPayments, setSplitPayments] = useState<SplitPayment[]>([]);
   const [complete, setComplete] = useState(false);
   const [completedInvoice, setCompletedInvoice] = useState<Record<string, any> | null>(null);
-  const locationsQuery = useQuery({ queryKey: ["locations"], queryFn: locationsApi.list });
+  const [priceChangeQuote, setPriceChangeQuote] = useState<InvoiceQuote | null>(null);
+  const locationsQuery = useQuery({ queryKey: ["billing-locations"], queryFn: invoicesApi.billingLocations });
   const customersQuery = useQuery({ queryKey: ["customers"], queryFn: customersApi.list });
   const methodsQuery = useQuery({ queryKey: ["payment-methods"], queryFn: paymentMethodsApi.list });
   useEffect(() => { const first = (locationsQuery.data ?? []).find((x: any) => x.isActive !== false); if (!locationId && first) setLocationId(Number(first.locationId)); }, [locationsQuery.data, locationId]);
-  const catalogQuery = useQuery({ queryKey: ["invoice-catalog", locationId], queryFn: () => invoicesApi.catalog(locationId), enabled: locationId > 0 });
+  const saleTypeCode = saleType.toUpperCase() as "RETAIL" | "WHOLESALE";
+  const catalogQuery = useQuery({ queryKey: ["invoice-catalog", locationId, saleTypeCode], queryFn: () => invoicesApi.catalog(locationId, saleTypeCode), enabled: locationId > 0 });
   const products: Product[] = (catalogQuery.data ?? []).map((x) => ({ ...x, retailPrice: Number(x.retailPrice), wholesalePrice: Number(x.wholesalePrice), stock: Number(x.stock) }));
   const customers: CustomerOption[] = (customersQuery.data ?? []).filter((x: any) => x.isActive !== false).map((x: any) => ({ customerId: Number(x.customerId), code: x.customerCode, name: x.customerName, phone: x.phone ?? "" }));
   const paymentMethods = (methodsQuery.data ?? []).filter((x) => x.isActive);
   useEffect(() => { if (!method && paymentMethods[0]) setMethod(paymentMethods[0].paymentMethodName); }, [paymentMethods, method]);
-  const unitPrice = (x: Product) =>
-    saleType === "Retail" ? x.retailPrice : x.wholesalePrice;
-  const lineGross = (x: CartLine) => x.qty * unitPrice(x);
-  const lineDiscount = (x: CartLine) => x.discountRs;
-  const lineNet = (x: CartLine) => Math.max(0, lineGross(x) - lineDiscount(x));
+  const quoteQuery = useQuery({
+    queryKey: ["invoice-quote", locationId, saleTypeCode, cart.map((line) => [line.productId, line.qty])],
+    queryFn: () => invoicesApi.quote({ locationId, saleType: saleTypeCode, details: cart.map((line) => ({ productId: line.productId, quantity: line.qty })) }),
+    enabled: locationId > 0 && cart.length > 0 && cart.every((line) => line.qty > 0),
+    retry: false,
+  });
+  useEffect(() => { setPriceChangeQuote(null); }, [locationId, saleTypeCode, cart]);
+  const activeQuote = priceChangeQuote ?? quoteQuery.data;
+  const quotedLine = (x: Product) => activeQuote?.lines.find((line) => Number(line.productId) === Number(x.productId));
+  const unitPrice = (x: Product) => quotedLine(x)?.unitPrice ?? (saleType === "Retail" ? x.retailPrice : x.wholesalePrice);
+  const lineGross = (x: CartLine) => quotedLine(x)?.grossTotal ?? x.qty * unitPrice(x);
+  const lineDiscount = (x: CartLine) => quotedLine(x)?.discountAmount ?? 0;
+  const lineNet = (x: CartLine) => quotedLine(x)?.netTotal ?? Math.max(0, lineGross(x) - lineDiscount(x));
   const subtotal = useMemo(
-    () => cart.reduce((n, x) => n + lineGross(x), 0),
-    [cart, saleType],
+    () => activeQuote?.subtotal ?? cart.reduce((n, x) => n + lineGross(x), 0),
+    [cart, saleType, activeQuote],
   );
   const discount = useMemo(
-    () => cart.reduce((n, x) => n + lineDiscount(x), 0),
-    [cart, saleType],
+    () => activeQuote?.discountTotal ?? cart.reduce((n, x) => n + lineDiscount(x), 0),
+    [cart, saleType, activeQuote],
   );
   const total = Math.max(0, subtotal - discount);
   const currentMethod = paymentMethods.find((x) => x.paymentMethodName === method);
@@ -79,17 +90,26 @@ export function BillingPage() {
         ? "Partially Paid"
         : "None Paid";
   const invoiceMutation = useMutation({
-    mutationFn: () => invoicesApi.create({
+    mutationFn: ({ acceptPriceChanges = false, quote = activeQuote }: { acceptPriceChanges?: boolean; quote?: InvoiceQuote } = {}) => invoicesApi.create({
+      checkoutKey,
       locationId,
       customerId: selectedCustomer?.customerId,
-      saleType: saleType.toUpperCase() as "RETAIL" | "WHOLESALE",
-      details: cart.map((x) => ({ productId: x.productId, quantity: x.qty, unitPrice: unitPrice(x), discountPercentage: x.discountPct, discountAmount: x.discountRs })),
+      saleType: saleTypeCode,
+      details: cart.map((x) => {
+        const line = quote?.lines.find((candidate) => Number(candidate.productId) === Number(x.productId));
+        return { productId: x.productId, quantity: x.qty, unitPrice: unitPrice(x), discountPercentage: line?.discountPercentage ?? 0, discountAmount: line?.discountAmount ?? 0, quotedPriceListItemId: line?.priceListItemId, quotedPriceListItemDiscountId: line?.priceListItemDiscountId ?? undefined, quotedUnitPrice: line?.unitPrice, quotedDiscountAmount: line?.discountAmount };
+      }),
       payments: [
         ...splitPayments.map((x) => ({ paymentMethodId: x.paymentMethodId, amount: x.amount })),
         ...(currentMethod && +paid > 0 ? [{ paymentMethodId: currentMethod.paymentMethodId, amount: +paid }] : []),
       ],
+      acceptPriceChanges,
     }),
-    onSuccess: (invoice) => { setCompletedInvoice(invoice); setComplete(true); },
+    onSuccess: (invoice) => { setPriceChangeQuote(null); setCompletedInvoice(invoice); setComplete(true); },
+    onError: (error) => {
+      const details = (error as ApiError).details as { code?: string; quote?: InvoiceQuote } | undefined;
+      if (details?.code === "PRICE_CHANGED" && details.quote) setPriceChangeQuote(details.quote);
+    },
   });
   const choosePaymentMethod = (paymentMethod: PaymentMethod) => {
     if (method !== paymentMethod.paymentMethodName && currentMethod && +paid > 0) {
@@ -103,12 +123,10 @@ export function BillingPage() {
     setPaid("");
     setCart((v) =>
       v.map((x) => {
-        const discountPct = type === "Wholesale" ? 5 : 0;
-        const price = type === "Retail" ? x.retailPrice : x.wholesalePrice;
         return {
           ...x,
-          discountPct,
-          discountRs: Number(((x.qty * price * discountPct) / 100).toFixed(2)),
+          discountPct: 0,
+          discountRs: 0,
         };
       }),
     );
@@ -127,7 +145,8 @@ export function BillingPage() {
       changeType(type);
     }
   };
-  const add = (p: Product) =>
+  const add = (p: Product) => {
+    if (!cart.length) setCheckoutKey(crypto.randomUUID());
     setCart((v) => {
       const found = v.find((x) => x.code === p.code);
       if (!((found?.qty ?? 0) + 1 <= p.stock)) return v;
@@ -146,15 +165,13 @@ export function BillingPage() {
         {
           ...p,
           qty: 1,
-          discountPct: saleType === "Wholesale" ? 5 : 0,
-          discountRs:
-            saleType === "Wholesale"
-              ? Number((p.wholesalePrice * 0.05).toFixed(2))
-              : 0,
+          discountPct: Number((p as Product & { discountPercentage?: number }).discountPercentage ?? 0),
+          discountRs: Number((p as Product & { discountAmount?: number }).discountAmount ?? 0),
         },
         ...v,
       ];
     });
+  };
   const removeOne = (p: Product) =>
     setCart((v) =>
       v.flatMap((x) => {
@@ -336,6 +353,7 @@ export function BillingPage() {
     setComplete(false);
     setSaleType("Retail");
     setCart([]);
+    setCheckoutKey(crypto.randomUUID());
     setQuery("");
     setCategory("All categories");
     setCustomerQuery("");
@@ -391,7 +409,7 @@ export function BillingPage() {
       </div>
       <div className="pos-layout">
         <section className="pos-workspace">
-          <div className="card billing-location-section"><div><h2>Location</h2><p>Select the stock location used for this invoice.</p></div><select className="control" value={locationId || ""} onChange={(event) => { setLocationId(Number(event.target.value)); setCart([]); }}><option value="">Select location</option>{(locationsQuery.data ?? []).filter((x: any) => x.isActive !== false).map((x: any) => <option key={x.locationId} value={x.locationId}>{x.name}</option>)}</select></div>
+          <div className="card billing-location-section"><div><h2>Location</h2><p>Select the stock location used for this invoice.</p></div><select className="control" value={locationId || ""} onChange={(event) => { setLocationId(Number(event.target.value)); setCart([]); setCheckoutKey(crypto.randomUUID()); }}><option value="">Select location</option>{(locationsQuery.data ?? []).filter((x: any) => x.isActive !== false).map((x: any) => <option key={x.locationId} value={x.locationId}>{x.name}</option>)}</select></div>
           <div
             ref={saleTypeSection}
             onKeyDown={keepEnterInSection}
@@ -565,7 +583,7 @@ export function BillingPage() {
                   changes values.
                 </p>
               </div>
-          <button className="btn btn-secondary" onClick={() => setCart([])}>
+          <button className="btn btn-secondary" onClick={() => { setCart([]); setCheckoutKey(crypto.randomUUID()); }}>
             Clear cart
           </button>
             </div>
@@ -626,16 +644,10 @@ export function BillingPage() {
                           min="0"
                           max="100"
                           step="0.01"
-                          value={x.discountPct || ""}
+                          value={quotedLine(x)?.discountPercentage || ""}
                           placeholder="0"
-                          onFocus={(e) => e.currentTarget.select()}
-                          onChange={(e) =>
-                            update(
-                              x.code,
-                              "discountPct",
-                              e.target.value === "" ? 0 : +e.target.value,
-                            )
-                          }
+                          disabled
+                          aria-label="Server product discount percentage"
                         />
                       </td>
                       <td>
@@ -647,16 +659,10 @@ export function BillingPage() {
                           type="number"
                           min="0"
                           step="0.01"
-                          value={x.discountRs || ""}
+                          value={lineDiscount(x) || ""}
                           placeholder="0.00"
-                          onFocus={(e) => e.currentTarget.select()}
-                          onChange={(e) =>
-                            update(
-                              x.code,
-                              "discountRs",
-                              e.target.value === "" ? 0 : +e.target.value,
-                            )
-                          }
+                          disabled
+                          aria-label="Server product discount amount"
                         />
                       </td>
                       <td className="right">{lineGross(x).toLocaleString()}</td>
@@ -891,13 +897,15 @@ export function BillingPage() {
             <div className="payment-finish">
               <button
                 className="pos-complete"
-                disabled={!cart.length || !currentMethod || !locationId || invoiceMutation.isPending}
-                onClick={() => invoiceMutation.mutate()}
+                disabled={!cart.length || !currentMethod || !locationId || invoiceMutation.isPending || quoteQuery.isPending || quoteQuery.isError || !activeQuote}
+                onClick={() => invoiceMutation.mutate({})}
               >
                 ✓ Complete Sale
               </button>
             </div>
-            {invoiceMutation.isError && <div className="error-box">{(invoiceMutation.error as Error).message}</div>}
+            {quoteQuery.isError && <div className="error-box">Unable to confirm current prices: {quoteQuery.error.message}</div>}
+            {priceChangeQuote && <div className="error-box"><strong>Prices changed while this cart was open.</strong><div>Review the updated cart totals, then confirm to finalize using the current prices.</div><button type="button" className="btn btn-primary" disabled={invoiceMutation.isPending} onClick={() => invoiceMutation.mutate({ acceptPriceChanges: true, quote: priceChangeQuote })}>Accept updated prices</button></div>}
+            {invoiceMutation.isError && !priceChangeQuote && <div className="error-box">{(invoiceMutation.error as Error).message}</div>}
           </div>
         </aside>
       </div>

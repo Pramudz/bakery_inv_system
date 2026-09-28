@@ -11,6 +11,7 @@ export function snapshotInvoiceReceipt(invoice: Invoice) {
     details: [...invoice.details].sort((a, b) => Number(a.invoiceDetailId) - Number(b.invoiceDetailId)).map((line) => ({
       invoiceDetailId: line.invoiceDetailId, quantity: line.quantity, unitPrice: line.unitPrice,
       discountAmount: line.discountAmount, netTotal: line.netTotal,
+      pricingSnapshot: (line as typeof line & { pricingSnapshot?: Record<string, unknown> }).pricingSnapshot ?? null,
       product: { sku: line.product.sku, productName: line.product.productName },
     })),
     payments: invoice.payments.map((payment) => ({ amount: payment.amount, tenderedAmount: payment.tenderedAmount, paymentMethod: { paymentMethodName: payment.paymentMethod.paymentMethodName } })),

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager, In, MoreThan, Not, IsNull } from 'typeorm';
 import { TenantPrincipal } from '../auth/auth.types';
 import { Customer } from '../customers/customers.entity';
@@ -13,12 +13,15 @@ import { InvoicePayment } from './invoice-payment.entity';
 import { Invoice } from './invoice.entity';
 import { ReceiveInvoicePaymentDto } from './dto/receive-invoice-payment.dto';
 import { snapshotInvoiceReceipt } from './invoice-receipt';
+import { PosPriceLine, PosPricingService, PosSaleType } from './pos-pricing.service';
+import { QuoteInvoiceDto } from './dto/quote-invoice.dto';
+import { createHash } from 'node:crypto';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class InvoicesService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(private readonly dataSource: DataSource, private readonly pricing: PosPricingService) {}
 
   pendingPayments(user: TenantPrincipal) {
     return this.dataSource.getRepository(Invoice).find({
@@ -84,7 +87,10 @@ export class InvoicesService {
 
   list(user: TenantPrincipal) {
     return this.dataSource.getRepository(Invoice).find({
-      where: { tenantId: user.tenantId },
+      where: {
+        tenantId: user.tenantId,
+        ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}),
+      },
       relations: { customer: true, location: true, payments: { paymentMethod: true } },
       order: { invoiceId: 'DESC' },
     });
@@ -96,24 +102,61 @@ export class InvoicesService {
       relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true } },
     });
     if (!invoice) throw new NotFoundException('Invoice not found.');
+    this.assertLocationAccess(invoice.locationId, user);
     return invoice;
   }
 
+  async billingLocations(user: TenantPrincipal) {
+    return this.dataSource.getRepository(Location).find({
+      where: {
+        tenantId: user.tenantId,
+        isActive: true,
+        ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}),
+      },
+      order: { name: 'ASC', locationId: 'ASC' },
+    });
+  }
+
+  async quote(dto: QuoteInvoiceDto, user: TenantPrincipal) {
+    await this.validateLocation(dto.locationId, user);
+    return this.pricing.quote(user.tenantId, dto.locationId, dto.saleType, dto.details);
+  }
+
   async create(dto: CreateInvoiceDto, user: TenantPrincipal) {
+    const checkoutFingerprint = this.checkoutFingerprint(dto);
+    const prior = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user);
+    if (prior) return prior;
     await this.validateHeader(dto, user);
-    return this.dataSource.transaction(async (manager) => {
-      const preparedDetails = dto.details.map((line) => {
-        const quantity = Number(line.quantity);
-        const unitPrice = money(Number(line.unitPrice));
-        const grossTotal = money(quantity * unitPrice);
-        const percentage = Number(line.discountPercentage ?? 0);
-        const discountAmount = money(line.discountAmount ?? grossTotal * percentage / 100);
-        if (percentage > 100 || discountAmount > grossTotal) throw new BadRequestException('A line discount cannot exceed its gross total.');
-        return { ...line, quantity, unitPrice, discountPercentage: percentage, discountAmount, grossTotal, netTotal: money(grossTotal - discountAmount) };
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+      const quote = await this.pricing.quoteWithManager(
+        manager,
+        user.tenantId,
+        dto.locationId,
+        dto.saleType as PosSaleType,
+        dto.details.map((line) => ({ productId: line.productId, quantity: line.quantity })),
+      );
+      const priceChanges = dto.details.flatMap((request, index) => {
+        const current = quote.lines[index];
+        return this.priceChanged(request, current) ? [{ productId: request.productId, quoted: {
+          priceListItemId: request.quotedPriceListItemId ?? null,
+          priceListItemDiscountId: request.quotedPriceListItemDiscountId ?? null,
+          unitPrice: request.quotedUnitPrice ?? null,
+          discountAmount: request.quotedDiscountAmount ?? null,
+        }, current }] : [];
       });
-      const subtotal = money(preparedDetails.reduce((sum, line) => sum + line.grossTotal, 0));
-      const discountTotal = money(preparedDetails.reduce((sum, line) => sum + line.discountAmount, 0));
-      const grandTotal = money(subtotal - discountTotal);
+      if (priceChanges.length) {
+        throw new ConflictException({
+          code: 'PRICE_CHANGED',
+          message: 'One or more prices changed. Review the updated totals and confirm again.',
+          priceChanges,
+          quote,
+        });
+      }
+      const preparedDetails = quote.lines;
+      const subtotal = quote.subtotal;
+      const discountTotal = quote.discountTotal;
+      const grandTotal = quote.grandTotal;
       const tenderedAmount = money((dto.payments ?? []).reduce((sum, payment) => sum + Number(payment.amount), 0));
       const paidAmount = money(Math.min(tenderedAmount, grandTotal));
       const changeAmount = money(Math.max(0, tenderedAmount - grandTotal));
@@ -121,9 +164,11 @@ export class InvoicesService {
       const invoiceRepo = manager.getRepository(Invoice);
       const invoice = await invoiceRepo.save(invoiceRepo.create({
         tenantId: user.tenantId,
+        checkoutKey: dto.checkoutKey,
+        checkoutFingerprint,
         locationId: dto.locationId,
         customerId: dto.customerId ?? null,
-        invoiceNumber: `PENDING-${Date.now()}-${user.userId}`,
+        invoiceNumber: `PENDING-${dto.checkoutKey}`,
         invoiceDate: new Date(),
         saleType: dto.saleType,
         subtotal: subtotal.toFixed(2),
@@ -164,28 +209,54 @@ export class InvoicesService {
         }));
       }
       const completed = (await this.getWithManager(manager, invoice.invoiceId, user.tenantId))!;
+      for (const detail of completed.details) {
+        const pricing = quote.lines.find((line) => Number(line.productId) === Number(detail.productId));
+        if (pricing) (detail as InvoiceDetail & { pricingSnapshot: PosPriceLine }).pricingSnapshot = pricing;
+      }
       completed.receiptSnapshot = snapshotInvoiceReceipt(completed);
       await invoiceRepo.update(invoice.invoiceId, { receiptSnapshot: completed.receiptSnapshot });
       return completed;
-    });
+      });
+    } catch (error) {
+      if (!this.isCheckoutKeyConflict(error)) throw error;
+      const committed = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user);
+      if (committed) return committed;
+      throw error;
+    }
   }
 
-  async catalog(locationId: number, user: TenantPrincipal) {
+  async catalog(locationId: number, saleType: PosSaleType, user: TenantPrincipal) {
     await this.validateLocation(locationId, user);
-    return this.dataSource.query(`
+    const products: Array<{ productId: number; code: string; name: string; category: string; stock: string; isStockItem: number }> = await this.dataSource.query(`
       SELECT p.product_id AS productId, p.sku AS code, p.product_name AS name,
         COALESCE(c.category_name, 'Uncategorized') AS category,
-        COALESCE(MAX(CASE WHEN UPPER(pl.price_list_type) = 'RETAIL' THEN pli.selling_price END), MAX(pli.selling_price), 0) AS retailPrice,
-        COALESCE(MAX(CASE WHEN UPPER(pl.price_list_type) = 'WHOLESALE' THEN pli.selling_price END), MAX(pli.selling_price), 0) AS wholesalePrice,
-        COALESCE(ib.quantity_on_hand, 0) AS stock
+        COALESCE(ib.quantity_on_hand, 0) AS stock, p.is_stock_item AS isStockItem
       FROM tbl_product p
       LEFT JOIN tbl_category c ON c.category_id = p.category_id
-      LEFT JOIN tbl_price_list_item pli ON pli.product_id = p.product_id AND pli.is_active = 1
-      LEFT JOIN tbl_price_list pl ON pl.price_list_id = pli.price_list_id AND pl.tenant_id = p.tenant_id AND pl.is_active = 1
+      INNER JOIN tbl_product_location product_location ON product_location.product_id = p.product_id AND product_location.location_id = ? AND product_location.is_active = 1 AND product_location.is_sellable = 1
       LEFT JOIN tbl_inventory_balance ib ON ib.product_id = p.product_id AND ib.tenant_id = p.tenant_id AND ib.location_id = ?
       WHERE p.tenant_id = ? AND p.is_active = 1 AND p.is_sellable = 1
-      GROUP BY p.product_id, p.sku, p.product_name, c.category_name, ib.quantity_on_hand
-      ORDER BY p.product_name`, [locationId, user.tenantId]);
+      ORDER BY p.product_name`, [locationId, locationId, user.tenantId]);
+    const result = [];
+    for (const product of products) {
+      try {
+        const quote = await this.pricing.quote(user.tenantId, locationId, saleType, [{ productId: Number(product.productId), quantity: 1 }]);
+        const line = quote.lines[0];
+        result.push({
+          ...product,
+          stock: product.isStockItem ? product.stock : Number.MAX_SAFE_INTEGER,
+          retailPrice: saleType === 'RETAIL' ? line.unitPrice : 0,
+          wholesalePrice: saleType === 'WHOLESALE' ? line.unitPrice : 0,
+          discountPercentage: line.discountPercentage,
+          discountAmount: line.discountAmount,
+          finalUnitPrice: line.netTotal,
+          pricing: line,
+        });
+      } catch (error) {
+        if (!(error instanceof NotFoundException)) throw error;
+      }
+    }
+    return result;
   }
 
   private async validateHeader(dto: CreateInvoiceDto, user: TenantPrincipal) {
@@ -196,8 +267,56 @@ export class InvoicesService {
   }
 
   private async validateLocation(locationId: number, user: TenantPrincipal) {
-    if (user.accessScope === 'LOCATION' && !user.assignedLocationIds.includes(locationId)) throw new ForbiddenException('You do not have access to this location.');
+    this.assertLocationAccess(locationId, user);
     if (!(await this.dataSource.getRepository(Location).findOneBy({ locationId, tenantId: user.tenantId, isActive: true }))) throw new NotFoundException('Location not found.');
+  }
+
+  private assertLocationAccess(locationId: number, user: TenantPrincipal) {
+    if (user.accessScope === 'LOCATION' && !user.assignedLocationIds.map(Number).includes(Number(locationId))) {
+      throw new ForbiddenException('You do not have access to this location.');
+    }
+  }
+
+  private priceChanged(request: CreateInvoiceDto['details'][number], current: PosPriceLine) {
+    if (!request.quotedPriceListItemId || request.quotedUnitPrice === undefined || request.quotedDiscountAmount === undefined) return true;
+    return Number(request.quotedPriceListItemId) !== current.priceListItemId
+      || Number(request.quotedPriceListItemDiscountId ?? 0) !== Number(current.priceListItemDiscountId ?? 0)
+      || money(Number(request.quotedUnitPrice)) !== current.unitPrice
+      || money(Number(request.quotedDiscountAmount)) !== current.discountAmount;
+  }
+
+  private checkoutFingerprint(dto: CreateInvoiceDto) {
+    const details = dto.details.map((line) => ({ productId: Number(line.productId), quantity: Number(line.quantity) }))
+      .sort((a, b) => a.productId - b.productId || a.quantity - b.quantity);
+    const payments = (dto.payments ?? []).map((payment) => ({
+      paymentMethodId: Number(payment.paymentMethodId),
+      amount: money(Number(payment.amount)),
+      referenceNumber: payment.referenceNumber?.trim() || null,
+    })).sort((a, b) => a.paymentMethodId - b.paymentMethodId || a.amount - b.amount || String(a.referenceNumber).localeCompare(String(b.referenceNumber)));
+    return createHash('sha256').update(JSON.stringify({
+      locationId: Number(dto.locationId),
+      customerId: dto.customerId ? Number(dto.customerId) : null,
+      saleType: dto.saleType,
+      details,
+      payments,
+    })).digest('hex');
+  }
+
+  private async checkoutResult(checkoutKey: string, checkoutFingerprint: string, user: TenantPrincipal) {
+    const existing = await this.dataSource.getRepository(Invoice).findOneBy({ tenantId: user.tenantId, checkoutKey });
+    if (!existing) return null;
+    this.assertLocationAccess(existing.locationId, user);
+    if (existing.checkoutFingerprint !== checkoutFingerprint) {
+      throw new ConflictException({ code: 'CHECKOUT_KEY_REUSED', message: 'This checkout key was already used for a different sale.' });
+    }
+    return this.get(existing.invoiceId, user);
+  }
+
+  private isCheckoutKeyConflict(error: unknown) {
+    const candidate = error as { code?: string; message?: string; driverError?: { code?: string; message?: string; sqlMessage?: string } };
+    const code = candidate.driverError?.code ?? candidate.code;
+    const message = `${candidate.driverError?.sqlMessage ?? ''} ${candidate.driverError?.message ?? ''} ${candidate.message ?? ''}`;
+    return code === 'ER_DUP_ENTRY' && message.includes('uq_invoice_tenant_checkout');
   }
 
   private async issueStock(manager: EntityManager, invoice: Invoice, detail: InvoiceDetail, user: TenantPrincipal) {

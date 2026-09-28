@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Invoice } from '../invoices/invoice.entity';
+import { ForbiddenException } from '@nestjs/common';
 import { InvoiceRefund } from './invoice-refund.entity';
 import { InvoiceAdjustment } from './invoice-adjustment.entity';
 import { InvoiceRefundsService } from './invoice-refunds.service';
@@ -94,4 +95,12 @@ test('an unpaid invoice can be fully returned without a cash payout', async () =
     details: [{ invoiceDetailId: 12, quantity: 3, returnToStock: false }],
   }, user);
   assert.equal(invoice.invoiceStatus, 'FULLY_REFUNDED');
+});
+
+test('refund preview rejects an invoice outside the authenticated location scope', async () => {
+  const invoice = { invoiceId: 1, tenantId: 1, locationId: 8, details: [], payments: [] };
+  const repository = { findOne: async () => invoice };
+  const service = new InvoiceRefundsService({ getRepository: () => repository, manager: {} } as any);
+  const locationUser = { tenantId: 1, userId: 2, accessScope: 'LOCATION', assignedLocationIds: [3] } as any;
+  await assert.rejects(service.refundableInvoice(1, locationUser), ForbiddenException);
 });

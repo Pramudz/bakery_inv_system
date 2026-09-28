@@ -26,12 +26,13 @@ test('local MySQL collection, receipt history and tenant/location isolation (rol
     const repo = manager.getRepository(Invoice);
     const invoice = await repo.save(repo.create({
       tenantId: base.tenantId, locationId: base.locationId, customerId: base.customerId,
+      checkoutKey: randomUUID(), checkoutFingerprint: randomUUID().replace(/-/g, '').padEnd(64, '0'),
       invoiceNumber: `TEST-${randomUUID()}`, invoiceDate: new Date(), saleType: 'RETAIL',
       subtotal: '5000.00', discountTotal: '0.00', grandTotal: '5000.00', paidAmount: '0.00',
       tenderedAmount: '0.00', changeAmount: '0.00', balanceAmount: '5000.00', paymentStatus: 'UNPAID',
       invoiceStatus: 'COMPLETED', createdByUserId: user.userId,
     }));
-    const service = new InvoicesService({ getRepository: manager.getRepository.bind(manager), transaction: (run: any) => run(manager) } as any);
+    const service = new InvoicesService({ getRepository: manager.getRepository.bind(manager), transaction: (run: any) => run(manager) } as any, {} as any);
     assert.ok((await service.pendingPayments(user)).some((row) => row.invoiceId === invoice.invoiceId));
     const firstInput = { amount: 2000, paymentMethodId: Number(method.paymentMethodId), collectionKey: randomUUID() };
     const first = await service.receivePayment(Number(invoice.invoiceId), firstInput, user);
@@ -61,7 +62,7 @@ test('local MySQL collection, receipt history and tenant/location isolation (rol
       tenantId: base.tenantId, sku: `RECEIPT-TEST-${randomUUID()}`, productName: 'Original receipt cake',
       categoryId: template.categoryId, baseUnitId: template.baseUnitId, isActive: true, isSellable: true, isStockItem: false,
     }));
-    const created = await service.create({ locationId: Number(base.locationId), saleType: 'RETAIL',
+    const created = await service.create({ checkoutKey: randomUUID(), locationId: Number(base.locationId), saleType: 'RETAIL',
       details: [{ productId: Number(product.productId), quantity: 2, unitPrice: 2500, discountAmount: 500 }],
       payments: [{ paymentMethodId: Number(method.paymentMethodId), amount: 2000 }],
     }, user);

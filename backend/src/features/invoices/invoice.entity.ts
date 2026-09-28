@@ -9,6 +9,7 @@ import { InvoicePayment } from './invoice-payment.entity';
 
 @Entity('tbl_invoice')
 @Index('uq_invoice_tenant_number', ['tenantId', 'invoiceNumber'], { unique: true })
+@Index('uq_invoice_tenant_checkout', ['tenantId', 'checkoutKey'], { unique: true })
 export class Invoice extends AuditEntity {
   @PrimaryGeneratedColumn({ name: 'invoice_id', type: 'bigint' }) invoiceId!: number;
   @Column({ name: 'tenant_id', type: 'bigint' }) tenantId!: number;
@@ -18,6 +19,8 @@ export class Invoice extends AuditEntity {
   @Column({ name: 'customer_id', type: 'bigint', nullable: true }) customerId!: number | null;
   @ManyToOne(() => Customer, { nullable: true, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'customer_id' }) customer!: Customer | null;
   @Column({ name: 'invoice_number', type: 'varchar', length: 50 }) invoiceNumber!: string;
+  @Column({ name: 'checkout_key', type: 'varchar', length: 36 }) checkoutKey!: string;
+  @Column({ name: 'checkout_fingerprint', type: 'char', length: 64 }) checkoutFingerprint!: string;
   @Column({ name: 'invoice_date', type: 'datetime' }) invoiceDate!: Date;
   @Column({ name: 'sale_type', type: 'varchar', length: 20 }) saleType!: string;
   @Column({ name: 'subtotal', type: 'decimal', precision: 18, scale: 2 }) subtotal!: string;

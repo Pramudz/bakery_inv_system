@@ -26,7 +26,7 @@ test('scheduled discount is future, current, then ended around its validity', ()
 
 test('no-discount resolution returns the original unit price', async () => {
   const price = { priceListItemId: 1, tenantId: 7, productId: 10, productUnitId: 3, priceListId: 5, sellingPrice: '99.95', minimumQuantity: '1', currencyCode: 'LKR', effectiveFrom: new Date('2026-01-01'), effectiveTo: null, isActive: true };
-  const priceBuilder: any = { where: () => priceBuilder, andWhere: () => priceBuilder, orderBy: () => priceBuilder, addOrderBy: () => priceBuilder, getMany: async () => [price] };
+  const priceBuilder: any = { innerJoin: () => priceBuilder, where: () => priceBuilder, andWhere: () => priceBuilder, orderBy: () => priceBuilder, addOrderBy: () => priceBuilder, getMany: async () => [price] };
   const discountBuilder: any = { where: () => discountBuilder, andWhere: () => discountBuilder, orderBy: () => discountBuilder, getOne: async () => null };
   const manager: any = { getRepository: (entity: any) => entity.name === 'PriceListItem' ? { createQueryBuilder: () => priceBuilder, findOneBy: async () => price } : { createQueryBuilder: () => discountBuilder } };
   const service = new PriceListItemDiscountService({} as any, { manager } as any);

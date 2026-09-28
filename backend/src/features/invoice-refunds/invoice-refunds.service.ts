@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { TenantPrincipal } from '../auth/auth.types';
 import { InvoiceDetail } from '../invoices/invoice-detail.entity';
@@ -24,22 +24,24 @@ export class InvoiceRefundsService {
   constructor(private readonly dataSource: DataSource) {}
 
   list(user: TenantPrincipal) {
-    return this.dataSource.getRepository(InvoiceRefund).find({ where: { tenantId: user.tenantId }, relations: { invoice: { customer: true }, location: true }, order: { invoiceRefundId: 'DESC' } });
+    return this.dataSource.getRepository(InvoiceRefund).find({ where: { tenantId: user.tenantId, ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}) }, relations: { invoice: { customer: true }, location: true }, order: { invoiceRefundId: 'DESC' } });
   }
   async get(id: number, user: TenantPrincipal) {
     const row = await this.dataSource.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: id, tenantId: user.tenantId }, relations: { invoice: { customer: true }, location: true, details: { product: true, invoiceDetail: true }, payments: { paymentMethod: true } } });
     if (!row) throw new NotFoundException('Invoice refund not found.');
+    this.assertLocationAccess(row.locationId, user);
     return row;
   }
 
   listAdjustments(user: TenantPrincipal) {
-    return this.dataSource.getRepository(InvoiceAdjustment).find({ where: { tenantId: user.tenantId }, relations: { invoice: { customer: true }, invoiceDetail: { product: true }, paymentMethod: true }, order: { invoiceAdjustmentId: 'DESC' } });
+    return this.dataSource.getRepository(InvoiceAdjustment).find({ where: { tenantId: user.tenantId, ...(user.accessScope === 'LOCATION' ? { invoice: { locationId: In(user.assignedLocationIds) } } : {}) }, relations: { invoice: { customer: true }, invoiceDetail: { product: true }, paymentMethod: true }, order: { invoiceAdjustmentId: 'DESC' } });
   }
 
   async createAdjustment(dto: CreateInvoiceAdjustmentDto, user: TenantPrincipal) {
     return this.dataSource.transaction(async (manager) => {
       const invoice = await manager.getRepository(Invoice).findOneBy({ invoiceId: dto.invoiceId, tenantId: user.tenantId });
       if (!invoice) throw new NotFoundException('Invoice not found.');
+      this.assertLocationAccess(invoice.locationId, user);
       const line = await manager.getRepository(InvoiceDetail).findOne({ where: { invoiceDetailId: dto.invoiceDetailId, invoiceId: invoice.invoiceId }, relations: { product: true } });
       if (!line) throw new NotFoundException('Invoice line not found.');
       const previous = await manager.getRepository(InvoiceAdjustment).findOne({ where: { invoiceDetailId: line.invoiceDetailId, status: 'SETTLED' }, order: { invoiceAdjustmentId: 'DESC' } });
@@ -63,6 +65,7 @@ export class InvoiceRefundsService {
   async refundableInvoice(id: number, user: TenantPrincipal) {
     const invoice = await this.dataSource.getRepository(Invoice).findOne({ where: { invoiceId: id, tenantId: user.tenantId }, relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true } } });
     if (!invoice) throw new NotFoundException('Invoice not found.');
+    this.assertLocationAccess(invoice.locationId, user);
     const sums = await this.refundedQuantities(invoice.details.map((x) => x.invoiceDetailId));
     return { ...invoice, refundablePaymentAmount: await this.remainingPayment(invoice), details: invoice.details.map((line) => ({ ...line, refundedQuantity: sums.get(Number(line.invoiceDetailId)) ?? 0, refundableQuantity: Math.max(0, Number(line.quantity) - (sums.get(Number(line.invoiceDetailId)) ?? 0)) })) };
   }
@@ -71,6 +74,7 @@ export class InvoiceRefundsService {
     return this.dataSource.transaction(async (manager) => {
       const invoice = await manager.getRepository(Invoice).findOne({ where: { invoiceId: dto.invoiceId, tenantId: user.tenantId }, relations: { details: { product: true } }, lock: { mode: 'pessimistic_write' } });
       if (!invoice) throw new NotFoundException('Invoice not found.');
+      this.assertLocationAccess(invoice.locationId, user);
       if (invoice.invoiceStatus === 'FULLY_REFUNDED') throw new BadRequestException('Invoice is already fully refunded.');
       const requestedIds = dto.details.map((x) => x.invoiceDetailId);
       if (new Set(requestedIds).size !== requestedIds.length) throw new BadRequestException('A refund line cannot be selected more than once.');
@@ -118,6 +122,7 @@ export class InvoiceRefundsService {
     return this.dataSource.transaction(async (manager) => {
       const invoice = await manager.getRepository(Invoice).findOne({ where: { invoiceId, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } });
       if (!invoice) throw new NotFoundException('Invoice not found.');
+      this.assertLocationAccess(invoice.locationId, user);
       const payment = await manager.getRepository(InvoicePayment).findOne({ where: { invoicePaymentId: paymentId, invoiceId }, lock: { mode: 'pessimistic_write' } });
       if (!payment) throw new NotFoundException('Invoice payment not found.');
       if (payment.isReversed) throw new BadRequestException('Payment is already reversed.');
@@ -169,6 +174,11 @@ export class InvoiceRefundsService {
     const payments = await manager.getRepository(InvoicePayment).findBy({ invoiceId: invoice.invoiceId, isReversed: false });
     const tendered = money(payments.reduce((sum, x) => sum + Number(x.tenderedAmount), 0)); const paid = money(Math.min(tendered, Number(invoice.grandTotal)));
     invoice.tenderedAmount = tendered.toFixed(2); invoice.paidAmount = paid.toFixed(2); invoice.changeAmount = Math.max(0, tendered - Number(invoice.grandTotal)).toFixed(2); invoice.balanceAmount = Math.max(0, Number(invoice.grandTotal) - paid).toFixed(2); invoice.paymentStatus = paid === 0 ? 'UNPAID' : paid < Number(invoice.grandTotal) ? 'PARTIALLY_PAID' : 'PAID'; await manager.getRepository(Invoice).save(invoice);
+  }
+  private assertLocationAccess(locationId: number, user: TenantPrincipal) {
+    if (user.accessScope === 'LOCATION' && !user.assignedLocationIds.map(Number).includes(Number(locationId))) {
+      throw new ForbiddenException('You do not have access to this location.');
+    }
   }
   private refundNumber(id: number) { return `REF-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(id).padStart(6, '0')}`; }
   private getWithManager(manager: EntityManager, id: number, tenantId: number) { return manager.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: id, tenantId }, relations: { invoice: true, location: true, details: { product: true }, payments: { paymentMethod: true } } }); }
