@@ -5,7 +5,8 @@ import { Customer } from '../customers/customers.entity';
 import { InventoryBalance } from '../inventory-balance/inventory-balance.entity';
 import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
 import { Location } from '../locations/locations.entity';
-import { PaymentMethod } from '../payment-methods/payment-methods.entity';
+import { PaymentMethodType } from '../payment-methods/payment-methods.entity';
+import { PaymentProcessingService } from '../payment-methods/payment-processing.service';
 import { Product } from '../products/products.entity';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceDetail } from './invoice-detail.entity';
@@ -21,7 +22,7 @@ const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 10
 
 @Injectable()
 export class InvoicesService {
-  constructor(private readonly dataSource: DataSource, private readonly pricing: PosPricingService) {}
+  constructor(private readonly dataSource: DataSource, private readonly pricing: PosPricingService, private readonly paymentProcessing: PaymentProcessingService = new PaymentProcessingService()) {}
 
   pendingPayments(user: TenantPrincipal) {
     return this.dataSource.getRepository(Invoice).find({
@@ -40,7 +41,7 @@ export class InvoicesService {
         collectionKey: Not(IsNull()),
         invoice: { tenantId: user.tenantId, ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}) },
       },
-      relations: { invoice: { customer: true, location: true }, paymentMethod: true },
+      relations: { invoice: { customer: true, location: true }, paymentMethod: true, paymentChannel: true },
       order: { invoicePaymentId: 'DESC' },
     });
   }
@@ -59,25 +60,27 @@ export class InvoicesService {
       const repo = manager.getRepository(InvoicePayment);
       const existing = await repo.findOneBy({ invoiceId: invoice.invoiceId, collectionKey: dto.collectionKey });
       if (existing) {
-        if (Number(existing.amount) !== dto.amount || Number(existing.paymentMethodId) !== dto.paymentMethodId || existing.referenceNumber !== (dto.referenceNumber?.trim() || null)) {
+        if (Number(existing.tenderedAmount) !== dto.amount || Number(existing.paymentMethodId) !== dto.paymentMethodId || Number(existing.paymentChannelId ?? 0) !== Number(dto.paymentChannelId ?? 0) || existing.referenceNumber !== (dto.referenceNumber?.trim() || null)) {
           throw new BadRequestException('This receipt request was already used for a different payment. Refresh and try again.');
         }
         return existing;
       }
       if (invoice.invoiceStatus !== 'COMPLETED') throw new BadRequestException('Only completed invoices without refunds can receive payments here.');
       const before = money(Number(invoice.balanceAmount));
-      if (before <= 0 || dto.amount > before) throw new BadRequestException(`Payment cannot exceed the remaining balance of ${before.toFixed(2)}.`);
-      const method = await manager.getRepository(PaymentMethod).findOneBy({ paymentMethodId: dto.paymentMethodId, tenantId: user.tenantId, isActive: true });
-      if (!method) throw new NotFoundException('Active payment method not found.');
-      const after = money(before - dto.amount);
+      if (before <= 0) throw new BadRequestException('This invoice has no remaining balance.');
+      const [prepared] = await this.paymentProcessing.prepare(manager, user.tenantId, [dto], before);
+      const after = money(before - prepared.applied);
       const payment = await repo.save(repo.create({
-        invoiceId: invoice.invoiceId, paymentMethodId: method.paymentMethodId, amount: dto.amount.toFixed(2),
-        tenderedAmount: dto.amount.toFixed(2), changeAmount: '0.00', referenceNumber: dto.referenceNumber?.trim() || null,
+        invoiceId: invoice.invoiceId, paymentMethodId: prepared.method.paymentMethodId, paymentMethodTypeSnapshot: prepared.method.paymentMethodType,
+        paymentChannelId: prepared.channel?.paymentChannelId ?? null, paymentChannelCodeSnapshot: prepared.channel?.code ?? null,
+        paymentChannelNameSnapshot: prepared.channel?.name ?? null,
+        amount: prepared.applied.toFixed(2), tenderedAmount: prepared.tendered.toFixed(2), changeAmount: prepared.change.toFixed(2), referenceNumber: prepared.referenceNumber,
         paidAt: new Date(), createdByUserId: user.userId, isReversed: false, reversedAt: null,
         collectionKey: dto.collectionKey, balanceBefore: before.toFixed(2), balanceAfter: after.toFixed(2),
       }));
-      invoice.paidAmount = money(Number(invoice.paidAmount) + dto.amount).toFixed(2);
-      invoice.tenderedAmount = money(Number(invoice.tenderedAmount) + dto.amount).toFixed(2);
+      invoice.paidAmount = money(Number(invoice.paidAmount) + prepared.applied).toFixed(2);
+      invoice.tenderedAmount = money(Number(invoice.tenderedAmount) + prepared.tendered).toFixed(2);
+      invoice.changeAmount = money(Number(invoice.changeAmount) + prepared.change).toFixed(2);
       invoice.balanceAmount = after.toFixed(2);
       invoice.paymentStatus = after === 0 ? 'PAID' : 'PARTIALLY_PAID';
       await invoiceRepo.save(invoice);
@@ -91,7 +94,7 @@ export class InvoicesService {
         tenantId: user.tenantId,
         ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}),
       },
-      relations: { customer: true, location: true, payments: { paymentMethod: true } },
+      relations: { customer: true, location: true, payments: { paymentMethod: true, paymentChannel: true } },
       order: { invoiceId: 'DESC' },
     });
   }
@@ -99,11 +102,37 @@ export class InvoicesService {
   async get(id: number, user: TenantPrincipal) {
     const invoice = await this.dataSource.getRepository(Invoice).findOne({
       where: { invoiceId: id, tenantId: user.tenantId },
-      relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true } },
+      relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true, paymentChannel: true } },
     });
     if (!invoice) throw new NotFoundException('Invoice not found.');
     this.assertLocationAccess(invoice.locationId, user);
     return invoice;
+  }
+
+  async paymentBreakdown(user: TenantPrincipal) {
+    const payments = await this.dataSource.getRepository(InvoicePayment).find({
+      where: {
+        isReversed: false,
+        invoice: { tenantId: user.tenantId, ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}) },
+      },
+      relations: { invoice: { location: true }, paymentMethod: true, paymentChannel: true },
+    });
+    const grouped = new Map<string, { locationId: number; locationName: string | null; source: 'NEW_SALE' | 'COLLECTION'; methodType: PaymentMethodType | 'UNCLASSIFIED'; paymentChannelId: number | null; paymentChannelCode: string | null; paymentChannelName: string | null; appliedAmount: number; tenderedAmount: number; changeGiven: number; netReceived: number; transactionCount: number }>();
+    for (const payment of payments) {
+      const source = payment.collectionKey ? 'COLLECTION' : 'NEW_SALE';
+      const methodType = payment.paymentMethodTypeSnapshot ?? payment.paymentMethod.paymentMethodType ?? 'UNCLASSIFIED';
+      const channelId = payment.paymentChannelId ? Number(payment.paymentChannelId) : null;
+      const locationId = Number(payment.invoice.locationId);
+      const key = `${locationId}|${source}|${methodType}|${channelId ?? ''}`;
+      const row = grouped.get(key) ?? { locationId, locationName: payment.invoice.location?.name ?? null, source, methodType, paymentChannelId: channelId, paymentChannelCode: payment.paymentChannelCodeSnapshot ?? payment.paymentChannel?.code ?? null, paymentChannelName: payment.paymentChannelNameSnapshot ?? payment.paymentChannel?.name ?? null, appliedAmount: 0, tenderedAmount: 0, changeGiven: 0, netReceived: 0, transactionCount: 0 };
+      row.appliedAmount = money(row.appliedAmount + Number(payment.amount));
+      row.tenderedAmount = money(row.tenderedAmount + Number(payment.tenderedAmount));
+      row.changeGiven = money(row.changeGiven + Number(payment.changeAmount));
+      row.netReceived = money(row.netReceived + Number(payment.tenderedAmount) - Number(payment.changeAmount));
+      row.transactionCount += 1;
+      grouped.set(key, row);
+    }
+    return [...grouped.values()].sort((a, b) => a.locationId - b.locationId || a.source.localeCompare(b.source) || a.methodType.localeCompare(b.methodType) || (a.paymentChannelName ?? '').localeCompare(b.paymentChannelName ?? ''));
   }
 
   async billingLocations(user: TenantPrincipal) {
@@ -122,7 +151,7 @@ export class InvoicesService {
     return this.pricing.quote(user.tenantId, dto.locationId, dto.saleType, dto.details);
   }
 
-  async create(dto: CreateInvoiceDto, user: TenantPrincipal) {
+  async create(dto: CreateInvoiceDto, user: TenantPrincipal, deadlockAttempt = 0): Promise<Invoice> {
     const checkoutFingerprint = this.checkoutFingerprint(dto);
     const prior = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user);
     if (prior) return prior;
@@ -157,9 +186,10 @@ export class InvoicesService {
       const subtotal = quote.subtotal;
       const discountTotal = quote.discountTotal;
       const grandTotal = quote.grandTotal;
-      const tenderedAmount = money((dto.payments ?? []).reduce((sum, payment) => sum + Number(payment.amount), 0));
-      const paidAmount = money(Math.min(tenderedAmount, grandTotal));
-      const changeAmount = money(Math.max(0, tenderedAmount - grandTotal));
+      const preparedPayments = await this.paymentProcessing.prepare(manager, user.tenantId, dto.payments ?? [], grandTotal);
+      const tenderedAmount = money(preparedPayments.reduce((sum, payment) => sum + payment.tendered, 0));
+      const paidAmount = money(preparedPayments.reduce((sum, payment) => sum + payment.applied, 0));
+      const changeAmount = money(preparedPayments.reduce((sum, payment) => sum + payment.change, 0));
 
       const invoiceRepo = manager.getRepository(Invoice);
       const invoice = await invoiceRepo.save(invoiceRepo.create({
@@ -195,17 +225,13 @@ export class InvoicesService {
         if (product.isStockItem) await this.issueStock(manager, invoice, detail, user);
       }
 
-      let remainingToApply = grandTotal;
-      for (const payment of dto.payments ?? []) {
-        const method = await manager.getRepository(PaymentMethod).findOneBy({ paymentMethodId: payment.paymentMethodId, tenantId: user.tenantId, isActive: true });
-        if (!method) throw new NotFoundException(`Payment method ${payment.paymentMethodId} was not found.`);
-        const tendered = money(Number(payment.amount));
-        const applied = money(Math.min(tendered, remainingToApply));
-        const change = money(tendered - applied);
-        remainingToApply = money(Math.max(0, remainingToApply - applied));
+      for (const payment of preparedPayments) {
         await manager.getRepository(InvoicePayment).save(manager.getRepository(InvoicePayment).create({
-          invoiceId: invoice.invoiceId, paymentMethodId: payment.paymentMethodId, amount: applied.toFixed(2), tenderedAmount: tendered.toFixed(2), changeAmount: change.toFixed(2),
-          referenceNumber: payment.referenceNumber?.trim() || null, paidAt: new Date(), createdByUserId: user.userId,
+          invoiceId: invoice.invoiceId, paymentMethodId: payment.method.paymentMethodId, paymentMethodTypeSnapshot: payment.method.paymentMethodType,
+          paymentChannelId: payment.channel?.paymentChannelId ?? null, paymentChannelCodeSnapshot: payment.channel?.code ?? null,
+          paymentChannelNameSnapshot: payment.channel?.name ?? null,
+          amount: payment.applied.toFixed(2), tenderedAmount: payment.tendered.toFixed(2), changeAmount: payment.change.toFixed(2),
+          referenceNumber: payment.referenceNumber, paidAt: new Date(), createdByUserId: user.userId,
         }));
       }
       const completed = (await this.getWithManager(manager, invoice.invoiceId, user.tenantId))!;
@@ -218,6 +244,10 @@ export class InvoicesService {
       return completed;
       });
     } catch (error) {
+      if (this.isRetryableDeadlock(error) && deadlockAttempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 10 * (deadlockAttempt + 1)));
+        return this.create(dto, user, deadlockAttempt + 1);
+      }
       if (!this.isCheckoutKeyConflict(error)) throw error;
       const committed = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user);
       if (committed) return committed;
@@ -291,8 +321,9 @@ export class InvoicesService {
     const payments = (dto.payments ?? []).map((payment) => ({
       paymentMethodId: Number(payment.paymentMethodId),
       amount: money(Number(payment.amount)),
+      paymentChannelId: payment.paymentChannelId ? Number(payment.paymentChannelId) : null,
       referenceNumber: payment.referenceNumber?.trim() || null,
-    })).sort((a, b) => a.paymentMethodId - b.paymentMethodId || a.amount - b.amount || String(a.referenceNumber).localeCompare(String(b.referenceNumber)));
+    })).sort((a, b) => a.paymentMethodId - b.paymentMethodId || a.amount - b.amount || Number(a.paymentChannelId ?? 0) - Number(b.paymentChannelId ?? 0) || String(a.referenceNumber).localeCompare(String(b.referenceNumber)));
     return createHash('sha256').update(JSON.stringify({
       locationId: Number(dto.locationId),
       customerId: dto.customerId ? Number(dto.customerId) : null,
@@ -317,6 +348,11 @@ export class InvoicesService {
     const code = candidate.driverError?.code ?? candidate.code;
     const message = `${candidate.driverError?.sqlMessage ?? ''} ${candidate.driverError?.message ?? ''} ${candidate.message ?? ''}`;
     return code === 'ER_DUP_ENTRY' && message.includes('uq_invoice_tenant_checkout');
+  }
+
+  private isRetryableDeadlock(error: unknown) {
+    const candidate = error as { code?: string; errno?: number; driverError?: { code?: string; errno?: number } };
+    return (candidate.driverError?.code ?? candidate.code) === 'ER_LOCK_DEADLOCK' || (candidate.driverError?.errno ?? candidate.errno) === 1213;
   }
 
   private async issueStock(manager: EntityManager, invoice: Invoice, detail: InvoiceDetail, user: TenantPrincipal) {
@@ -344,6 +380,6 @@ export class InvoicesService {
   }
 
   private async getWithManager(manager: EntityManager, id: number, tenantId: number) {
-    return manager.getRepository(Invoice).findOne({ where: { invoiceId: id, tenantId }, relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true } } });
+    return manager.getRepository(Invoice).findOne({ where: { invoiceId: id, tenantId }, relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true, paymentChannel: true } } });
   }
 }

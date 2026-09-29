@@ -9,7 +9,7 @@ export type PendingInvoice = {
   balanceAmount: string;
   paymentStatus: string;
   customer: { customerName: string; phone: string | null; mobile: string | null } | null;
-  location: { name: string };
+  location: { locationId: number; name: string };
 };
 
 export type PaymentReceipt = {
@@ -17,18 +17,22 @@ export type PaymentReceipt = {
   invoiceId: number;
   paidAt: string;
   amount: string;
+  tenderedAmount: string;
+  changeAmount: string;
   balanceBefore: string;
   balanceAfter: string;
   referenceNumber: string | null;
   isReversed: boolean;
   invoice: PendingInvoice;
-  paymentMethod: { paymentMethodName: string };
+  paymentMethod: { paymentMethodName: string; paymentMethodType?: 'CASH' | 'CARD' | 'CHEQUE' | null };
+  paymentChannel?: { paymentChannelId: number; name: string } | null;
 };
 
 export type ReceivePaymentInput = {
   amount: number;
   paymentMethodId: number;
   referenceNumber?: string;
+  paymentChannelId?: number;
   collectionKey: string;
 };
 

@@ -6,6 +6,14 @@ import { InvoiceReceiptContent } from "./InvoiceReceiptContent";
 import { downloadInvoiceReceipt } from "./invoiceReceiptPdf";
 import { PaymentMethod, paymentMethodsApi } from "../api/paymentMethodsApi";
 import { ApiError } from "../../../services/apiClient";
+import { paymentChannelsApi } from "../api/paymentChannelsApi";
+import { BillingLoyaltyArea } from "../components/BillingLoyaltyArea";
+import {
+  PosPaymentEntry,
+  summarizePaymentEntries,
+  validatePaymentDraft,
+  validatePaymentSequence,
+} from "../paymentDraft";
 
 type SaleType = "Retail" | "Wholesale";
 type Product = {
@@ -23,8 +31,15 @@ type CartLine = Product & {
   discountRs: number;
 };
 
-type CustomerOption = { customerId: number; code: string; name: string; phone: string };
-type SplitPayment = { paymentMethodId: number; name: string; amount: number };
+type CustomerOption = {
+  customerId: number;
+  code: string;
+  name: string;
+  phone: string;
+};
+type PaymentFieldErrors = Partial<
+  Record<"method" | "amount" | "channel" | "reference" | "form", string>
+>;
 
 export function BillingPage() {
   const saleTypeSection = useRef<HTMLDivElement>(null);
@@ -39,88 +54,295 @@ export function BillingPage() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All categories");
   const [customerQuery, setCustomerQuery] = useState("");
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerOption | null>(null);
+  const [selectedCustomer, setSelectedCustomer] =
+    useState<CustomerOption | null>(null);
   const [newCustomer, setNewCustomer] = useState(false);
-  const [method, setMethod] = useState("Cash");
+  const [paymentMethodId, setPaymentMethodId] = useState(0);
   const [paid, setPaid] = useState("");
+  const [paymentChannelId, setPaymentChannelId] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentValidation, setPaymentValidation] =
+    useState<PaymentFieldErrors>({});
   const [locationId, setLocationId] = useState(0);
   const [checkoutKey, setCheckoutKey] = useState(() => crypto.randomUUID());
-  const [splitPayments, setSplitPayments] = useState<SplitPayment[]>([]);
+  const [paymentEntries, setPaymentEntries] = useState<PosPaymentEntry[]>([]);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [complete, setComplete] = useState(false);
-  const [completedInvoice, setCompletedInvoice] = useState<Record<string, any> | null>(null);
-  const [priceChangeQuote, setPriceChangeQuote] = useState<InvoiceQuote | null>(null);
-  const locationsQuery = useQuery({ queryKey: ["billing-locations"], queryFn: invoicesApi.billingLocations });
-  const customersQuery = useQuery({ queryKey: ["customers"], queryFn: customersApi.list });
-  const methodsQuery = useQuery({ queryKey: ["payment-methods"], queryFn: paymentMethodsApi.list });
-  useEffect(() => { const first = (locationsQuery.data ?? []).find((x: any) => x.isActive !== false); if (!locationId && first) setLocationId(Number(first.locationId)); }, [locationsQuery.data, locationId]);
+  const [completedInvoice, setCompletedInvoice] = useState<Record<
+    string,
+    any
+  > | null>(null);
+  const [priceChangeQuote, setPriceChangeQuote] = useState<InvoiceQuote | null>(
+    null,
+  );
+  const locationsQuery = useQuery({
+    queryKey: ["billing-locations"],
+    queryFn: invoicesApi.billingLocations,
+  });
+  const customersQuery = useQuery({
+    queryKey: ["customers"],
+    queryFn: customersApi.list,
+  });
+  const methodsQuery = useQuery({
+    queryKey: ["payment-methods"],
+    queryFn: paymentMethodsApi.list,
+  });
+  const channelsQuery = useQuery({
+    queryKey: ["payment-channels", "active"],
+    queryFn: () => paymentChannelsApi.list(true),
+  });
+  useEffect(() => {
+    const first = (locationsQuery.data ?? []).find(
+      (x: any) => x.isActive !== false,
+    );
+    if (!locationId && first) setLocationId(Number(first.locationId));
+  }, [locationsQuery.data, locationId]);
   const saleTypeCode = saleType.toUpperCase() as "RETAIL" | "WHOLESALE";
-  const catalogQuery = useQuery({ queryKey: ["invoice-catalog", locationId, saleTypeCode], queryFn: () => invoicesApi.catalog(locationId, saleTypeCode), enabled: locationId > 0 });
-  const products: Product[] = (catalogQuery.data ?? []).map((x) => ({ ...x, retailPrice: Number(x.retailPrice), wholesalePrice: Number(x.wholesalePrice), stock: Number(x.stock) }));
-  const customers: CustomerOption[] = (customersQuery.data ?? []).filter((x: any) => x.isActive !== false).map((x: any) => ({ customerId: Number(x.customerId), code: x.customerCode, name: x.customerName, phone: x.phone ?? "" }));
-  const paymentMethods = (methodsQuery.data ?? []).filter((x) => x.isActive);
-  useEffect(() => { if (!method && paymentMethods[0]) setMethod(paymentMethods[0].paymentMethodName); }, [paymentMethods, method]);
+  const catalogQuery = useQuery({
+    queryKey: ["invoice-catalog", locationId, saleTypeCode],
+    queryFn: () => invoicesApi.catalog(locationId, saleTypeCode),
+    enabled: locationId > 0,
+  });
+  const products: Product[] = (catalogQuery.data ?? []).map((x) => ({
+    ...x,
+    retailPrice: Number(x.retailPrice),
+    wholesalePrice: Number(x.wholesalePrice),
+    stock: Number(x.stock),
+  }));
+  const customers: CustomerOption[] = (customersQuery.data ?? [])
+    .filter((x: any) => x.isActive !== false)
+    .map((x: any) => ({
+      customerId: Number(x.customerId),
+      code: x.customerCode,
+      name: x.customerName,
+      phone: x.phone ?? "",
+    }));
+  const paymentMethods = (methodsQuery.data ?? []).filter(
+    (x) => x.isActive && x.paymentMethodType,
+  );
+  useEffect(() => {
+    if (!paymentMethodId && paymentMethods[0])
+      setPaymentMethodId(paymentMethods[0].paymentMethodId);
+  }, [paymentMethods, paymentMethodId]);
   const quoteQuery = useQuery({
-    queryKey: ["invoice-quote", locationId, saleTypeCode, cart.map((line) => [line.productId, line.qty])],
-    queryFn: () => invoicesApi.quote({ locationId, saleType: saleTypeCode, details: cart.map((line) => ({ productId: line.productId, quantity: line.qty })) }),
-    enabled: locationId > 0 && cart.length > 0 && cart.every((line) => line.qty > 0),
+    queryKey: [
+      "invoice-quote",
+      locationId,
+      saleTypeCode,
+      cart.map((line) => [line.productId, line.qty]),
+    ],
+    queryFn: () =>
+      invoicesApi.quote({
+        locationId,
+        saleType: saleTypeCode,
+        details: cart.map((line) => ({
+          productId: line.productId,
+          quantity: line.qty,
+        })),
+      }),
+    enabled:
+      locationId > 0 && cart.length > 0 && cart.every((line) => line.qty > 0),
     retry: false,
   });
-  useEffect(() => { setPriceChangeQuote(null); }, [locationId, saleTypeCode, cart]);
+  useEffect(() => {
+    setPriceChangeQuote(null);
+  }, [locationId, saleTypeCode, cart]);
   const activeQuote = priceChangeQuote ?? quoteQuery.data;
-  const quotedLine = (x: Product) => activeQuote?.lines.find((line) => Number(line.productId) === Number(x.productId));
-  const unitPrice = (x: Product) => quotedLine(x)?.unitPrice ?? (saleType === "Retail" ? x.retailPrice : x.wholesalePrice);
-  const lineGross = (x: CartLine) => quotedLine(x)?.grossTotal ?? x.qty * unitPrice(x);
+  const quotedLine = (x: Product) =>
+    activeQuote?.lines.find(
+      (line) => Number(line.productId) === Number(x.productId),
+    );
+  const unitPrice = (x: Product) =>
+    quotedLine(x)?.unitPrice ??
+    (saleType === "Retail" ? x.retailPrice : x.wholesalePrice);
+  const lineGross = (x: CartLine) =>
+    quotedLine(x)?.grossTotal ?? x.qty * unitPrice(x);
   const lineDiscount = (x: CartLine) => quotedLine(x)?.discountAmount ?? 0;
-  const lineNet = (x: CartLine) => quotedLine(x)?.netTotal ?? Math.max(0, lineGross(x) - lineDiscount(x));
+  const lineNet = (x: CartLine) =>
+    quotedLine(x)?.netTotal ?? Math.max(0, lineGross(x) - lineDiscount(x));
   const subtotal = useMemo(
     () => activeQuote?.subtotal ?? cart.reduce((n, x) => n + lineGross(x), 0),
     [cart, saleType, activeQuote],
   );
   const discount = useMemo(
-    () => activeQuote?.discountTotal ?? cart.reduce((n, x) => n + lineDiscount(x), 0),
+    () =>
+      activeQuote?.discountTotal ??
+      cart.reduce((n, x) => n + lineDiscount(x), 0),
     [cart, saleType, activeQuote],
   );
   const total = Math.max(0, subtotal - discount);
-  const currentMethod = paymentMethods.find((x) => x.paymentMethodName === method);
-  const paidTotal = splitPayments.reduce((sum, x) => sum + x.amount, 0) + (+paid || 0);
+  const currentMethod = paymentMethods.find(
+    (x) => x.paymentMethodId === paymentMethodId,
+  );
+  const paymentSummary = summarizePaymentEntries(total, paymentEntries);
+  const editingPaymentIndex = editingPaymentId
+    ? paymentEntries.findIndex((entry) => entry.id === editingPaymentId)
+    : -1;
+  const draftBaseEntries =
+    editingPaymentIndex >= 0
+      ? paymentEntries.slice(0, editingPaymentIndex)
+      : paymentEntries;
+  const paymentSequenceError = validatePaymentSequence(total, paymentEntries);
+  const currentChannel = (channelsQuery.data ?? []).find(
+    (row) => Number(row.paymentChannelId) === Number(paymentChannelId),
+  );
   const paymentStatus =
-    paidTotal >= total && total > 0
-      ? "Full Paid"
-      : paidTotal > 0
-        ? "Partially Paid"
-        : "None Paid";
+    paymentSummary.remaining <= 0 && total > 0
+      ? "Paid"
+      : paymentSummary.applied > 0
+        ? "Partially paid"
+        : "Unpaid";
+  const submitGuard = useRef(false);
   const invoiceMutation = useMutation({
-    mutationFn: ({ acceptPriceChanges = false, quote = activeQuote }: { acceptPriceChanges?: boolean; quote?: InvoiceQuote } = {}) => invoicesApi.create({
-      checkoutKey,
-      locationId,
-      customerId: selectedCustomer?.customerId,
-      saleType: saleTypeCode,
-      details: cart.map((x) => {
-        const line = quote?.lines.find((candidate) => Number(candidate.productId) === Number(x.productId));
-        return { productId: x.productId, quantity: x.qty, unitPrice: unitPrice(x), discountPercentage: line?.discountPercentage ?? 0, discountAmount: line?.discountAmount ?? 0, quotedPriceListItemId: line?.priceListItemId, quotedPriceListItemDiscountId: line?.priceListItemDiscountId ?? undefined, quotedUnitPrice: line?.unitPrice, quotedDiscountAmount: line?.discountAmount };
+    mutationFn: ({
+      acceptPriceChanges = false,
+      quote = activeQuote,
+    }: { acceptPriceChanges?: boolean; quote?: InvoiceQuote } = {}) =>
+      invoicesApi.create({
+        checkoutKey,
+        locationId,
+        customerId: selectedCustomer?.customerId,
+        saleType: saleTypeCode,
+        details: cart.map((x) => {
+          const line = quote?.lines.find(
+            (candidate) => Number(candidate.productId) === Number(x.productId),
+          );
+          return {
+            productId: x.productId,
+            quantity: x.qty,
+            unitPrice: unitPrice(x),
+            discountPercentage: line?.discountPercentage ?? 0,
+            discountAmount: line?.discountAmount ?? 0,
+            quotedPriceListItemId: line?.priceListItemId,
+            quotedPriceListItemDiscountId:
+              line?.priceListItemDiscountId ?? undefined,
+            quotedUnitPrice: line?.unitPrice,
+            quotedDiscountAmount: line?.discountAmount,
+          };
+        }),
+        payments: paymentEntries.map((x) => ({
+          paymentMethodId: x.paymentMethodId,
+          amount: x.amount,
+          paymentChannelId: x.paymentChannelId,
+          referenceNumber: x.referenceNumber,
+        })),
+        acceptPriceChanges,
       }),
-      payments: [
-        ...splitPayments.map((x) => ({ paymentMethodId: x.paymentMethodId, amount: x.amount })),
-        ...(currentMethod && +paid > 0 ? [{ paymentMethodId: currentMethod.paymentMethodId, amount: +paid }] : []),
-      ],
-      acceptPriceChanges,
-    }),
-    onSuccess: (invoice) => { setPriceChangeQuote(null); setCompletedInvoice(invoice); setComplete(true); },
+    onSuccess: (invoice) => {
+      setPriceChangeQuote(null);
+      setCompletedInvoice(invoice);
+      setComplete(true);
+    },
     onError: (error) => {
-      const details = (error as ApiError).details as { code?: string; quote?: InvoiceQuote } | undefined;
-      if (details?.code === "PRICE_CHANGED" && details.quote) setPriceChangeQuote(details.quote);
+      const details = (error as ApiError).details as
+        { code?: string; quote?: InvoiceQuote } | undefined;
+      if (details?.code === "PRICE_CHANGED" && details.quote)
+        setPriceChangeQuote(details.quote);
+    },
+    onSettled: () => {
+      submitGuard.current = false;
     },
   });
+  const clearPaymentDraft = () => {
+    setPaid("");
+    setPaymentChannelId("");
+    setPaymentReference("");
+    setEditingPaymentId(null);
+    setPaymentValidation({});
+  };
   const choosePaymentMethod = (paymentMethod: PaymentMethod) => {
-    if (method !== paymentMethod.paymentMethodName && currentMethod && +paid > 0) {
-      setSplitPayments((rows) => [...rows, { paymentMethodId: currentMethod.paymentMethodId, name: currentMethod.paymentMethodName, amount: +paid }]);
-      setPaid("");
+    setPaymentValidation({});
+    setPaymentMethodId(paymentMethod.paymentMethodId);
+    if (paymentMethod.paymentMethodType !== "CARD") {
+      setPaymentChannelId("");
+      setPaymentReference("");
     }
-    setMethod(paymentMethod.paymentMethodName);
+  };
+  const savePaymentEntry = () => {
+    const amount = Number(paid);
+    const validation = validatePaymentDraft({
+      invoiceTotal: total,
+      entries: draftBaseEntries,
+      methodType: currentMethod?.paymentMethodType ?? undefined,
+      amount,
+      channelId: paymentChannelId ? Number(paymentChannelId) : undefined,
+      referenceNumber: paymentReference,
+    });
+    if (
+      currentMethod?.paymentMethodType === "CARD" &&
+      !(channelsQuery.data ?? []).length
+    ) {
+      validation.channel =
+        "No active card channel is configured for this tenant.";
+    }
+    if (Object.keys(validation).length) {
+      setPaymentValidation(validation);
+      return;
+    }
+    if (!currentMethod?.paymentMethodType) return;
+    const entry: PosPaymentEntry = {
+      id: editingPaymentId ?? crypto.randomUUID(),
+      paymentMethodId: currentMethod.paymentMethodId,
+      name: currentMethod.paymentMethodName,
+      type: currentMethod.paymentMethodType,
+      amount,
+      paymentChannelId:
+        currentMethod.paymentMethodType === "CARD"
+          ? Number(paymentChannelId)
+          : undefined,
+      channelName:
+        currentMethod.paymentMethodType === "CARD"
+          ? currentChannel?.name
+          : undefined,
+      referenceNumber:
+        currentMethod.paymentMethodType === "CARD"
+          ? paymentReference.trim()
+          : undefined,
+    };
+    const nextEntries = editingPaymentId
+      ? paymentEntries.map((row) => (row.id === editingPaymentId ? entry : row))
+      : [...paymentEntries, entry];
+    const sequenceError = validatePaymentSequence(total, nextEntries);
+    if (sequenceError) {
+      setPaymentValidation({ form: sequenceError });
+      return;
+    }
+    setPaymentEntries(nextEntries);
+    clearPaymentDraft();
+  };
+  const editPaymentEntry = (entry: PosPaymentEntry) => {
+    setEditingPaymentId(entry.id);
+    setPaymentMethodId(entry.paymentMethodId);
+    setPaid(String(entry.amount));
+    setPaymentChannelId(
+      entry.paymentChannelId ? String(entry.paymentChannelId) : "",
+    );
+    setPaymentReference(entry.referenceNumber ?? "");
+    setPaymentValidation({});
+    setTimeout(() => focusFirst(paymentSection.current), 0);
+  };
+  const submitSale = (
+    options: { acceptPriceChanges?: boolean; quote?: InvoiceQuote } = {},
+  ) => {
+    if (submitGuard.current || invoiceMutation.isPending) return;
+    if (editingPaymentId || paid.trim()) {
+      setPaymentValidation({
+        form: "Add or cancel the payment being edited before completing the sale.",
+      });
+      return;
+    }
+    if (paymentSequenceError) {
+      setPaymentValidation({ form: paymentSequenceError });
+      return;
+    }
+    submitGuard.current = true;
+    invoiceMutation.mutate(options);
   };
   const changeType = (type: SaleType) => {
+    if (type === saleType) return;
     setSaleType(type);
-    setPaid("");
+    clearPaymentDraft();
+    setPaymentEntries([]);
     setCart((v) =>
       v.map((x) => {
         return {
@@ -146,7 +368,12 @@ export function BillingPage() {
     }
   };
   const add = (p: Product) => {
+    const existingQuantity =
+      cart.find((line) => line.code === p.code)?.qty ?? 0;
+    if (existingQuantity + 1 > p.stock) return;
     if (!cart.length) setCheckoutKey(crypto.randomUUID());
+    clearPaymentDraft();
+    setPaymentEntries([]);
     setCart((v) => {
       const found = v.find((x) => x.code === p.code);
       if (!((found?.qty ?? 0) + 1 <= p.stock)) return v;
@@ -165,14 +392,21 @@ export function BillingPage() {
         {
           ...p,
           qty: 1,
-          discountPct: Number((p as Product & { discountPercentage?: number }).discountPercentage ?? 0),
-          discountRs: Number((p as Product & { discountAmount?: number }).discountAmount ?? 0),
+          discountPct: Number(
+            (p as Product & { discountPercentage?: number })
+              .discountPercentage ?? 0,
+          ),
+          discountRs: Number(
+            (p as Product & { discountAmount?: number }).discountAmount ?? 0,
+          ),
         },
         ...v,
       ];
     });
   };
-  const removeOne = (p: Product) =>
+  const removeOne = (p: Product) => {
+    clearPaymentDraft();
+    setPaymentEntries([]);
     setCart((v) =>
       v.flatMap((x) => {
         if (x.code !== p.code) return [x];
@@ -189,11 +423,14 @@ export function BillingPage() {
         ];
       }),
     );
+  };
   const update = (
     code: string,
     key: "qty" | "discountPct" | "discountRs",
     value: number,
-  ) =>
+  ) => {
+    clearPaymentDraft();
+    setPaymentEntries([]);
     setCart((v) =>
       v.map((x) => {
         if (x.code !== code) return x;
@@ -227,6 +464,7 @@ export function BillingPage() {
         };
       }),
     );
+  };
   const focusFirst = (section: HTMLDivElement | null) =>
     section?.querySelector<HTMLElement>("button,input,select")?.focus();
   const keepEnterInSection = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -359,15 +597,15 @@ export function BillingPage() {
     setCustomerQuery("");
     setSelectedCustomer(null);
     setNewCustomer(false);
-    setMethod("Cash");
+    setPaymentMethodId(0);
     setPaid("");
-    setSplitPayments([]);
+    setPaymentChannelId("");
+    setPaymentReference("");
+    setPaymentValidation({});
+    setPaymentEntries([]);
+    setEditingPaymentId(null);
     setCompletedInvoice(null);
-    setTimeout(
-      () =>
-        focusFirst(productSection.current),
-      0,
-    );
+    setTimeout(() => focusFirst(productSection.current), 0);
   };
   const navigateReceipt = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const actions = Array.from(
@@ -409,7 +647,32 @@ export function BillingPage() {
       </div>
       <div className="pos-layout">
         <section className="pos-workspace">
-          <div className="card billing-location-section"><div><h2>Location</h2><p>Select the stock location used for this invoice.</p></div><select className="control" value={locationId || ""} onChange={(event) => { setLocationId(Number(event.target.value)); setCart([]); setCheckoutKey(crypto.randomUUID()); }}><option value="">Select location</option>{(locationsQuery.data ?? []).filter((x: any) => x.isActive !== false).map((x: any) => <option key={x.locationId} value={x.locationId}>{x.name}</option>)}</select></div>
+          <div className="card billing-location-section">
+            <div>
+              <h2>Location</h2>
+              <p>Select the stock location used for this invoice.</p>
+            </div>
+            <select
+              className="control"
+              value={locationId || ""}
+              onChange={(event) => {
+                setLocationId(Number(event.target.value));
+                setCart([]);
+                clearPaymentDraft();
+                setPaymentEntries([]);
+                setCheckoutKey(crypto.randomUUID());
+              }}
+            >
+              <option value="">Select location</option>
+              {(locationsQuery.data ?? [])
+                .filter((x: any) => x.isActive !== false)
+                .map((x: any) => (
+                  <option key={x.locationId} value={x.locationId}>
+                    {x.name}
+                  </option>
+                ))}
+            </select>
+          </div>
           <div
             ref={saleTypeSection}
             onKeyDown={keepEnterInSection}
@@ -583,9 +846,17 @@ export function BillingPage() {
                   changes values.
                 </p>
               </div>
-          <button className="btn btn-secondary" onClick={() => { setCart([]); setCheckoutKey(crypto.randomUUID()); }}>
-            Clear cart
-          </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  setCart([]);
+                  clearPaymentDraft();
+                  setPaymentEntries([]);
+                  setCheckoutKey(crypto.randomUUID());
+                }}
+              >
+                Clear cart
+              </button>
             </div>
             <div className="sales-table-wrap">
               <table className="table pos-cart-table">
@@ -675,9 +946,11 @@ export function BillingPage() {
                           data-cart-row={i}
                           data-cart-column="3"
                           className="sales-more cart-remove"
-                          onClick={() =>
-                            setCart((v) => v.filter((y) => y.code !== x.code))
-                          }
+                          onClick={() => {
+                            setCart((v) => v.filter((y) => y.code !== x.code));
+                            clearPaymentDraft();
+                            setPaymentEntries([]);
+                          }}
                         >
                           ✕
                         </button>
@@ -791,121 +1064,354 @@ export function BillingPage() {
               </div>
             )}
           </div>
-          <div
-            ref={paymentMethodSection}
-            onKeyDown={keepEnterInSection}
-            className="card pos-payment-method"
-          >
-            <div className="pos-panel-title">
-              <h2>
-                <span className="panel-shortcut">F5</span> Payment Method
-              </h2>
-            </div>
-            <div className="pos-methods">
-              {paymentMethods.map((x) => (
-                <button
-                  data-enter-flow
-                  data-payment-method
-                  className={method === x.paymentMethodName ? "active" : ""}
-                  onKeyDown={(event) => {
-                    if (event.key === "+" || event.key === "Add") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      choosePaymentMethod(x);
-                    }
-                    if (event.key === " ") {
-                      event.preventDefault();
-                    }
-                  }}
-                  onClick={() => choosePaymentMethod(x)}
-                  key={x.paymentMethodId}
-                >
-                  <span>◇</span>
-                  {x.paymentMethodName}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="card pos-summary">
-            <div className="pos-panel-title">
-              <h2>Cart Summary</h2>
-            </div>
-            <div className="summary-line">
-              <span>Items</span>
-              <b>{cart.reduce((n, x) => n + x.qty, 0)} units</b>
-            </div>
-            <div className="summary-line">
-              <span>Subtotal</span>
-              <b>LKR {subtotal.toLocaleString()}</b>
-            </div>
-            <div className="summary-line">
-              <span>Total discount</span>
-              <b>- LKR {discount.toLocaleString()}</b>
-            </div>
-            <div className="summary-total">
-              <span>Grand Total</span>
-              <strong>LKR {total.toLocaleString()}</strong>
-            </div>
-          </div>
+          <BillingLoyaltyArea customerId={selectedCustomer?.customerId} />
           <div
             ref={paymentSection}
             onKeyDown={keepEnterInSection}
-            className="card pos-payment"
+            className="card pos-payment pos-checkout-card"
           >
             <div className="pos-panel-title">
-              <h2>
-                <span className="panel-shortcut">F6</span> Payment
-              </h2>
-            </div>
-            <div className="pos-pay-status">
-              <span className={paymentStatus === "Full Paid" ? "active full" : ""}>
-                <i />
-                Full Paid
-              </span>
+              <h2>Checkout</h2>
               <span
-                className={paymentStatus === "Partially Paid" ? "active partial" : ""}
+                className={`checkout-status ${paymentStatus.toLowerCase().replace(" ", "-")}`}
               >
-                <i />
-                Partially Paid
-              </span>
-              <span className={paymentStatus === "None Paid" ? "active none" : ""}>
-                <i />
-                None Paid
+                {paymentStatus}
               </span>
             </div>
-            {splitPayments.length > 0 && <div className="split-payment-list">{splitPayments.map((payment, index) => <div key={`${payment.paymentMethodId}-${index}`}><span>{payment.name}</span><b>LKR {payment.amount.toLocaleString()}</b><button type="button" onClick={() => setSplitPayments((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}>×</button></div>)}</div>}
-            <label>
-              {method} amount
-              <div className="money-input">
-                <span>LKR</span>
-                <input
-                  className="control"
-                  type="number"
-                  value={paid}
-                  onFocus={(e) => e.currentTarget.select()}
-                  onChange={(e) => setPaid(e.target.value)}
-                  placeholder="0.00"
-                />
+            <div className="checkout-summary">
+              <h3>Cart summary</h3>
+              <div className="summary-line">
+                <span>Items</span>
+                <b>{cart.reduce((n, x) => n + x.qty, 0)} units</b>
               </div>
-            </label>
-            <div className="pos-balance">
-              <span>{paidTotal >= total ? "Change" : "Balance Due"}</span>
-              <strong>
-                LKR {Math.abs(total - paidTotal).toLocaleString()}
-              </strong>
+              <div className="summary-line">
+                <span>Subtotal</span>
+                <b>LKR {subtotal.toLocaleString()}</b>
+              </div>
+              <div className="summary-line">
+                <span>Discounts</span>
+                <b>- LKR {discount.toLocaleString()}</b>
+              </div>
+              <div className="summary-total">
+                <span>Invoice total</span>
+                <strong>LKR {total.toLocaleString()}</strong>
+              </div>
+            </div>
+            <div className="checkout-payments-head">
+              <h3>Payments</h3>
+              <span>{paymentEntries.length} added</span>
+            </div>
+            {paymentEntries.length ? (
+              <div className="split-payment-list">
+                {paymentEntries.map((payment, index) => {
+                  const previousChange = summarizePaymentEntries(
+                    total,
+                    paymentEntries.slice(0, index),
+                  ).change;
+                  const rowChange =
+                    summarizePaymentEntries(
+                      total,
+                      paymentEntries.slice(0, index + 1),
+                    ).change - previousChange;
+                  return (
+                    <div
+                      className={
+                        editingPaymentId === payment.id ? "editing" : ""
+                      }
+                      key={payment.id}
+                    >
+                      <span>
+                        <strong>{payment.name}</strong>
+                        <small>
+                          {payment.channelName
+                            ? `${payment.channelName} · `
+                            : ""}
+                          {payment.referenceNumber ||
+                            (payment.type === "CASH"
+                              ? `Tendered LKR ${payment.amount.toLocaleString()}`
+                              : payment.type)}
+                        </small>
+                      </span>
+                      <b>
+                        LKR {payment.amount.toLocaleString()}
+                        {rowChange > 0 && (
+                          <small>Change {rowChange.toLocaleString()}</small>
+                        )}
+                      </b>
+                      <span className="payment-row-actions">
+                        <button
+                          type="button"
+                          aria-label={`Edit ${payment.name} payment`}
+                          onClick={() => editPaymentEntry(payment)}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${payment.name} payment`}
+                          onClick={() => {
+                            setPaymentEntries((rows) =>
+                              rows.filter((row) => row.id !== payment.id),
+                            );
+                            if (editingPaymentId === payment.id)
+                              clearPaymentDraft();
+                          }}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="checkout-empty-payment">
+                No payments added. The invoice may still be completed with an
+                outstanding balance.
+              </p>
+            )}
+
+            <div ref={paymentMethodSection} className="add-payment-panel">
+              <div className="add-payment-title">
+                <h3>
+                  <span className="panel-shortcut">F5</span> Add payment
+                </h3>
+                {editingPaymentId && (
+                  <button type="button" onClick={clearPaymentDraft}>
+                    Cancel edit
+                  </button>
+                )}
+              </div>
+              <div className="pos-methods">
+                {paymentMethods.map((x) => (
+                  <button
+                    type="button"
+                    data-enter-flow
+                    data-payment-method
+                    className={
+                      paymentMethodId === x.paymentMethodId ? "active" : ""
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "+" || event.key === "Add") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        choosePaymentMethod(x);
+                      }
+                      if (event.key === " ") event.preventDefault();
+                    }}
+                    onClick={() => choosePaymentMethod(x)}
+                    key={x.paymentMethodId}
+                  >
+                    <span>
+                      {x.paymentMethodType === "CASH"
+                        ? "◉"
+                        : x.paymentMethodType === "CARD"
+                          ? "▣"
+                          : "◇"}
+                    </span>
+                    <b>{x.paymentMethodName}</b>
+                    <small>{x.paymentMethodType}</small>
+                  </button>
+                ))}
+              </div>
+              {paymentValidation.method && (
+                <small className="field-error">
+                  {paymentValidation.method}
+                </small>
+              )}
+              {!methodsQuery.isPending && !paymentMethods.length && (
+                <div className="error-box">
+                  No active classified payment method is configured. Classify
+                  legacy methods or add a payment method first.
+                </div>
+              )}
+              {currentMethod?.paymentMethodType === "CARD" && (
+                <div className="card-payment-fields">
+                  <label>
+                    Card channel
+                    <select
+                      data-enter-flow
+                      className={
+                        paymentValidation.channel
+                          ? "control invalid"
+                          : "control"
+                      }
+                      value={paymentChannelId}
+                      onChange={(event) => {
+                        setPaymentChannelId(event.target.value);
+                        setPaymentValidation((errors) => ({
+                          ...errors,
+                          channel: undefined,
+                        }));
+                      }}
+                    >
+                      <option value="">Choose acquiring bank</option>
+                      {(channelsQuery.data ?? []).map((channel) => (
+                        <option
+                          key={channel.paymentChannelId}
+                          value={channel.paymentChannelId}
+                        >
+                          {channel.name}
+                        </option>
+                      ))}
+                    </select>
+                    {paymentValidation.channel && (
+                      <small className="field-error">
+                        {paymentValidation.channel}
+                      </small>
+                    )}
+                  </label>
+                  <label>
+                    Approval / transaction reference
+                    <input
+                      data-enter-flow
+                      className={
+                        paymentValidation.reference
+                          ? "control invalid"
+                          : "control"
+                      }
+                      maxLength={100}
+                      value={paymentReference}
+                      onChange={(event) => {
+                        setPaymentReference(event.target.value);
+                        setPaymentValidation((errors) => ({
+                          ...errors,
+                          reference: undefined,
+                        }));
+                      }}
+                      placeholder="External approval reference"
+                    />
+                    {paymentValidation.reference && (
+                      <small className="field-error">
+                        {paymentValidation.reference}
+                      </small>
+                    )}
+                  </label>
+                </div>
+              )}
+              <div className="payment-amount-row">
+                <label>
+                  Amount (LKR)
+                  <div className="money-input">
+                    <span>LKR</span>
+                    <input
+                      data-enter-flow
+                      className={
+                        paymentValidation.amount ? "control invalid" : "control"
+                      }
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={paid}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => {
+                        setPaid(e.target.value);
+                        setPaymentValidation((errors) => ({
+                          ...errors,
+                          amount: undefined,
+                          form: undefined,
+                        }));
+                      }}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  {paymentValidation.amount && (
+                    <small className="field-error">
+                      {paymentValidation.amount}
+                    </small>
+                  )}
+                </label>
+                <button
+                  data-enter-flow
+                  type="button"
+                  className="btn btn-secondary add-payment-button"
+                  disabled={!paymentMethods.length || invoiceMutation.isPending}
+                  onClick={savePaymentEntry}
+                >
+                  {editingPaymentId ? "Update payment" : "Add payment"}
+                </button>
+              </div>
+            </div>
+
+            <div className="checkout-balance">
+              <div>
+                <span>Total tendered</span>
+                <b>LKR {paymentSummary.tendered.toLocaleString()}</b>
+              </div>
+              <div>
+                <span>Total collected (net)</span>
+                <b>LKR {paymentSummary.netReceived.toLocaleString()}</b>
+              </div>
+              <div>
+                <span>Applied to invoice</span>
+                <b>LKR {paymentSummary.applied.toLocaleString()}</b>
+              </div>
+              <div className="remaining">
+                <span>Remaining balance</span>
+                <strong>LKR {paymentSummary.remaining.toLocaleString()}</strong>
+              </div>
+              <div>
+                <span>Cash change</span>
+                <b>LKR {paymentSummary.change.toLocaleString()}</b>
+              </div>
             </div>
             <div className="payment-finish">
               <button
                 className="pos-complete"
-                disabled={!cart.length || !currentMethod || !locationId || invoiceMutation.isPending || quoteQuery.isPending || quoteQuery.isError || !activeQuote}
-                onClick={() => invoiceMutation.mutate({})}
+                disabled={
+                  !cart.length ||
+                  !locationId ||
+                  invoiceMutation.isPending ||
+                  quoteQuery.isPending ||
+                  quoteQuery.isError ||
+                  !activeQuote ||
+                  Boolean(
+                    editingPaymentId || paid.trim() || paymentSequenceError,
+                  )
+                }
+                onClick={() => submitSale()}
               >
-                ✓ Complete Sale
+                ✓ Complete sale
               </button>
             </div>
-            {quoteQuery.isError && <div className="error-box">Unable to confirm current prices: {quoteQuery.error.message}</div>}
-            {priceChangeQuote && <div className="error-box"><strong>Prices changed while this cart was open.</strong><div>Review the updated cart totals, then confirm to finalize using the current prices.</div><button type="button" className="btn btn-primary" disabled={invoiceMutation.isPending} onClick={() => invoiceMutation.mutate({ acceptPriceChanges: true, quote: priceChangeQuote })}>Accept updated prices</button></div>}
-            {invoiceMutation.isError && !priceChangeQuote && <div className="error-box">{(invoiceMutation.error as Error).message}</div>}
+            {quoteQuery.isError && (
+              <div className="error-box">
+                Unable to confirm current prices: {quoteQuery.error.message}
+              </div>
+            )}
+            {paymentValidation.form && (
+              <div className="error-box">{paymentValidation.form}</div>
+            )}
+            {paymentSequenceError && !paymentValidation.form && (
+              <div className="error-box">{paymentSequenceError}</div>
+            )}
+            {priceChangeQuote && (
+              <div className="error-box">
+                <strong>Prices changed while this cart was open.</strong>
+                <div>
+                  Review the updated cart totals, then confirm to finalize using
+                  the current prices.
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={invoiceMutation.isPending}
+                  onClick={() =>
+                    submitSale({
+                      acceptPriceChanges: true,
+                      quote: priceChangeQuote,
+                    })
+                  }
+                >
+                  Accept updated prices
+                </button>
+              </div>
+            )}
+            {invoiceMutation.isError && !priceChangeQuote && (
+              <div className="error-box">
+                {(invoiceMutation.error as Error).message}
+              </div>
+            )}
           </div>
         </aside>
       </div>
@@ -927,10 +1433,14 @@ export function BillingPage() {
             <span>✓</span>
             <h2>Sale completed</h2>
             <p>
-              {completedInvoice?.invoiceNumber} · {saleType} · {method} · LKR{" "}
-              {total.toLocaleString()}
+              {completedInvoice?.invoiceNumber} · {saleType} ·{" "}
+              {paymentEntries.map((entry) => entry.name).join(" + ") ||
+                "Unpaid"}{" "}
+              · LKR {total.toLocaleString()}
             </p>
-            {completedInvoice && <InvoiceReceiptContent invoice={completedInvoice} />}
+            {completedInvoice && (
+              <InvoiceReceiptContent invoice={completedInvoice} />
+            )}
             <div className="modal-foot receipt-actions">
               <button
                 autoFocus

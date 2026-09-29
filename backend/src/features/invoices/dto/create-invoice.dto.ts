@@ -18,6 +18,7 @@ export class CreateInvoicePaymentDto {
   @Type(() => Number) @IsInt() @IsPositive() paymentMethodId!: number;
   @Type(() => Number) @IsNumber() @IsPositive() amount!: number;
   @IsOptional() @IsString() @MaxLength(100) referenceNumber?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @IsPositive() paymentChannelId?: number;
 }
 
 export class CreateInvoiceDto {

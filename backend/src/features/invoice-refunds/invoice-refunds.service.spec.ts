@@ -6,6 +6,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { InvoiceRefund } from './invoice-refund.entity';
 import { InvoiceAdjustment } from './invoice-adjustment.entity';
 import { InvoiceRefundsService } from './invoice-refunds.service';
+import { PaymentMethodType } from '../payment-methods/payment-methods.entity';
 
 function fixture(paidAmount = '20') {
   const invoice = { invoiceId: '1', invoiceStatus: 'PARTIALLY_REFUNDED', paidAmount, details: [{
@@ -21,7 +22,7 @@ function fixture(paidAmount = '20') {
     ? { findOne: async () => invoice, save: async (value: any) => value }
     : entity === InvoiceRefund ? { find: async () => [{ payments: [{ amount: '5' }] }], create: (value: any) => value, save: async (value: any) => ({ ...value, invoiceRefundId: 10 }), findOne: async () => ({ invoiceRefundId: 10 }) }
     : entity === InvoiceAdjustment ? { find: async () => [] }
-    : { createQueryBuilder: () => query, create: (value: any) => value, save: async (value: any) => value, findOneBy: async () => ({}) } };
+    : { createQueryBuilder: () => query, create: (value: any) => value, save: async (value: any) => value, findOneBy: async () => ({ paymentMethodId: 1, paymentMethodName: 'Cash', paymentMethodType: PaymentMethodType.CASH }) } };
   const service = new InvoiceRefundsService({
     ...manager, manager, transaction: (run: any) => run(manager),
   } as any);

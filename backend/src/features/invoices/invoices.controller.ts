@@ -21,6 +21,7 @@ export class InvoicesController {
   @Post('quote') @RequirePermission('SALES_BILLING') quote(@Body() dto: QuoteInvoiceDto, @CurrentUser() user: TenantPrincipal) { return this.service.quote(dto, user); }
   @Get('pending-payments') @RequirePermission('SALES_PAYMENT_COLLECT') pendingPayments(@CurrentUser() user: TenantPrincipal) { return this.service.pendingPayments(user); }
   @Get('payment-receipts') @RequirePermission('SALES_PAYMENT_COLLECT') collectionHistory(@CurrentUser() user: TenantPrincipal) { return this.service.collectionHistory(user); }
+  @Get('payment-breakdown') @RequirePermission('SALES_INVOICE_VIEW') paymentBreakdown(@CurrentUser() user: TenantPrincipal) { return this.service.paymentBreakdown(user); }
   @Post(':id/payments') @RequirePermission('SALES_PAYMENT_COLLECT') receivePayment(@Param('id', ParseIntPipe) id: number, @Body() dto: ReceiveInvoicePaymentDto, @CurrentUser() user: TenantPrincipal) { return this.service.receivePayment(id, dto, user); }
   @Get(':id') @RequirePermission('SALES_INVOICE_VIEW') get(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.get(id, user); }
   @Post() @RequirePermission('SALES_BILLING') create(@Body() dto: CreateInvoiceDto, @CurrentUser() user: TenantPrincipal) { return this.service.create(dto, user); }

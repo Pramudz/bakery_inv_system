@@ -4,7 +4,7 @@ export type CreateInvoiceRefundInput = {
   invoiceId: number;
   reason: string;
   details: { invoiceDetailId: number; quantity: number; returnToStock: boolean }[];
-  payments: { paymentMethodId: number; amount: number; referenceNumber?: string }[];
+  payments: { paymentMethodId: number; amount: number; paymentChannelId?: number; referenceNumber?: string }[];
 };
 
 export const invoiceRefundsApi = {

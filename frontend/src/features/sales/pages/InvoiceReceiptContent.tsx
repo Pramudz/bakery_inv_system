@@ -2,7 +2,7 @@ import { invoiceReceiptModel } from './invoiceReceiptModel';
 import './invoice-receipt.css';
 
 export function InvoiceReceiptContent({ invoice }: { invoice: Record<string, any> }) {
-  const { cart, paidTotal, total, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, completedInvoice, receiptDate, unitPrice, lineNet } = invoiceReceiptModel(invoice);
+  const { cart, paidTotal, tenderedTotal, changeTotal, total, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, completedInvoice, receiptDate, unitPrice, lineNet } = invoiceReceiptModel(invoice);
   return (<div className="receipt-preview">
               <div className="receipt-business">
                 <h3>ERP CORE BAKERY</h3>
@@ -81,12 +81,16 @@ export function InvoiceReceiptContent({ invoice }: { invoice: Record<string, any
                   <b>LKR {total.toLocaleString()}</b>
                 </div>
                 <div>
-                  <span>Paid amount</span>
+                  <span>Tendered</span>
+                  <b>LKR {tenderedTotal.toLocaleString()}</b>
+                </div>
+                <div>
+                  <span>Applied to invoice</span>
                   <b>LKR {paidTotal.toLocaleString()}</b>
                 </div>
                 <div>
-                  <span>{paidTotal > total ? "Change" : "Balance"}</span>
-                  <b>LKR {Math.abs(total - paidTotal).toLocaleString()}</b>
+                  <span>{changeTotal > 0 ? "Change given" : "Balance"}</span>
+                  <b>LKR {(changeTotal > 0 ? changeTotal : Math.max(0, total - paidTotal)).toLocaleString()}</b>
                 </div>
                 <div>
                   <span>Payment method</span>

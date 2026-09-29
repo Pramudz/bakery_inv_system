@@ -8,6 +8,7 @@ import { SalesBadge, SalesStat } from './SalesUi';
 import './pending-payments.css';
 import './sales-history.css';
 import { PaymentReceiptContent, receiptNumber } from './PaymentReceipt';
+import { paymentChannelsApi } from '../api/paymentChannelsApi';
 
 const money = (value: string | number) => Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const customerName = (invoice: PendingInvoice) => invoice.customer?.customerName ?? 'Walk-in Customer';
@@ -28,6 +29,7 @@ export function PendingPaymentsPage() {
   const [amount, setAmount] = useState('');
   const [methodId, setMethodId] = useState('');
   const [reference, setReference] = useState('');
+  const [paymentChannelId, setPaymentChannelId] = useState('');
   const [validation, setValidation] = useState('');
   const requestKey = useRef('');
   const submitting = useRef(false);
@@ -35,7 +37,9 @@ export function PendingPaymentsPage() {
   const pending = useQuery({ queryKey: ['pending-payments', ...queryScope], queryFn: pendingPaymentsApi.list });
   const history = useQuery({ queryKey: ['payment-receipts', ...queryScope], queryFn: pendingPaymentsApi.history });
   const methods = useQuery({ queryKey: ['payment-methods', ...queryScope], queryFn: paymentMethodsApi.list });
-  const activeMethods = (methods.data ?? []).filter((method) => method.isActive);
+  const channels = useQuery({ queryKey: ['payment-channels', 'active'], queryFn: () => paymentChannelsApi.list(true) });
+  const activeMethods = (methods.data ?? []).filter((method) => method.isActive && method.paymentMethodType);
+  const selectedMethod = activeMethods.find((method) => Number(method.paymentMethodId) === Number(methodId));
   const open = selected !== null || receipt !== null;
 
   useEffect(() => {
@@ -52,7 +56,8 @@ export function PendingPaymentsPage() {
     mutationFn: ({ invoice, data }: { invoice: PendingInvoice; data: ReceivePaymentInput }) => pendingPaymentsApi.receive(invoice.invoiceId, data),
     retry: false,
     onSuccess: (payment, { invoice, data }) => {
-      setReceipt({ ...payment, invoice, paymentMethod: { paymentMethodName: activeMethods.find((method) => Number(method.paymentMethodId) === data.paymentMethodId)?.paymentMethodName ?? 'Payment' } });
+      const method = activeMethods.find((row) => Number(row.paymentMethodId) === data.paymentMethodId);
+      setReceipt({ ...payment, invoice, paymentMethod: { paymentMethodName: method?.paymentMethodName ?? 'Payment', paymentMethodType: method?.paymentMethodType }, paymentChannel: (channels.data ?? []).find((row) => Number(row.paymentChannelId) === Number(data.paymentChannelId)) ?? null });
       setSelected(null);
       refresh();
     },
@@ -68,6 +73,7 @@ export function PendingPaymentsPage() {
     setAmount(Number(invoice.balanceAmount).toFixed(2));
     setMethodId(activeMethods[0] ? String(activeMethods[0].paymentMethodId) : '');
     setReference('');
+    setPaymentChannelId('');
     requestKey.current = crypto.randomUUID();
   };
   const changed = () => {
@@ -79,16 +85,19 @@ export function PendingPaymentsPage() {
     event.preventDefault();
     if (!selected || submitting.current) return;
     const value = Number(amount);
-    if (!Number.isFinite(value) || value <= 0 || value > Number(selected.balanceAmount) || Math.round((value + Number.EPSILON) * 100) / 100 !== value) {
-      setValidation('Enter an amount greater than zero, up to the remaining balance, with at most two decimal places.');
+    if (!Number.isFinite(value) || value <= 0 || Math.round((value + Number.EPSILON) * 100) / 100 !== value) {
+      setValidation('Enter an amount greater than zero with at most two decimal places.');
       return;
     }
     if (!activeMethods.some((method) => Number(method.paymentMethodId) === Number(methodId))) {
       setValidation('Choose an active payment method.');
       return;
     }
+    if (selectedMethod?.paymentMethodType !== 'CASH' && value > Number(selected.balanceAmount)) { setValidation('Only cash can be tendered above the remaining balance.'); return; }
+    if (selectedMethod?.paymentMethodType === 'CARD' && !paymentChannelId) { setValidation('Select the card channel used for this payment.'); return; }
+    if (selectedMethod?.paymentMethodType === 'CARD' && !reference.trim()) { setValidation('Enter the external card-machine approval or transaction reference.'); return; }
     submitting.current = true;
-    receive.mutate({ invoice: selected, data: { amount: value, paymentMethodId: Number(methodId), referenceNumber: reference.trim() || undefined, collectionKey: requestKey.current } });
+    receive.mutate({ invoice: selected, data: { amount: value, paymentMethodId: Number(methodId), paymentChannelId: paymentChannelId ? Number(paymentChannelId) : undefined, referenceNumber: reference.trim() || undefined, collectionKey: requestKey.current } });
   };
   const close = () => {
     if (submitting.current) return;
@@ -138,7 +147,7 @@ export function PendingPaymentsPage() {
           </tr>)}</tbody></table></div> :
         <div className="sales-table-wrap"><table className="table"><thead><tr><th>Receipt / date</th><th>Invoice</th><th>Customer</th><th>Method</th><th className="right">Received</th><th>Status</th><th /></tr></thead>
           <tbody>{history.isPending ? <tr><td colSpan={7}>Loading payment history…</td></tr> : !receipts.length ? <tr><td colSpan={7} className="pending-empty">No payment receipts {query ? 'match your search' : 'recorded yet'}.</td></tr> : pagedReceipts.map((payment) => <tr key={payment.invoicePaymentId}>
-            <td><strong className="sales-id">{receiptNumber(payment.invoicePaymentId)}</strong><small className="refund-code">{new Date(payment.paidAt).toLocaleString()}</small></td><td>{payment.invoice.invoiceNumber}</td><td>{customerName(payment.invoice)}</td><td>{payment.paymentMethod.paymentMethodName}</td><td className="right">LKR {money(payment.amount)}</td><td><SalesBadge status={payment.isReversed ? 'Reversed' : 'Received'} /></td><td className="right"><button className="btn btn-edit-soft" onClick={() => setReceipt(payment)}>View / Print</button></td>
+            <td><strong className="sales-id">{receiptNumber(payment.invoicePaymentId)}</strong><small className="refund-code">{new Date(payment.paidAt).toLocaleString()}</small></td><td>{payment.invoice.invoiceNumber}</td><td>{customerName(payment.invoice)}</td><td>{payment.paymentMethod.paymentMethodName}{payment.paymentChannel && <small className="refund-code">{payment.paymentChannel.name}</small>}</td><td className="right">LKR {money(payment.amount)}</td><td><SalesBadge status={payment.isReversed ? 'Reversed' : 'Received'} /></td><td className="right"><button className="btn btn-edit-soft" onClick={() => setReceipt(payment)}>View / Print</button></td>
           </tr>)}</tbody></table></div>}
       {!loadError && <>
       <div className="toolbar sales-history-pagination">
@@ -165,13 +174,16 @@ export function PendingPaymentsPage() {
           <p><strong>{customerName(selected)}</strong> · {selected.location?.name}</p>
           <div className="pending-due"><span>Balance due</span><strong>LKR {money(selected.balanceAmount)}</strong></div>
           <fieldset disabled={receive.isPending} className="pending-fields">
-            <label className="field"><span>Amount received (LKR)</span><input autoFocus required className="control" type="number" min="0.01" max={selected.balanceAmount} step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); changed(); }} /></label>
-            <label className="field"><span>Payment method</span><select required className="control" value={methodId} onChange={(event) => { setMethodId(event.target.value); changed(); }}><option value="">Choose payment method</option>{activeMethods.map((method) => <option key={method.paymentMethodId} value={method.paymentMethodId}>{method.paymentMethodName}</option>)}</select></label>
-            <label className="field"><span>Reference number (optional)</span><input className="control" maxLength={100} value={reference} onChange={(event) => { setReference(event.target.value); changed(); }} /></label>
+            <label className="field"><span>Amount tendered (LKR)</span><input autoFocus required className="control" type="number" min="0.01" step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); changed(); }} /></label>
+            <label className="field"><span>Payment method</span><select required className="control" value={methodId} onChange={(event) => { setMethodId(event.target.value); setPaymentChannelId(''); changed(); }}><option value="">Choose payment method</option>{activeMethods.map((method) => <option key={method.paymentMethodId} value={method.paymentMethodId}>{method.paymentMethodName} — {method.paymentMethodType}</option>)}</select></label>
+            {selectedMethod?.paymentMethodType === 'CARD' && <label className="field"><span>Card channel</span><select required className="control" value={paymentChannelId} onChange={(event) => { setPaymentChannelId(event.target.value); changed(); }}><option value="">Choose acquiring bank</option>{(channels.data ?? []).map((channel) => <option key={channel.paymentChannelId} value={channel.paymentChannelId}>{channel.name}</option>)}</select></label>}
+            <label className="field"><span>{selectedMethod?.paymentMethodType === 'CARD' ? 'Approval / transaction reference' : 'Reference number (optional)'}</span><input className="control" required={selectedMethod?.paymentMethodType === 'CARD'} maxLength={100} value={reference} onChange={(event) => { setReference(event.target.value); changed(); }} /></label>
           </fieldset>
           <p className="pending-after">Remaining after payment: <strong>LKR {money(Math.max(0, Number(selected.balanceAmount) - (Number(amount) || 0)))}</strong></p>
+          {selectedMethod?.paymentMethodType === 'CASH' && Number(amount) > Number(selected.balanceAmount) && <p className="pending-after">Change to give: <strong>LKR {money(Number(amount) - Number(selected.balanceAmount))}</strong></p>}
           {methods.isError && <div className="error-box" role="alert">{methods.error.message}</div>}
           {!methods.isPending && !methods.isError && !activeMethods.length && <div className="error-box">Add an active method in Payment Methods before receiving a payment.</div>}
+          {selectedMethod?.paymentMethodType === 'CARD' && !channels.isPending && !(channels.data ?? []).length && <div className="error-box">No active card channel is configured for this tenant.</div>}
           {(validation || receive.isError) && <div className="error-box" role="alert">{validation || receive.error?.message}</div>}
         </div><div className="modal-foot"><button className="btn btn-secondary" type="button" disabled={receive.isPending} onClick={close}>Cancel</button><button className="btn btn-primary" disabled={receive.isPending || methods.isPending || !activeMethods.length}>{receive.isPending ? 'Saving…' : 'Save & View Receipt'}</button></div>
       </form>}

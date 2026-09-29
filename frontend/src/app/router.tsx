@@ -37,6 +37,7 @@ import { BillingPage } from "../features/sales/pages/BillingPage";
 import { PendingPaymentsPage } from "../features/sales/pages/PendingPaymentsPage";
 import { RefundsPage } from "../features/sales/pages/RefundsPage";
 import { PaymentMethodsPage } from "../features/sales/pages/PaymentMethodsPage";
+import { CardChannelsPage } from "../features/sales/pages/CardChannelsPage";
 import { SalesPage } from "../features/sales/pages/SalesPage";
 import { GoodsReceiptScreen } from "../features/purchasing/pages/GoodsReceiptScreen";
 import { GoodsReceiptReversalScreen } from "../features/purchasing/pages/GoodsReceiptReversalScreen";
@@ -78,6 +79,7 @@ const tenantChildren = [
   { path: "pending-payments", element: <PendingPaymentsPage /> },
   { path: "refunds", element: <RefundsPage /> },
   { path: "payment-methods", element: <PaymentMethodsPage /> },
+  { path: "card-channels", element: <CardChannelsPage /> },
   { path: "goods-receipts/reverse", element: <GoodsReceiptReversalScreen /> },
   { path: "goods-receipts/direct/new", element: <GoodsReceiptScreen mode="create-direct" /> },
   { path: "goods-receipts/po/new", element: <GoodsReceiptScreen mode="create-po-based" /> },

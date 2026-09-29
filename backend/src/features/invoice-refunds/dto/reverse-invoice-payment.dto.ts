@@ -6,4 +6,5 @@ export class ReverseInvoicePaymentDto {
   @IsOptional() @Type(() => Number) @IsInt() @IsPositive() replacementPaymentMethodId?: number;
   @ValidateIf((dto) => dto.replacementPaymentMethodId !== undefined) @Type(() => Number) @IsNumber() @IsPositive() replacementAmount?: number;
   @IsOptional() @IsString() @MaxLength(100) referenceNumber?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @IsPositive() replacementPaymentChannelId?: number;
 }

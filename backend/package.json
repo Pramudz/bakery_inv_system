@@ -8,6 +8,7 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "db:bootstrap": "npm run build && node scripts/bootstrap-database.cjs",
+    "migration:show": "npm run build && typeorm migration:show -d dist/data-source.js",
     "migration:run": "npm run build && typeorm migration:run -d dist/data-source.js",
     "test": "npm run build && node --test dist/features/**/*.spec.js",
     "test:sales:mysql": "npm run build && node --test dist/features/invoices/invoice-checkout-idempotency.mysql.js",

@@ -74,6 +74,10 @@ test('finalization ignores tampered browser price and discount amounts', async (
   assert.equal(invoice.subtotal, '200.00');
   assert.equal(invoice.discountTotal, '20.00');
   assert.equal(invoice.grandTotal, '180.00');
+  assert.equal(invoice.paidAmount, '0.00');
+  assert.equal(invoice.balanceAmount, '180.00');
+  assert.equal(invoice.paymentStatus, 'UNPAID');
+  assert.deepEqual((invoice.receiptSnapshot as any).payments, []);
   assert.equal(savedDetails[0].unitPrice, '100.00');
   assert.equal(savedDetails[0].discountAmount, '20.00');
   assert.equal((invoice.receiptSnapshot as any).details[0].pricingSnapshot.priceListItemId, 40);

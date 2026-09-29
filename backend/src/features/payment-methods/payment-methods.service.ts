@@ -1,13 +1,13 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { CreatePaymentMethodDto } from './dto/create-payment-method.dto';
 import { UpdatePaymentMethodDto } from './dto/update-payment-method.dto';
 import { PaymentMethod } from './payment-methods.entity';
 
 @Injectable()
 export class PaymentMethodsService {
-  constructor(@InjectRepository(PaymentMethod) private readonly repo: Repository<PaymentMethod>) {}
+  constructor(@InjectRepository(PaymentMethod) private readonly repo: Repository<PaymentMethod>, private readonly dataSource: DataSource) {}
 
   findAll(tenantId: number) {
     return this.repo.find({ where: { tenantId }, order: { paymentMethodId: 'ASC' } });
@@ -25,8 +25,18 @@ export class PaymentMethodsService {
   }
 
   async update(id: number, dto: UpdatePaymentMethodDto, tenantId: number) {
-    await this.findOne(id, tenantId);
+    const current = await this.findOne(id, tenantId);
     if (dto.paymentMethodName) await this.ensureNameAvailable(dto.paymentMethodName, tenantId, id);
+    if (dto.paymentMethodType && current.paymentMethodType !== dto.paymentMethodType) {
+      const rows = await this.dataSource.query(`
+        SELECT
+          (SELECT COUNT(*) FROM tbl_invoice_payment WHERE payment_method_id = ?) +
+          (SELECT COUNT(*) FROM tbl_invoice_refund_payment WHERE payment_method_id = ?) +
+          (SELECT COUNT(*) FROM tbl_invoice_adjustment WHERE payment_method_id = ?) AS transactionCount`, [id, id, id]);
+      if (Number(rows[0]?.transactionCount ?? 0) > 0) {
+        throw new ConflictException('The payment method type cannot be changed because the method has transaction history. Create a new method instead.');
+      }
+    }
     await this.repo.update({ paymentMethodId: id, tenantId }, dto);
     return this.findOne(id, tenantId);
   }

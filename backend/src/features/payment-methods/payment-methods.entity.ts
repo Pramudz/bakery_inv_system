@@ -19,6 +19,15 @@ export class PaymentMethod extends AuditEntity {
   @Column({ name: 'payment_method_name', type: 'varchar', length: 150 })
   paymentMethodName!: string;
 
+  @Column({ name: 'payment_method_type', type: 'varchar', length: 20, nullable: true })
+  paymentMethodType!: PaymentMethodType | null;
+
   @Column({ name: 'is_active', default: true })
   isActive!: boolean;
+}
+
+export enum PaymentMethodType {
+  CASH = 'CASH',
+  CARD = 'CARD',
+  CHEQUE = 'CHEQUE',
 }

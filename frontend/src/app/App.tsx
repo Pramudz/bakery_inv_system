@@ -23,6 +23,7 @@ const tenantGroups = [
       ["Pending Payments", "/pending-payments"],
       ["Refunds", "/refunds"],
       ["Payment Methods", "/payment-methods"],
+      ["Card Channels", "/card-channels"],
     ],
   },
   {
@@ -90,6 +91,7 @@ const moduleForPath: Record<string, string> = {
   "/pending-payments": "SALES",
   "/refunds": "SALES",
   "/payment-methods": "SALES",
+  "/card-channels": "SALES",
   "/users": "USER_MANAGEMENT",
   "/roles": "USER_MANAGEMENT",
   "/permissions": "USER_MANAGEMENT",
@@ -121,6 +123,7 @@ const viewPermissionForPath: Record<string, string> = {
   "/pending-payments": "SALES_PAYMENT_COLLECT",
   "/refunds": "SALES_REFUND_VIEW",
   "/payment-methods": "SALES_PAYMENT_METHOD_VIEW",
+  "/card-channels": "SALES_PAYMENT_METHOD_VIEW",
   "/users": "USER_VIEW",
   "/roles": "ROLE_VIEW",
   "/permissions": "PERMISSION_VIEW",

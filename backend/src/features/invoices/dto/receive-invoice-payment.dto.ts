@@ -6,4 +6,5 @@ export class ReceiveInvoicePaymentDto {
   @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @IsPositive() amount!: number;
   @IsUUID('4') collectionKey!: string;
   @IsOptional() @IsString() @MaxLength(100) referenceNumber?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @IsPositive() paymentChannelId?: number;
 }

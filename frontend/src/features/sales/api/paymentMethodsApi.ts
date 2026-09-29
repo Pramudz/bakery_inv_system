@@ -4,10 +4,11 @@ export type PaymentMethod = {
   paymentMethodId: number;
   tenantId: number;
   paymentMethodName: string;
+  paymentMethodType: 'CASH' | 'CARD' | 'CHEQUE' | null;
   isActive: boolean;
 };
 
-export type PaymentMethodInput = Pick<PaymentMethod, 'paymentMethodName'>;
+export type PaymentMethodInput = Pick<PaymentMethod, 'paymentMethodName' | 'paymentMethodType'>;
 
 export const paymentMethodsApi = {
   list: () => apiClient.get<PaymentMethod[]>('/payment-methods'),

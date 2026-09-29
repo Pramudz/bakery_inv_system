@@ -46,6 +46,7 @@ import { ProductSupplierUnitsModule } from './features/product-supplier-units/pr
 import { PriceListItemDiscountModule } from './features/price-list-item-discounts/price-list-item-discounts.module';
 import { InventoryAdjustmentsModule } from './features/inventory-adjustments/inventory-adjustments.module';
 import { InventoryConversionsModule } from './features/inventory-conversions/inventory-conversions.module';
+import { PaymentChannelsModule } from './features/payment-channels/payment-channels.module';
 
 
 @Module({
@@ -85,6 +86,7 @@ import { InventoryConversionsModule } from './features/inventory-conversions/inv
     CategoryModule,
     CustomerModule,
     PaymentMethodsModule,
+    PaymentChannelsModule,
     InvoicesModule,
     InvoiceRefundsModule,
     SupplierModule,

@@ -5,6 +5,7 @@ import { InvoiceDetail } from '../invoices/invoice-detail.entity';
 import { InvoicePayment } from '../invoices/invoice-payment.entity';
 import { Invoice } from '../invoices/invoice.entity';
 import { PaymentMethod } from '../payment-methods/payment-methods.entity';
+import { PaymentProcessingService } from '../payment-methods/payment-processing.service';
 import { InventoryBalance } from '../inventory-balance/inventory-balance.entity';
 import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
 import { Product } from '../products/products.entity';
@@ -16,18 +17,19 @@ import { InvoiceRefundPayment } from './invoice-refund-payment.entity';
 import { InvoiceRefund } from './invoice-refund.entity';
 import { InvoiceAdjustment } from './invoice-adjustment.entity';
 import { CreateInvoiceAdjustmentDto } from './dto/create-invoice-adjustment.dto';
+import { randomUUID } from 'node:crypto';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class InvoiceRefundsService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(private readonly dataSource: DataSource, private readonly paymentProcessing: PaymentProcessingService = new PaymentProcessingService()) {}
 
   list(user: TenantPrincipal) {
     return this.dataSource.getRepository(InvoiceRefund).find({ where: { tenantId: user.tenantId, ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}) }, relations: { invoice: { customer: true }, location: true }, order: { invoiceRefundId: 'DESC' } });
   }
   async get(id: number, user: TenantPrincipal) {
-    const row = await this.dataSource.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: id, tenantId: user.tenantId }, relations: { invoice: { customer: true }, location: true, details: { product: true, invoiceDetail: true }, payments: { paymentMethod: true } } });
+    const row = await this.dataSource.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: id, tenantId: user.tenantId }, relations: { invoice: { customer: true }, location: true, details: { product: true, invoiceDetail: true }, payments: { paymentMethod: true, paymentChannel: true } } });
     if (!row) throw new NotFoundException('Invoice refund not found.');
     this.assertLocationAccess(row.locationId, user);
     return row;
@@ -63,7 +65,7 @@ export class InvoiceRefundsService {
   }
 
   async refundableInvoice(id: number, user: TenantPrincipal) {
-    const invoice = await this.dataSource.getRepository(Invoice).findOne({ where: { invoiceId: id, tenantId: user.tenantId }, relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true } } });
+    const invoice = await this.dataSource.getRepository(Invoice).findOne({ where: { invoiceId: id, tenantId: user.tenantId }, relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true, paymentChannel: true } } });
     if (!invoice) throw new NotFoundException('Invoice not found.');
     this.assertLocationAccess(invoice.locationId, user);
     const sums = await this.refundedQuantities(invoice.details.map((x) => x.invoiceDetailId));
@@ -107,9 +109,13 @@ export class InvoiceRefundsService {
         if (detail.returnToStock && item.line.product.isStockItem) await this.restoreStock(manager, invoice, detail, user);
       }
       for (const payment of dto.payments ?? []) {
-        const method = await manager.getRepository(PaymentMethod).findOneBy({ paymentMethodId: payment.paymentMethodId, tenantId: user.tenantId, isActive: true });
-        if (!method) throw new NotFoundException('Refund payment method not found.');
-        await manager.getRepository(InvoiceRefundPayment).save(manager.getRepository(InvoiceRefundPayment).create({ invoiceRefundId: refund.invoiceRefundId, paymentMethodId: payment.paymentMethodId, amount: money(payment.amount).toFixed(2), referenceNumber: payment.referenceNumber?.trim() || null, refundedAt: new Date(), createdByUserId: user.userId }));
+        const { method, channel, referenceNumber } = await this.paymentProcessing.configuration(manager, user.tenantId, payment);
+        await manager.getRepository(InvoiceRefundPayment).save(manager.getRepository(InvoiceRefundPayment).create({
+          invoiceRefundId: refund.invoiceRefundId, paymentMethodId: method.paymentMethodId, paymentMethodTypeSnapshot: method.paymentMethodType,
+          paymentChannelId: channel?.paymentChannelId ?? null, paymentChannelCodeSnapshot: channel?.code ?? null,
+          paymentChannelNameSnapshot: channel?.name ?? null,
+          amount: money(payment.amount).toFixed(2), referenceNumber, refundedAt: new Date(), createdByUserId: user.userId,
+        }));
       }
       const fullyReturned = invoice.details.every((line) => (previous.get(Number(line.invoiceDetailId)) ?? 0) + (dto.details.find((item) => item.invoiceDetailId === Number(line.invoiceDetailId))?.quantity ?? 0) >= Number(line.quantity));
       invoice.invoiceStatus = fullyReturned ? 'FULLY_REFUNDED' : 'PARTIALLY_REFUNDED';
@@ -123,23 +129,27 @@ export class InvoiceRefundsService {
       const invoice = await manager.getRepository(Invoice).findOne({ where: { invoiceId, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } });
       if (!invoice) throw new NotFoundException('Invoice not found.');
       this.assertLocationAccess(invoice.locationId, user);
-      const payment = await manager.getRepository(InvoicePayment).findOne({ where: { invoicePaymentId: paymentId, invoiceId }, lock: { mode: 'pessimistic_write' } });
+      const payment = await manager.getRepository(InvoicePayment).findOne({ where: { invoicePaymentId: paymentId, invoiceId }, relations: { paymentChannel: true }, lock: { mode: 'pessimistic_write' } });
       if (!payment) throw new NotFoundException('Invoice payment not found.');
       if (payment.isReversed) throw new BadRequestException('Payment is already reversed.');
       await manager.getRepository(InvoicePaymentReversal).save(manager.getRepository(InvoicePaymentReversal).create({ invoicePaymentId: payment.invoicePaymentId, reversalAmount: payment.amount, reason: dto.reason.trim(), reversedAt: new Date(), reversedByUserId: user.userId }));
       payment.isReversed = true; payment.reversedAt = new Date(); await manager.getRepository(InvoicePayment).save(payment);
       if (dto.replacementPaymentMethodId && dto.replacementAmount) {
-        const method = await manager.getRepository(PaymentMethod).findOneBy({ paymentMethodId: dto.replacementPaymentMethodId, tenantId: user.tenantId, isActive: true });
-        if (!method) throw new NotFoundException('Replacement payment method not found.');
-        const tendered = money(dto.replacementAmount);
         const otherPayments = await manager.getRepository(InvoicePayment).findBy({ invoiceId, isReversed: false });
         const alreadyApplied = money(otherPayments.reduce((sum, row) => sum + Number(row.amount), 0));
         const remaining = money(Math.max(0, Number(invoice.grandTotal) - alreadyApplied));
-        const applied = money(Math.min(tendered, remaining));
-        await manager.getRepository(InvoicePayment).save(manager.getRepository(InvoicePayment).create({ invoiceId, paymentMethodId: method.paymentMethodId, amount: applied.toFixed(2), tenderedAmount: tendered.toFixed(2), changeAmount: Math.max(0, tendered - applied).toFixed(2), referenceNumber: dto.referenceNumber?.trim() || null, paidAt: new Date(), createdByUserId: user.userId, isReversed: false, reversedAt: null }));
+        const [replacement] = await this.paymentProcessing.prepare(manager, user.tenantId, [{ paymentMethodId: dto.replacementPaymentMethodId, paymentChannelId: dto.replacementPaymentChannelId, amount: dto.replacementAmount, referenceNumber: dto.referenceNumber }], remaining);
+        await manager.getRepository(InvoicePayment).save(manager.getRepository(InvoicePayment).create({
+          invoiceId, paymentMethodId: replacement.method.paymentMethodId, paymentMethodTypeSnapshot: replacement.method.paymentMethodType,
+          paymentChannelId: replacement.channel?.paymentChannelId ?? null, paymentChannelCodeSnapshot: replacement.channel?.code ?? null,
+          paymentChannelNameSnapshot: replacement.channel?.name ?? null,
+          amount: replacement.applied.toFixed(2), tenderedAmount: replacement.tendered.toFixed(2), changeAmount: replacement.change.toFixed(2),
+          referenceNumber: replacement.referenceNumber, paidAt: new Date(), createdByUserId: user.userId, isReversed: false, reversedAt: null,
+          collectionKey: payment.collectionKey ? randomUUID() : null,
+        }));
       }
       await this.recalculateInvoicePayments(manager, invoice);
-      return manager.getRepository(Invoice).findOne({ where: { invoiceId }, relations: { payments: { paymentMethod: true } } });
+      return manager.getRepository(Invoice).findOne({ where: { invoiceId }, relations: { payments: { paymentMethod: true, paymentChannel: true } } });
     });
   }
 
@@ -172,8 +182,10 @@ export class InvoiceRefundsService {
   }
   private async recalculateInvoicePayments(manager: EntityManager, invoice: Invoice) {
     const payments = await manager.getRepository(InvoicePayment).findBy({ invoiceId: invoice.invoiceId, isReversed: false });
-    const tendered = money(payments.reduce((sum, x) => sum + Number(x.tenderedAmount), 0)); const paid = money(Math.min(tendered, Number(invoice.grandTotal)));
-    invoice.tenderedAmount = tendered.toFixed(2); invoice.paidAmount = paid.toFixed(2); invoice.changeAmount = Math.max(0, tendered - Number(invoice.grandTotal)).toFixed(2); invoice.balanceAmount = Math.max(0, Number(invoice.grandTotal) - paid).toFixed(2); invoice.paymentStatus = paid === 0 ? 'UNPAID' : paid < Number(invoice.grandTotal) ? 'PARTIALLY_PAID' : 'PAID'; await manager.getRepository(Invoice).save(invoice);
+    const tendered = money(payments.reduce((sum, x) => sum + Number(x.tenderedAmount), 0));
+    const paid = money(payments.reduce((sum, x) => sum + Number(x.amount), 0));
+    const change = money(payments.reduce((sum, x) => sum + Number(x.changeAmount), 0));
+    invoice.tenderedAmount = tendered.toFixed(2); invoice.paidAmount = paid.toFixed(2); invoice.changeAmount = change.toFixed(2); invoice.balanceAmount = Math.max(0, Number(invoice.grandTotal) - paid).toFixed(2); invoice.paymentStatus = paid === 0 ? 'UNPAID' : paid < Number(invoice.grandTotal) ? 'PARTIALLY_PAID' : 'PAID'; await manager.getRepository(Invoice).save(invoice);
   }
   private assertLocationAccess(locationId: number, user: TenantPrincipal) {
     if (user.accessScope === 'LOCATION' && !user.assignedLocationIds.map(Number).includes(Number(locationId))) {
@@ -181,5 +193,5 @@ export class InvoiceRefundsService {
     }
   }
   private refundNumber(id: number) { return `REF-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(id).padStart(6, '0')}`; }
-  private getWithManager(manager: EntityManager, id: number, tenantId: number) { return manager.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: id, tenantId }, relations: { invoice: true, location: true, details: { product: true }, payments: { paymentMethod: true } } }); }
+  private getWithManager(manager: EntityManager, id: number, tenantId: number) { return manager.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: id, tenantId }, relations: { invoice: true, location: true, details: { product: true }, payments: { paymentMethod: true, paymentChannel: true } } }); }
 }

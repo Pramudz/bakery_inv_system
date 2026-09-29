@@ -14,6 +14,11 @@ export function snapshotInvoiceReceipt(invoice: Invoice) {
       pricingSnapshot: (line as typeof line & { pricingSnapshot?: Record<string, unknown> }).pricingSnapshot ?? null,
       product: { sku: line.product.sku, productName: line.product.productName },
     })),
-    payments: invoice.payments.map((payment) => ({ amount: payment.amount, tenderedAmount: payment.tenderedAmount, paymentMethod: { paymentMethodName: payment.paymentMethod.paymentMethodName } })),
+    payments: invoice.payments.map((payment) => ({
+      amount: payment.amount, tenderedAmount: payment.tenderedAmount, changeAmount: payment.changeAmount,
+      referenceNumber: payment.referenceNumber, source: payment.collectionKey ? 'COLLECTION' : 'NEW_SALE',
+      paymentMethod: { paymentMethodName: payment.paymentMethod.paymentMethodName, paymentMethodType: payment.paymentMethodTypeSnapshot ?? payment.paymentMethod.paymentMethodType },
+      paymentChannel: payment.paymentChannelId ? { paymentChannelId: payment.paymentChannelId, code: payment.paymentChannelCodeSnapshot ?? payment.paymentChannel?.code, name: payment.paymentChannelNameSnapshot ?? payment.paymentChannel?.name } : null,
+    })),
   };
 }

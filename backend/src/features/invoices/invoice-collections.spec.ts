@@ -4,7 +4,7 @@ import test from 'node:test';
 import { InvoicesService } from './invoices.service';
 import { Invoice } from './invoice.entity';
 import { InvoicePayment } from './invoice-payment.entity';
-import { PaymentMethod } from '../payment-methods/payment-methods.entity';
+import { PaymentMethod, PaymentMethodType } from '../payment-methods/payment-methods.entity';
 import { TenantPrincipal } from '../auth/auth.types';
 
 const user = { tenantId: 1, userId: 2, accessScope: 'TENANT', assignedLocationIds: [] } as unknown as TenantPrincipal;
@@ -27,7 +27,7 @@ function fixture(overrides = {}) {
       create: (row: any) => row,
       save: async (row: any) => { const saved = { ...row, invoicePaymentId: payments.length + 1 }; payments.push(saved); return saved; },
     };
-    if (entity === PaymentMethod) return { findOneBy: async (where: any) => where.paymentMethodId === 1 && where.tenantId === 1 && where.isActive ? { paymentMethodId: 1, paymentMethodName: 'Cash' } : null };
+    if (entity === PaymentMethod) return { findOneBy: async (where: any) => where.paymentMethodId === 1 && where.tenantId === 1 && where.isActive ? { paymentMethodId: 1, paymentMethodName: 'Cash', paymentMethodType: PaymentMethodType.CASH } : null };
     throw new Error('Collection must not change stock or invoice lines.');
   } };
   const service = new InvoicesService({ transaction: (fn: any) => fn(manager) } as any, {} as any);
@@ -71,12 +71,15 @@ test('a retry key cannot be reused with a different amount', async () => {
   assert.equal(f.payments.length, 1);
 });
 
-test('rejects overpayment and already settled invoices', async () => {
-  for (const overrides of [{}, { balanceAmount: '0.00', paymentStatus: 'PAID' }]) {
-    const f = fixture(overrides);
-    await assert.rejects(f.receive({ ...request, amount: 3001 }), /balance|paid/i);
-    assert.equal(f.payments.length, 0);
-  }
+test('cash may be over-tendered with change, but an already settled invoice rejects collection', async () => {
+  const open = fixture();
+  const payment = await open.receive({ ...request, amount: 3001 });
+  assert.equal(payment.amount, '3000.00');
+  assert.equal(payment.tenderedAmount, '3001.00');
+  assert.equal(payment.changeAmount, '1.00');
+  const settled = fixture({ balanceAmount: '0.00', paymentStatus: 'PAID' });
+  await assert.rejects(settled.receive({ ...request, amount: 1 }), /balance/i);
+  assert.equal(settled.payments.length, 0);
 });
 
 test('rejects invalid monetary amounts before recording payment', async () => {

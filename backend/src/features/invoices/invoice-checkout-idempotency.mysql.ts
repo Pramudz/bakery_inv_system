@@ -8,7 +8,7 @@ import { Category } from '../categories/categories.entity';
 import { InventoryBalance } from '../inventory-balance/inventory-balance.entity';
 import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
 import { Location, LocationType } from '../locations/locations.entity';
-import { PaymentMethod } from '../payment-methods/payment-methods.entity';
+import { PaymentMethod, PaymentMethodType } from '../payment-methods/payment-methods.entity';
 import { PriceListItemDiscountService } from '../price-list-item-discounts/price-list-item-discounts.service';
 import { PriceListItemDiscount } from '../price-list-item-discounts/price-list-item-discounts.entity';
 import { PriceListItem } from '../price-list-items/price-list-items.entity';
@@ -43,7 +43,7 @@ test('concurrent committed checkout retries create one invoice, payment and stoc
     await dataSource.getRepository(InventoryBalance).save(dataSource.getRepository(InventoryBalance).create({ tenantId: tenant.tenantId, locationId: location.locationId, productId: product.productId, quantityOnHand: '10', averageCost: '3', lastMovementAt: null }));
     const priceList = await dataSource.getRepository(PriceList).save(dataSource.getRepository(PriceList).create({ tenantId: tenant.tenantId, code: `R-${suffix}`, name: 'Retail', priceListType: 'RETAIL', currencyCode: 'LKR', isDefault: true, isActive: true }));
     const priceItem = await dataSource.getRepository(PriceListItem).save(dataSource.getRepository(PriceListItem).create({ tenantId: tenant.tenantId, priceListId: priceList.priceListId, productId: product.productId, unitId: unit.unitId, productUnitId: productUnit.productUnitId, sellingPrice: '10', currencyCode: 'LKR', minimumQuantity: '1', effectiveFrom: new Date('2026-01-01T00:00:00Z'), effectiveTo: null, isActive: true }));
-    const paymentMethod = await dataSource.getRepository(PaymentMethod).save(dataSource.getRepository(PaymentMethod).create({ tenantId: tenant.tenantId, paymentMethodName: 'Cash', isActive: true }));
+    const paymentMethod = await dataSource.getRepository(PaymentMethod).save(dataSource.getRepository(PaymentMethod).create({ tenantId: tenant.tenantId, paymentMethodName: 'Cash', paymentMethodType: PaymentMethodType.CASH, isActive: true }));
 
     const discounts = new PriceListItemDiscountService(dataSource.getRepository(PriceListItemDiscount), dataSource);
     const service = new InvoicesService(dataSource, new PosPricingService(dataSource, discounts));

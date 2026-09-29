@@ -7,6 +7,7 @@ import { InvoiceRefund } from './invoice-refund.entity';
 import { InvoiceRefundsController } from './invoice-refunds.controller';
 import { InvoiceRefundsService } from './invoice-refunds.service';
 import { InvoiceAdjustment } from './invoice-adjustment.entity';
+import { PaymentMethodsModule } from '../payment-methods/payment-methods.module';
 
-@Module({ imports: [TypeOrmModule.forFeature([InvoiceRefund, InvoiceRefundDetail, InvoiceRefundPayment, InvoicePaymentReversal, InvoiceAdjustment])], controllers: [InvoiceRefundsController], providers: [InvoiceRefundsService] })
+@Module({ imports: [TypeOrmModule.forFeature([InvoiceRefund, InvoiceRefundDetail, InvoiceRefundPayment, InvoicePaymentReversal, InvoiceAdjustment]), PaymentMethodsModule], controllers: [InvoiceRefundsController], providers: [InvoiceRefundsService] })
 export class InvoiceRefundsModule {}
