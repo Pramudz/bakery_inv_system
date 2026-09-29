@@ -12,6 +12,7 @@ import { ReceiveInvoicePaymentDto } from './dto/receive-invoice-payment.dto';
 
 const user = { tenantId: 1, userId: 2, accessScope: 'TENANT', assignedLocationIds: [] } as unknown as TenantPrincipal;
 const request: ReceiveInvoicePaymentDto = { amount: 2000, paymentMethodId: 1, collectionKey: 'be49edbc-a597-4a38-8cde-5629c0fe2018' };
+const activePosSession: any = { terminal: { posTerminalId: 21 }, registerSession: { posRegisterSessionId: 22 }, cashierSession: { posCashierSessionId: 23 } };
 
 function fixture(overrides = {}, serializeTransactions = false) {
   let invoice: any = { invoiceId: 7, tenantId: 1, locationId: 3, customerId: 11, invoiceNumber: 'INV-7', grandTotal: '5000.00', paidAmount: '2000.00', tenderedAmount: '2000.00', changeAmount: '0.00', balanceAmount: '3000.00', paymentStatus: 'PARTIALLY_PAID', invoiceStatus: 'COMPLETED', ...overrides };
@@ -49,7 +50,7 @@ function fixture(overrides = {}, serializeTransactions = false) {
     transactionQueue = result.then(() => undefined, () => undefined);
     return result;
   };
-  const service = new InvoicesService({ transaction } as any, {} as any);
+  const service = new InvoicesService({ transaction } as any, {} as any, { requireCashierSession: async () => activePosSession } as any);
   const receive = (data = request, principal = user) => (service as any).receivePayment(7, data, principal);
   return { receive, payments, invoice: () => invoice };
 }
@@ -63,6 +64,9 @@ test('later partial payment reduces balance and preserves invoice total', async 
   assert.equal(f.invoice().paymentStatus, 'PARTIALLY_PAID');
   assert.equal(result.balanceBefore, '3000.00');
   assert.equal(result.balanceAfter, '1000.00');
+  assert.equal(result.posTerminalId, 21);
+  assert.equal(result.posRegisterSessionId, 22);
+  assert.equal(result.posCashierSessionId, 23);
   assert.equal(f.payments.length, 1);
 });
 

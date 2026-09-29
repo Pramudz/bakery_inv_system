@@ -1,6 +1,7 @@
 import { apiClient } from '../../../services/apiClient';
 
 export type CreateInvoiceRefundInput = {
+  refundKey: string;
   invoiceId: number;
   reason: string;
   details: { invoiceDetailId: number; quantity: number; returnToStock: boolean }[];

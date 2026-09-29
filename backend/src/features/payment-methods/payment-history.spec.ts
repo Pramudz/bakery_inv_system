@@ -51,6 +51,6 @@ test('payment breakdown keeps new-sale receipts separate from later collections'
     { amount: '25', tenderedAmount: '25', changeAmount: '0', collectionKey: 'collection-key', invoice: { locationId: 3, location: { name: 'Main' } }, paymentMethodTypeSnapshot: PaymentMethodType.CARD, paymentMethod: { paymentMethodType: PaymentMethodType.CARD }, paymentChannelId: 9, paymentChannelCodeSnapshot: 'COMMERCIAL', paymentChannelNameSnapshot: 'Commercial' },
   ];
   const dataSource: any = { getRepository: (entity: unknown) => entity === InvoicePayment ? { find: async () => rows } : null };
-  const breakdown = await new InvoicesService(dataSource, {} as any).paymentBreakdown({ tenantId: 1, accessScope: 'TENANT', assignedLocationIds: [] } as any);
+  const breakdown = await new InvoicesService(dataSource, {} as any, {} as any).paymentBreakdown({ tenantId: 1, accessScope: 'TENANT', assignedLocationIds: [] } as any);
   assert.deepEqual(breakdown.map((row) => [row.locationId, row.locationName, row.source, row.methodType, row.appliedAmount, row.netReceived]), [[3, 'Main', 'COLLECTION', 'CARD', 25, 25], [3, 'Main', 'NEW_SALE', 'CASH', 50, 50]]);
 });

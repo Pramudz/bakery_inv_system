@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantPrincipal } from '../auth/auth.types';
 import { TenantAuthGuard } from '../auth/tenant-auth.guard';
@@ -15,9 +15,9 @@ export class InvoiceRefundsController {
   constructor(private readonly service: InvoiceRefundsService) {}
   @Get('invoice-refunds') @RequirePermission('SALES_REFUND_VIEW') list(@CurrentUser() user: TenantPrincipal) { return this.service.list(user); }
   @Get('invoice-refunds/:id') @RequirePermission('SALES_REFUND_VIEW') get(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.get(id, user); }
-  @Post('invoice-refunds') @RequirePermission('SALES_REFUND_CREATE') create(@Body() dto: CreateInvoiceRefundDto, @CurrentUser() user: TenantPrincipal) { return this.service.create(dto, user); }
+  @Post('invoice-refunds') @RequirePermission('SALES_REFUND_CREATE') create(@Body() dto: CreateInvoiceRefundDto, @Headers('x-pos-terminal-credential') credential: string | undefined, @CurrentUser() user: TenantPrincipal) { return this.service.create(dto, user, credential); }
   @Get('invoice-adjustments') @RequirePermission('SALES_ADJUSTMENT_VIEW') listAdjustments(@CurrentUser() user: TenantPrincipal) { return this.service.listAdjustments(user); }
   @Post('invoice-adjustments') @RequirePermission('SALES_ADJUSTMENT_CREATE') createAdjustment(@Body() dto: CreateInvoiceAdjustmentDto, @CurrentUser() user: TenantPrincipal) { return this.service.createAdjustment(dto, user); }
   @Get('invoices/:id/refundable') @RequirePermission('SALES_REFUND_VIEW') refundable(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.refundableInvoice(id, user); }
-  @Post('invoices/:invoiceId/payments/:paymentId/reverse') @RequirePermission('SALES_PAYMENT_REVERSE') reversePayment(@Param('invoiceId', ParseIntPipe) invoiceId: number, @Param('paymentId', ParseIntPipe) paymentId: number, @Body() dto: ReverseInvoicePaymentDto, @CurrentUser() user: TenantPrincipal) { return this.service.reversePayment(invoiceId, paymentId, dto, user); }
+  @Post('invoices/:invoiceId/payments/:paymentId/reverse') @RequirePermission('SALES_PAYMENT_REVERSE') reversePayment(@Param('invoiceId', ParseIntPipe) invoiceId: number, @Param('paymentId', ParseIntPipe) paymentId: number, @Body() dto: ReverseInvoicePaymentDto, @Headers('x-pos-terminal-credential') credential: string | undefined, @CurrentUser() user: TenantPrincipal) { return this.service.reversePayment(invoiceId, paymentId, dto, user, credential); }
 }

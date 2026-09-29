@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsBoolean, IsInt, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsBoolean, IsInt, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, IsUUID, MaxLength, ValidateNested } from 'class-validator';
 
 export class CreateRefundDetailDto {
   @Type(() => Number) @IsInt() @IsPositive() invoiceDetailId!: number;
@@ -13,6 +13,7 @@ export class CreateRefundPaymentDto {
   @IsOptional() @Type(() => Number) @IsInt() @IsPositive() paymentChannelId?: number;
 }
 export class CreateInvoiceRefundDto {
+  @IsUUID('4') refundKey?: string;
   @Type(() => Number) @IsInt() @IsPositive() invoiceId!: number;
   @IsString() @IsNotEmpty() @MaxLength(255) reason!: string;
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => CreateRefundDetailDto) details!: CreateRefundDetailDto[];

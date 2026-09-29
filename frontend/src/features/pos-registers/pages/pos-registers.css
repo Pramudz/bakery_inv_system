@@ -1,0 +1,72 @@
+.pos-register-page {
+  display: grid;
+  gap: 18px;
+}
+.pos-register-page .card {
+  min-width: 0;
+}
+.pos-pairing-card {
+  display: grid;
+  gap: 14px;
+}
+.pos-pairing-card h2,
+.pos-register-page .sales-card-head h2 {
+  margin: 0 0 4px;
+}
+.pos-pairing-card p,
+.pos-register-page .sales-card-head p {
+  margin: 0;
+  color: #718096;
+}
+.paired-terminal {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid #a9dcc0;
+  border-radius: 10px;
+  background: #f0faf4;
+}
+.paired-terminal small,
+.paired-terminal strong {
+  display: block;
+}
+.activation-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) auto;
+  align-items: end;
+  gap: 10px;
+}
+.activation-form .error-box {
+  grid-column: 1 / -1;
+}
+.activation-code {
+  font-family: Consolas, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.pos-terminal-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.activation-result {
+  text-align: center;
+}
+.activation-result > strong {
+  display: block;
+  margin: 18px 0;
+  color: #12345b;
+  font:
+    800 28px/1 Consolas,
+    monospace;
+  letter-spacing: 0.12em;
+}
+@media (max-width: 700px) {
+  .paired-terminal,
+  .activation-form {
+    grid-template-columns: 1fr;
+  }
+}

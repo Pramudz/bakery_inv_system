@@ -33,6 +33,7 @@ export function RefundsPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [historyMode, setHistoryMode] = useState<'REFUNDS' | 'ADJUSTMENTS'>('REFUNDS');
+  const [refundKey, setRefundKey] = useState(() => crypto.randomUUID());
 
   const invoices = useQuery({ queryKey: ['invoices'], queryFn: invoicesApi.list });
   const invoice = useQuery({ queryKey: ['refundable-invoice', selectedId], queryFn: () => invoicesApi.refundable(selectedId!), enabled: selectedId !== null });
@@ -96,7 +97,7 @@ export function RefundsPage() {
   useEffect(() => setSettlementAmount(settlementLimit > 0 ? settlementLimit.toFixed(2) : '0'), [settlementLimit]);
 
   const resetWork = () => {
-    setQuantities({}); setStockReturns({}); setSelectedLineId(null); setCorrectedPercentage(''); setCorrectedAmount(''); setMessage('');
+    setQuantities({}); setStockReturns({}); setSelectedLineId(null); setCorrectedPercentage(''); setCorrectedAmount(''); setMessage(''); setRefundKey(crypto.randomUUID());
   };
   const loadInvoice = () => {
     const value = lookup.trim().toLowerCase();
@@ -121,7 +122,7 @@ export function RefundsPage() {
 
   const createRefund = useMutation({
     mutationFn: () => invoiceRefundsApi.create({
-      invoiceId: selectedId!, reason,
+      refundKey, invoiceId: selectedId!, reason,
       details: (invoice.data?.details ?? []).filter((line: any) => (quantities[line.invoiceDetailId] ?? 0) > 0).map((line: any) => ({ invoiceDetailId: line.invoiceDetailId, quantity: quantities[line.invoiceDetailId], returnToStock: stockReturns[line.invoiceDetailId] !== false })),
       payments: paymentMethodId && Number(settlementAmount) > 0 ? [{ paymentMethodId: Number(paymentMethodId), amount: Number(settlementAmount), paymentChannelId: paymentChannelId ? Number(paymentChannelId) : undefined, referenceNumber: paymentReference.trim() || undefined }] : [],
     }),

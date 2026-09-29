@@ -5,6 +5,9 @@ import { PaymentMethodType } from '../payment-methods/payment-methods.entity';
 import { PaymentChannel } from '../payment-channels/payment-channel.entity';
 import { User } from '../users/user.entity';
 import { Invoice } from './invoice.entity';
+import { PosTerminal } from '../pos-registers/pos-terminal.entity';
+import { PosRegisterSession } from '../pos-registers/pos-register-session.entity';
+import { PosCashierSession } from '../pos-registers/pos-cashier-session.entity';
 
 @Entity('tbl_invoice_payment')
 @Index('uq_invoice_payment_collection', ['invoiceId', 'collectionKey'], { unique: true })
@@ -12,6 +15,12 @@ export class InvoicePayment extends AuditEntity {
   @PrimaryGeneratedColumn({ name: 'invoice_payment_id', type: 'bigint' }) invoicePaymentId!: number;
   @Column({ name: 'invoice_id', type: 'bigint' }) invoiceId!: number;
   @ManyToOne(() => Invoice, (invoice) => invoice.payments, { nullable: false, onDelete: 'CASCADE' }) @JoinColumn({ name: 'invoice_id' }) invoice!: Invoice;
+  @Column({ name: 'pos_terminal_id', type: 'bigint', nullable: true }) posTerminalId!: number | null;
+  @ManyToOne(() => PosTerminal, { nullable: true, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'pos_terminal_id' }) terminal!: PosTerminal | null;
+  @Column({ name: 'pos_register_session_id', type: 'bigint', nullable: true }) posRegisterSessionId!: number | null;
+  @ManyToOne(() => PosRegisterSession, { nullable: true, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'pos_register_session_id' }) registerSession!: PosRegisterSession | null;
+  @Column({ name: 'pos_cashier_session_id', type: 'bigint', nullable: true }) posCashierSessionId!: number | null;
+  @ManyToOne(() => PosCashierSession, { nullable: true, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'pos_cashier_session_id' }) cashierSession!: PosCashierSession | null;
   @Column({ name: 'payment_method_id', type: 'bigint' }) paymentMethodId!: number;
   @ManyToOne(() => PaymentMethod, { nullable: false, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'payment_method_id' }) paymentMethod!: PaymentMethod;
   @Column({ name: 'payment_method_type_snapshot', type: 'varchar', length: 20, nullable: true }) paymentMethodTypeSnapshot!: PaymentMethodType | null;

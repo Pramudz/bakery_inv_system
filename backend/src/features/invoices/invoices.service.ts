@@ -20,12 +20,13 @@ import { createHash } from 'node:crypto';
 import { Permission } from '../permissions/permissions.entity';
 import { RolePermission } from '../role-permissions/role-permissions.entity';
 import { TenantModule } from '../tenant-modules/tenant-modules.entity';
+import { PosSessionsService } from '../pos-registers/pos-sessions.service';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class InvoicesService {
-  constructor(private readonly dataSource: DataSource, private readonly pricing: PosPricingService, private readonly paymentProcessing: PaymentProcessingService = new PaymentProcessingService()) {}
+  constructor(private readonly dataSource: DataSource, private readonly pricing: PosPricingService, private readonly posSessions: PosSessionsService, private readonly paymentProcessing: PaymentProcessingService = new PaymentProcessingService()) {}
 
   async pendingPayments(user: TenantPrincipal) {
     const invoices = await this.dataSource.getRepository(Invoice).find({
@@ -50,7 +51,7 @@ export class InvoicesService {
     });
   }
 
-  async receivePayment(id: number, dto: ReceiveInvoicePaymentDto, user: TenantPrincipal) {
+  async receivePayment(id: number, dto: ReceiveInvoicePaymentDto, user: TenantPrincipal, credential?: string) {
     if (!Number.isFinite(dto.amount) || dto.amount <= 0 || money(dto.amount) !== dto.amount) {
       throw new BadRequestException('Payment amount must be positive with at most two decimal places.');
     }
@@ -61,10 +62,11 @@ export class InvoicesService {
       if (user.accessScope === 'LOCATION' && !user.assignedLocationIds.map(Number).includes(Number(invoice.locationId))) {
         throw new ForbiddenException('You do not have access to this location.');
       }
+      const activeSession = await this.posSessions.requireCashierSession(manager, credential, user, invoice.locationId, true);
       const repo = manager.getRepository(InvoicePayment);
       const existing = await repo.findOneBy({ invoiceId: invoice.invoiceId, collectionKey: dto.collectionKey });
       if (existing) {
-        if (Number(existing.tenderedAmount) !== dto.amount || Number(existing.paymentMethodId) !== dto.paymentMethodId || Number(existing.paymentChannelId ?? 0) !== Number(dto.paymentChannelId ?? 0) || existing.referenceNumber !== (dto.referenceNumber?.trim() || null)) {
+        if (Number(existing.posCashierSessionId ?? 0) !== Number(activeSession.cashierSession.posCashierSessionId) || Number(existing.tenderedAmount) !== dto.amount || Number(existing.paymentMethodId) !== dto.paymentMethodId || Number(existing.paymentChannelId ?? 0) !== Number(dto.paymentChannelId ?? 0) || existing.referenceNumber !== (dto.referenceNumber?.trim() || null)) {
           throw new BadRequestException('This receipt request was already used for a different payment. Refresh and try again.');
         }
         return existing;
@@ -84,6 +86,9 @@ export class InvoicesService {
         amount: prepared.applied.toFixed(2), tenderedAmount: prepared.tendered.toFixed(2), changeAmount: prepared.change.toFixed(2), referenceNumber: prepared.referenceNumber,
         paidAt: new Date(), createdByUserId: user.userId, isReversed: false, reversedAt: null,
         collectionKey: dto.collectionKey, balanceBefore: before.toFixed(2), balanceAfter: after.toFixed(2),
+        posTerminalId: activeSession.terminal.posTerminalId,
+        posRegisterSessionId: activeSession.registerSession.posRegisterSessionId,
+        posCashierSessionId: activeSession.cashierSession.posCashierSessionId,
       }));
       invoice.paidAmount = money(Number(invoice.paidAmount) + prepared.applied).toFixed(2);
       invoice.tenderedAmount = money(Number(invoice.tenderedAmount) + prepared.tendered).toFixed(2);
@@ -158,13 +163,15 @@ export class InvoicesService {
     return this.pricing.quote(user.tenantId, dto.locationId, dto.saleType, dto.details);
   }
 
-  async create(dto: CreateInvoiceDto, user: TenantPrincipal, deadlockAttempt = 0): Promise<Invoice> {
+  async create(dto: CreateInvoiceDto, user: TenantPrincipal, credential?: string, deadlockAttempt = 0): Promise<Invoice> {
     const checkoutFingerprint = this.checkoutFingerprint(dto);
-    const prior = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user);
+    const currentSession = await this.posSessions.requireCashierSession(this.dataSource.manager, credential, user, dto.locationId, false);
+    const prior = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user, currentSession.cashierSession.posCashierSessionId);
     if (prior) return prior;
     await this.validateHeader(dto, user);
     try {
       return await this.dataSource.transaction(async (manager) => {
+      const activeSession = await this.posSessions.requireCashierSession(manager, credential, user, dto.locationId, true);
       const quote = await this.pricing.quoteWithManager(
         manager,
         user.tenantId,
@@ -211,6 +218,9 @@ export class InvoicesService {
         checkoutKey: dto.checkoutKey,
         checkoutFingerprint,
         locationId: dto.locationId,
+        posTerminalId: activeSession.terminal.posTerminalId,
+        posRegisterSessionId: activeSession.registerSession.posRegisterSessionId,
+        posCashierSessionId: activeSession.cashierSession.posCashierSessionId,
         customerId: dto.customerId ?? null,
         invoiceNumber: `PENDING-${dto.checkoutKey}`,
         invoiceDate: new Date(),
@@ -249,6 +259,9 @@ export class InvoicesService {
           paymentChannelNameSnapshot: payment.channel?.name ?? null,
           amount: payment.applied.toFixed(2), tenderedAmount: payment.tendered.toFixed(2), changeAmount: payment.change.toFixed(2),
           referenceNumber: payment.referenceNumber, paidAt: new Date(), createdByUserId: user.userId,
+          posTerminalId: activeSession.terminal.posTerminalId,
+          posRegisterSessionId: activeSession.registerSession.posRegisterSessionId,
+          posCashierSessionId: activeSession.cashierSession.posCashierSessionId,
         }));
       }
       const completed = (await this.getWithManager(manager, invoice.invoiceId, user.tenantId))!;
@@ -263,10 +276,10 @@ export class InvoicesService {
     } catch (error) {
       if (this.isRetryableDeadlock(error) && deadlockAttempt < 2) {
         await new Promise((resolve) => setTimeout(resolve, 10 * (deadlockAttempt + 1)));
-        return this.create(dto, user, deadlockAttempt + 1);
+        return this.create(dto, user, credential, deadlockAttempt + 1);
       }
       if (!this.isCheckoutKeyConflict(error)) throw error;
-      const committed = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user);
+      const committed = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user, currentSession.cashierSession.posCashierSessionId);
       if (committed) return committed;
       throw error;
     }
@@ -351,10 +364,11 @@ export class InvoicesService {
     })).digest('hex');
   }
 
-  private async checkoutResult(checkoutKey: string, checkoutFingerprint: string, user: TenantPrincipal) {
+  private async checkoutResult(checkoutKey: string, checkoutFingerprint: string, user: TenantPrincipal, cashierSessionId: number) {
     const existing = await this.dataSource.getRepository(Invoice).findOneBy({ tenantId: user.tenantId, checkoutKey });
     if (!existing) return null;
     this.assertLocationAccess(existing.locationId, user);
+    if (Number(existing.posCashierSessionId ?? 0) !== Number(cashierSessionId)) throw new ConflictException({ code: 'CHECKOUT_KEY_REUSED', message: 'This checkout key belongs to another cashier session.' });
     if (existing.checkoutFingerprint !== checkoutFingerprint) {
       throw new ConflictException({ code: 'CHECKOUT_KEY_REUSED', message: 'This checkout key was already used for a different sale.' });
     }

@@ -46,6 +46,8 @@ import { InventoryAdjustmentScreen } from "../features/inventory-adjustments/pag
 import { InventoryAdjustmentReasonsPage } from "../features/inventory-adjustments/pages/InventoryAdjustmentReasonsPage";
 import { InventoryConversionsPage } from "../features/inventory-conversions/pages/InventoryConversionsPage";
 import { InventoryConversionScreen } from "../features/inventory-conversions/pages/InventoryConversionScreen";
+import { PosRegistersPage } from "../features/pos-registers/pages/PosRegistersPage";
+import { PosRegisterVerificationPage } from "../features/pos-registers/pages/PosRegisterVerificationPage";
 
 const tenantChildren = [
   { path: "my-tenant", element: <TenantProfilePage /> },
@@ -80,6 +82,8 @@ const tenantChildren = [
   { path: "refunds", element: <RefundsPage /> },
   { path: "payment-methods", element: <PaymentMethodsPage /> },
   { path: "card-channels", element: <CardChannelsPage /> },
+  { path: "pos-registers", element: <PosRegistersPage /> },
+  { path: "pos-register-verification", element: <PosRegisterVerificationPage /> },
   { path: "goods-receipts/reverse", element: <GoodsReceiptReversalScreen /> },
   { path: "goods-receipts/direct/new", element: <GoodsReceiptScreen mode="create-direct" /> },
   { path: "goods-receipts/po/new", element: <GoodsReceiptScreen mode="create-po-based" /> },

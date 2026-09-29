@@ -20,6 +20,7 @@ import { RolePermission } from '../role-permissions/role-permissions.entity';
 import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 
 const user = { tenantId: 1, userId: 2, roleId: 4, roleCode: 'TENANT_ADMIN', accessScope: 'LOCATION', assignedLocationIds: [3] } as unknown as TenantPrincipal;
+const activePosSession: any = { terminal: { posTerminalId: 21 }, registerSession: { posRegisterSessionId: 22 }, cashierSession: { posCashierSessionId: 23 } };
 const currentLine = {
   productId: 10, productUnitId: 20, priceListId: 30, priceListItemId: 40,
   priceListItemDiscountId: 50, discountType: 'PERCENTAGE', discountValue: '10.0000',
@@ -69,7 +70,7 @@ function fixture(grantCredit = true) {
     transaction: (work: any) => work(manager),
   };
   const pricing: any = { quoteWithManager: async () => ({ quotedAt: new Date().toISOString(), locationId: 3, saleType: 'RETAIL', priceList: { priceListId: 30 }, lines: [currentLine], subtotal: 200, discountTotal: 20, grandTotal: 180 }) };
-  return { service: new InvoicesService(dataSource, pricing), savedDetails };
+  return { service: new InvoicesService(dataSource, pricing, { requireCashierSession: async () => activePosSession } as any), savedDetails };
 }
 
 test('authorized partial credit finalization ignores tampered browser price and discount amounts', async () => {
@@ -88,6 +89,9 @@ test('authorized partial credit finalization ignores tampered browser price and 
   assert.equal(invoice.isCreditSale, true);
   assert.equal(invoice.creditAuthorizedByUserId, 2);
   assert.ok(invoice.creditAuthorizedAt instanceof Date);
+  assert.equal(invoice.posTerminalId, 21);
+  assert.equal(invoice.posRegisterSessionId, 22);
+  assert.equal(invoice.posCashierSessionId, 23);
   assert.deepEqual((invoice.receiptSnapshot as any).payments, []);
   assert.equal(savedDetails[0].unitPrice, '100.00');
   assert.equal(savedDetails[0].discountAmount, '20.00');
@@ -159,6 +163,17 @@ test('backend rejects accidental and anonymous debt even when UI is bypassed', a
   await assert.rejects(fixture().service.create({ ...request, checkoutKey: '66666666-6666-4666-8666-666666666666', sellOnCredit: true }, user), /customer/i);
 });
 
+test('checkout is denied before invoice creation when the paired cashier session is unavailable', async () => {
+  const f = fixture();
+  (f.service as any).posSessions = { requireCashierSession: async () => { throw new ForbiddenException('An active cashier session is required.'); } };
+  await assert.rejects(f.service.create({
+    checkoutKey: '99999999-9999-4999-8999-999999999999', locationId: 3, saleType: 'RETAIL',
+    details: [{ productId: 10, quantity: 2, quotedPriceListItemId: 40, quotedPriceListItemDiscountId: 50, quotedUnitPrice: 100, quotedDiscountAmount: 20 }],
+    payments: [{ paymentMethodId: 1, amount: 180 }],
+  }, user), /active cashier session/i);
+  assert.equal(f.savedDetails.length, 0);
+});
+
 test('credit sales require the dedicated permission for non-admin cashiers', async () => {
   const cashier = { ...user, roleCode: 'CASHIER' };
   const request: any = {
@@ -173,7 +188,7 @@ test('credit sales require the dedicated permission for non-admin cashiers', asy
 
 test('single invoice reads enforce the authenticated location scope', async () => {
   const repo = { findOne: async () => ({ invoiceId: 9, tenantId: 1, locationId: 8 }) };
-  const service = new InvoicesService({ getRepository: () => repo } as any, {} as any);
+  const service = new InvoicesService({ getRepository: () => repo } as any, {} as any, { requireCashierSession: async () => activePosSession } as any);
   await assert.rejects(service.get(9, user), ForbiddenException);
 });
 

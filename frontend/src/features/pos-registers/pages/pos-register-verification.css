@@ -1,0 +1,15 @@
+.verification-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; }
+.verification-layout tbody tr { cursor: pointer; }
+.verification-detail { display: grid; gap: 14px; position: sticky; top: 18px; }
+.verification-detail h2 { margin: 3px 0; }
+.verification-detail p { margin: 0; color: #64748b; }
+.verification-money { display: grid; gap: 7px; }
+.verification-money > div { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
+.verification-money small { grid-column: 1 / -1; color: #64748b; }
+.verification-money .total { padding: 12px 0; font-size: 17px; border-bottom: 2px solid #94a3b8; }
+.verification-money.compact b { text-align: right; }
+.variance-ok { color: #15803d; }
+.variance-alert { color: #b91c1c; }
+.verified-variance { padding: 10px 12px; border-radius: 8px; background: #f1f5f9; display: flex; justify-content: space-between; }
+.verification-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 1050px) { .verification-layout { grid-template-columns: 1fr; } .verification-detail { position: static; } }

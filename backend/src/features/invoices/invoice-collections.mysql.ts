@@ -36,7 +36,8 @@ test('local MySQL collection, receipt history and tenant/location isolation (rol
       tenderedAmount: '0.00', changeAmount: '0.00', balanceAmount: '5000.00', paymentStatus: 'UNPAID',
       invoiceStatus: 'COMPLETED', createdByUserId: user.userId,
     }));
-    const service = new InvoicesService({ getRepository: manager.getRepository.bind(manager), transaction: (run: any) => run(manager) } as any, {} as any);
+    const legacyTestSession: any = { terminal: { posTerminalId: null }, registerSession: { posRegisterSessionId: null }, cashierSession: { posCashierSessionId: null } };
+    const service = new InvoicesService({ getRepository: manager.getRepository.bind(manager), transaction: (run: any) => run(manager) } as any, {} as any, { requireCashierSession: async () => legacyTestSession } as any);
     assert.ok((await service.pendingPayments(user)).some((row) => row.invoiceId === invoice.invoiceId));
     const firstInput = { amount: 2000, paymentMethodId: Number(method.paymentMethodId), collectionKey: randomUUID() };
     const first = await service.receivePayment(Number(invoice.invoiceId), firstInput, user);

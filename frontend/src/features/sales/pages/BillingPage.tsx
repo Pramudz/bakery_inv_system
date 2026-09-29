@@ -16,6 +16,8 @@ import {
   validatePaymentSequence,
 } from "../paymentDraft";
 import { useAuth } from "../../auth/AuthContext";
+import { posRegistersApi } from "../../pos-registers/api/posRegistersApi";
+import "./billing-register-session.css";
 
 type SaleType = "Retail" | "Wholesale";
 type Product = {
@@ -69,6 +71,10 @@ export function BillingPage() {
   const [paymentValidation, setPaymentValidation] =
     useState<PaymentFieldErrors>({});
   const [locationId, setLocationId] = useState(0);
+  const [openingBalance, setOpeningBalance] = useState("0");
+  const [cashCountOpen, setCashCountOpen] = useState(false);
+  const [countedCash, setCountedCash] = useState("");
+  const [countSubmissionKey, setCountSubmissionKey] = useState(() => crypto.randomUUID());
   const [checkoutKey, setCheckoutKey] = useState(() => crypto.randomUUID());
   const [paymentEntries, setPaymentEntries] = useState<PosPaymentEntry[]>([]);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
@@ -95,6 +101,27 @@ export function BillingPage() {
   const channelsQuery = useQuery({
     queryKey: ["payment-channels", "active"],
     queryFn: () => paymentChannelsApi.list(true),
+  });
+  const sessionQuery = useQuery({
+    queryKey: ["pos-register-session", "context", locationId],
+    queryFn: () => posRegistersApi.sessionContext(locationId),
+    enabled: locationId > 0,
+    retry: false,
+  });
+  const cashSummaryQuery = useQuery({
+    queryKey: ["pos-register-closing", "current-summary", sessionQuery.data?.cashierSession?.posCashierSessionId],
+    queryFn: posRegistersApi.currentCashSummary,
+    enabled: cashCountOpen && sessionQuery.data?.config?.registerMode === "TERMINAL_REGISTER",
+    retry: false,
+  });
+  const submitCashCount = useMutation({
+    mutationFn: () => posRegistersApi.submitCashCount(Number(countedCash), countSubmissionKey),
+    onSuccess: () => {
+      setCashCountOpen(false);
+      setCountedCash("");
+      setCountSubmissionKey(crypto.randomUUID());
+      void sessionQuery.refetch();
+    },
   });
   useEffect(() => {
     const first = (locationsQuery.data ?? []).find(
@@ -197,10 +224,43 @@ export function BillingPage() {
       : paymentSummary.applied > 0
         ? "Partially paid"
         : "Unpaid";
-  const hasPermission = (code: string) => role?.code === "TENANT_ADMIN" || permissions.includes(code);
+  const hasPermission = (code: string) =>
+    role?.code === "TENANT_ADMIN" || permissions.includes(code);
   const canAuthorizeCredit = hasPermission("SALES_CREDIT_AUTHORIZE");
+  const canOpenMasterRegister = hasPermission("SALES_REGISTER_OPEN");
+  const sessionReady = sessionQuery.data?.canBill === true;
+  const sessionMutation = useMutation({
+    mutationFn: async () => {
+      const action = sessionQuery.data?.action;
+      const balance = Number(openingBalance);
+      if (
+        (action === "OPEN_TERMINAL_REGISTER" ||
+          action === "OPEN_MASTER_REGISTER") &&
+        (!Number.isFinite(balance) ||
+          balance < 0 ||
+          Math.round(balance * 100) / 100 !== balance)
+      ) {
+        throw new Error(
+          "Opening balance must be nonnegative with at most two decimal places.",
+        );
+      }
+      if (action === "OPEN_TERMINAL_REGISTER")
+        return posRegistersApi.openTerminalRegister(balance);
+      if (action === "OPEN_MASTER_REGISTER")
+        return posRegistersApi.openMasterRegister(locationId, balance);
+      if (action === "START_CASHIER_SESSION")
+        return posRegistersApi.startCashierSession();
+      throw new Error("No register session action is available.");
+    },
+    onSuccess: () => {
+      setOpeningBalance("0");
+      void sessionQuery.refetch();
+    },
+  });
   const creditRequired = paymentSummary.remaining > 0;
-  const creditReady = !creditRequired || (Boolean(selectedCustomer) && sellOnCredit && canAuthorizeCredit);
+  const creditReady =
+    !creditRequired ||
+    (Boolean(selectedCustomer) && sellOnCredit && canAuthorizeCredit);
   const submitGuard = useRef(false);
   const invoiceMutation = useMutation({
     mutationFn: ({
@@ -346,15 +406,21 @@ export function BillingPage() {
       return;
     }
     if (creditRequired && !selectedCustomer) {
-      setPaymentValidation({ form: "Select an existing customer before completing a sale with an outstanding balance." });
+      setPaymentValidation({
+        form: "Select an existing customer before completing a sale with an outstanding balance.",
+      });
       return;
     }
     if (creditRequired && !sellOnCredit) {
-      setPaymentValidation({ form: "Explicitly choose Sell on credit before creating the customer receivable." });
+      setPaymentValidation({
+        form: "Explicitly choose Sell on credit before creating the customer receivable.",
+      });
       return;
     }
     if (creditRequired && !canAuthorizeCredit) {
-      setPaymentValidation({ form: "Your role does not have SALES_CREDIT_AUTHORIZE permission." });
+      setPaymentValidation({
+        form: "Your role does not have SALES_CREDIT_AUTHORIZE permission.",
+      });
       return;
     }
     submitGuard.current = true;
@@ -696,6 +762,162 @@ export function BillingPage() {
                 ))}
             </select>
           </div>
+          {locationId > 0 && (
+            <div
+              className={`card pos-session-card ${sessionReady ? "ready" : "blocked"}`}
+            >
+              <div className="pos-session-summary">
+                <div>
+                  <small>Terminal</small>
+                  <strong>
+                    {sessionQuery.data?.terminal
+                      ? `${sessionQuery.data.terminal.displayName} (${sessionQuery.data.terminal.terminalCode})`
+                      : "Not paired"}
+                  </strong>
+                </div>
+                <div>
+                  <small>Location / mode</small>
+                  <strong>
+                    {sessionQuery.data?.location.name ?? "Checking location"} ·{" "}
+                    {sessionQuery.data?.config?.registerMode ===
+                    "MASTER_REGISTER"
+                      ? "Master register"
+                      : sessionQuery.data?.config?.registerMode ===
+                          "TERMINAL_REGISTER"
+                        ? "Terminal register"
+                        : "Unconfigured"}
+                  </strong>
+                </div>
+                <div>
+                  <small>Register session</small>
+                  <strong>
+                    {sessionQuery.data?.registerSession
+                      ? `${sessionQuery.data.registerSession.status} · ${sessionQuery.data.registerSession.businessDate}`
+                      : "Not open"}
+                  </strong>
+                </div>
+                <div>
+                  <small>Cashier session</small>
+                  <strong>{sessionReady ? "Active" : "Not active"}</strong>
+                </div>
+              </div>
+              {sessionQuery.isPending ? (
+                <p>Checking register session…</p>
+              ) : sessionQuery.isError ? (
+                <div className="error-box">
+                  Unable to verify the POS register session:{" "}
+                  {sessionQuery.error.message}
+                </div>
+              ) : (
+                !sessionReady && (
+                  <div className="pos-session-action">
+                    <div>
+                      <strong>Billing blocked</strong>
+                      <p>{sessionQuery.data?.blockedReason}</p>
+                    </div>
+                    {(sessionQuery.data?.action === "OPEN_TERMINAL_REGISTER" ||
+                      (sessionQuery.data?.action === "OPEN_MASTER_REGISTER" &&
+                        canOpenMasterRegister)) && (
+                      <label>
+                        Opening balance (LKR)
+                        <input
+                          className="control"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={openingBalance}
+                          onChange={(event) => {
+                            setOpeningBalance(event.target.value);
+                            sessionMutation.reset();
+                          }}
+                        />
+                      </label>
+                    )}
+                    {sessionQuery.data?.action === "OPEN_TERMINAL_REGISTER" && (
+                      <button
+                        className="btn btn-primary"
+                        disabled={sessionMutation.isPending}
+                        onClick={() => sessionMutation.mutate()}
+                      >
+                        Open register
+                      </button>
+                    )}
+                    {sessionQuery.data?.action === "OPEN_MASTER_REGISTER" &&
+                      canOpenMasterRegister && (
+                        <button
+                          className="btn btn-primary"
+                          disabled={sessionMutation.isPending}
+                          onClick={() => sessionMutation.mutate()}
+                        >
+                          Open master register
+                        </button>
+                      )}
+                    {sessionQuery.data?.action === "START_CASHIER_SESSION" && (
+                      <button
+                        className="btn btn-primary"
+                        disabled={sessionMutation.isPending}
+                        onClick={() => sessionMutation.mutate()}
+                      >
+                        Start cashier session
+                      </button>
+                    )}
+                    {sessionQuery.data?.action === "RECOUNT_CASH" && (
+                      <button className="btn btn-primary" onClick={() => setCashCountOpen(true)}>
+                        Recount cash
+                      </button>
+                    )}
+                    {(sessionQuery.data?.action === "PAIR_TERMINAL" ||
+                      sessionQuery.data?.action === "CONFIGURE_LOCATION") && (
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => navigate("/pos-registers")}
+                      >
+                        {sessionQuery.data.action === "PAIR_TERMINAL"
+                          ? "Pair terminal"
+                          : "Configure registers"}
+                      </button>
+                    )}
+                    {sessionQuery.data?.action === "OPEN_MASTER_REGISTER" &&
+                      !canOpenMasterRegister && (
+                        <small>Requires SALES_REGISTER_OPEN permission.</small>
+                      )}
+                    {sessionMutation.isError && (
+                      <div className="error-box">
+                        {sessionMutation.error.message}
+                      </div>
+                    )}
+                  </div>
+                )
+              )}
+              {sessionReady && sessionQuery.data?.config?.registerMode === "TERMINAL_REGISTER" && (
+                <div className="pos-session-action">
+                  <div><strong>Shift active</strong><p>Count the drawer and submit it for independent verification when the shift ends.</p></div>
+                  <button className="btn btn-secondary" onClick={() => setCashCountOpen(true)}>Sign off / Count cash</button>
+                </div>
+              )}
+            </div>
+          )}
+          {cashCountOpen && (
+            <div className="card cash-count-card">
+              <div className="sales-card-head"><div><h2>Count cash and sign off</h2><p>Submitting immediately blocks checkout and collections until verification or recount.</p></div></div>
+              {cashSummaryQuery.isPending ? <p>Calculating the shift summary...</p> : cashSummaryQuery.isError ? <div className="error-box">{cashSummaryQuery.error.message}</div> : cashSummaryQuery.data && <>
+                <div className="cash-summary-grid">
+                  <div><small>Opening balance</small><strong>LKR {cashSummaryQuery.data.openingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
+                  <div><small>Cash sales (net)</small><strong>LKR {cashSummaryQuery.data.cash.sales.net.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
+                  <div><small>Cash collections (net)</small><strong>LKR {cashSummaryQuery.data.cash.collections.net.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
+                  <div><small>Cash paid out</small><strong>LKR {cashSummaryQuery.data.cash.paidOut.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
+                  <div className="expected"><small>Expected cash</small><strong>LKR {cashSummaryQuery.data.expectedCash.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
+                </div>
+                <div className="cash-detail-line">Tendered LKR {cashSummaryQuery.data.cash.received.tendered.toFixed(2)} · Applied LKR {cashSummaryQuery.data.cash.received.applied.toFixed(2)} · Change LKR {cashSummaryQuery.data.cash.received.change.toFixed(2)}</div>
+                <div className="pos-session-action">
+                  <label>Counted cash (LKR)<input className="control" type="number" min="0" step="0.01" value={countedCash} onChange={(event) => { setCountedCash(event.target.value); submitCashCount.reset(); }} /></label>
+                  <button className="btn btn-secondary" onClick={() => setCashCountOpen(false)}>Cancel</button>
+                  <button className="btn btn-primary" disabled={submitCashCount.isPending || countedCash === "" || !Number.isFinite(Number(countedCash)) || Number(countedCash) < 0} onClick={() => submitCashCount.mutate()}>{submitCashCount.isPending ? "Submitting..." : "Submit count and sign off"}</button>
+                  {submitCashCount.isError && <div className="error-box">{submitCashCount.error.message}</div>}
+                </div>
+              </>}
+            </div>
+          )}
           <div
             ref={saleTypeSection}
             onKeyDown={keepEnterInSection}
@@ -1383,12 +1605,17 @@ export function BillingPage() {
               </div>
             </div>
             {creditRequired && (
-              <div className={`credit-decision ${creditReady ? "ready" : "attention"}`}>
+              <div
+                className={`credit-decision ${creditReady ? "ready" : "attention"}`}
+              >
                 <div>
                   <strong>Customer credit</strong>
                   <span>
-                    LKR {paymentSummary.remaining.toLocaleString()} will remain outstanding
-                    {selectedCustomer ? ` for ${selectedCustomer.name}` : ". Select an existing customer."}
+                    LKR {paymentSummary.remaining.toLocaleString()} will remain
+                    outstanding
+                    {selectedCustomer
+                      ? ` for ${selectedCustomer.name}`
+                      : ". Select an existing customer."}
                   </span>
                 </div>
                 <label>
@@ -1398,7 +1625,10 @@ export function BillingPage() {
                     disabled={!selectedCustomer || !canAuthorizeCredit}
                     onChange={(event) => {
                       setSellOnCredit(event.target.checked);
-                      setPaymentValidation((errors) => ({ ...errors, form: undefined }));
+                      setPaymentValidation((errors) => ({
+                        ...errors,
+                        form: undefined,
+                      }));
                     }}
                   />
                   Sell on credit
@@ -1419,6 +1649,7 @@ export function BillingPage() {
                   quoteQuery.isError ||
                   !activeQuote ||
                   !creditReady ||
+                  !sessionReady ||
                   Boolean(
                     editingPaymentId || paid.trim() || paymentSequenceError,
                   )
@@ -1496,18 +1727,19 @@ export function BillingPage() {
               <InvoiceReceiptContent invoice={completedInvoice} />
             )}
             <div className="modal-foot receipt-actions">
-              {Number(completedInvoice?.balanceAmount ?? 0) > 0 && hasPermission("SALES_PAYMENT_COLLECT") && (
-                <button
-                  data-receipt-action
-                  className="btn btn-primary"
-                  onClick={() => {
-                    resetSale();
-                    navigate("/pending-payments");
-                  }}
-                >
-                  Collect balance later
-                </button>
-              )}
+              {Number(completedInvoice?.balanceAmount ?? 0) > 0 &&
+                hasPermission("SALES_PAYMENT_COLLECT") && (
+                  <button
+                    data-receipt-action
+                    className="btn btn-primary"
+                    onClick={() => {
+                      resetSale();
+                      navigate("/pending-payments");
+                    }}
+                  >
+                    Collect balance later
+                  </button>
+                )}
               <button
                 autoFocus
                 data-receipt-action

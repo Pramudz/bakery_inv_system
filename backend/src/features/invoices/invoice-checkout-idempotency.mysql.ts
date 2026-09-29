@@ -46,7 +46,8 @@ test('concurrent committed checkout retries create one invoice, payment and stoc
     const paymentMethod = await dataSource.getRepository(PaymentMethod).save(dataSource.getRepository(PaymentMethod).create({ tenantId: tenant.tenantId, paymentMethodName: 'Cash', paymentMethodType: PaymentMethodType.CASH, isActive: true }));
 
     const discounts = new PriceListItemDiscountService(dataSource.getRepository(PriceListItemDiscount), dataSource);
-    const service = new InvoicesService(dataSource, new PosPricingService(dataSource, discounts));
+    const legacyTestSession: any = { terminal: { posTerminalId: null }, registerSession: { posRegisterSessionId: null }, cashierSession: { posCashierSessionId: null } };
+    const service = new InvoicesService(dataSource, new PosPricingService(dataSource, discounts), { requireCashierSession: async () => legacyTestSession } as any);
     const user = { tenantId: Number(tenant.tenantId), userId: Number(userRow.userId), accessScope: 'TENANT', assignedLocationIds: [] } as unknown as TenantPrincipal;
     const quote = await service.quote({ locationId: Number(location.locationId), saleType: 'RETAIL', details: [{ productId: Number(product.productId), quantity: 2 }] }, user);
     assert.equal(quote.lines[0].priceListItemId, Number(priceItem.priceListItemId));
