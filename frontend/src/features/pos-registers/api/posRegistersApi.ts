@@ -95,6 +95,7 @@ export type PosSessionContext = {
 export type CashSummary = {
   posRegisterSessionId: number;
   posCashierSessionId: number;
+  registerMode: RegisterMode;
   businessDate: string;
   openingBalance: number;
   cash: {
@@ -109,12 +110,15 @@ export type CashSummary = {
   reversedPayments: { count: number; amount: number };
   creditSales: { count: number; originalTotal: number; originalCreditExtended: number; outstanding: number };
   refunds: { count: number; total: number; paid: number };
+  expectedNetContribution: number;
+  unconfirmedMasterCash: number | null;
   expectedCash: number;
   formula: string;
 };
 
 export type CashReconciliation = {
   posCashReconciliationId: number;
+  reconciliationType: "TERMINAL_CASH_COUNT" | "MASTER_CASH_BATCH";
   locationId: number;
   location?: { locationId: number; code: string; name: string };
   registerSession?: { posRegisterSessionId: number; businessDate: string; openingBalance: string; status: string; register?: { displayName: string; registerMode: RegisterMode } };
@@ -124,13 +128,17 @@ export type CashReconciliation = {
   cashReceived: number;
   cashPaidOut: number;
   expectedCash: number;
-  countedCash: number;
-  cashierVariance: number;
+  countedCash: number | null;
+  cashierVariance: number | null;
   summary: CashSummary;
   submittedAt: string;
   status: "PENDING_VERIFICATION" | "APPROVED" | "REJECTED";
   verifiedCountedCash: number | null;
   verifiedVariance: number | null;
+  confirmedNetCash: number | null;
+  confirmationVariance: number | null;
+  physicalRecipientIdentity: string | null;
+  verificationReason: string | null;
   rejectionReason: string | null;
 };
 
@@ -203,10 +211,12 @@ export const posRegistersApi = {
     apiClient.get<CashSummary>("/pos-register-closing/current-summary"),
   submitCashCount: (countedCash: number, submissionKey: string) =>
     apiClient.post<CashReconciliation>("/pos-register-closing/submit-count", { countedCash, submissionKey }),
+  submitMasterCashBatch: (submissionKey: string) =>
+    apiClient.post<CashReconciliation>("/pos-register-closing/submit-master-batch", { submissionKey }),
   verificationQueue: () =>
     apiClient.get<CashReconciliation[]>("/pos-register-closing/verification-queue"),
   reconciliation: (id: number) =>
     apiClient.get<CashReconciliation>(`/pos-register-closing/verification-queue/${id}`),
-  decideReconciliation: (id: number, data: { verificationKey: string; decision: "APPROVE" | "REJECT"; verifiedCountedCash: number; rejectionReason?: string }) =>
+  decideReconciliation: (id: number, data: { verificationKey: string; decision: "APPROVE" | "REJECT"; verifiedCountedCash?: number; confirmedNetCash?: number; physicalRecipientIdentity?: string; verificationReason?: string; rejectionReason?: string }) =>
     apiClient.post<CashReconciliation>(`/pos-register-closing/verification-queue/${id}/decision`, data),
 };

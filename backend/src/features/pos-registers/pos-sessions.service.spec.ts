@@ -128,6 +128,20 @@ test('master mode opens remotely without a pairing and starts each billing cashi
   assert.equal(f.state.cashierSessions.length, 1);
 });
 
+test('approved master sign-off releases the terminal for the next cashier without closing the shared register', async () => {
+  const f = fixture(PosRegisterMode.MASTER_REGISTER);
+  await f.service.openMaster({ locationId: 11, openingBalance: 500 }, user({ userId: 99, roleCode: 'TENANT_ADMIN' }));
+  await f.service.startCashier(credential, user());
+  f.state.cashierSessions[0].status = PosCashierSessionStatus.ENDED;
+  f.state.cashierSessions[0].endedAt = new Date();
+  const next = await f.service.startCashier(credential, user({ userId: 12, username: 'next-cashier' }));
+  assert.equal(next.resumed, false);
+  assert.equal(f.state.cashierSessions.length, 2);
+  assert.equal(f.state.cashierSessions[1].cashierUserId, 12);
+  assert.equal(f.state.registerSessions.length, 1);
+  assert.equal(f.state.registerSessions[0].status, PosRegisterSessionStatus.OPEN);
+});
+
 test('serialized concurrent terminal openings create one opening balance and one cashier session', async () => {
   const f = fixture(PosRegisterMode.TERMINAL_REGISTER, true);
   const results = await Promise.all([

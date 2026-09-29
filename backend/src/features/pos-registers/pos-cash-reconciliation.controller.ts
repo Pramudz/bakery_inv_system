@@ -4,7 +4,7 @@ import { TenantPrincipal } from '../auth/auth.types';
 import { PermissionGuard } from '../auth/permission.guard';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { TenantAuthGuard } from '../auth/tenant-auth.guard';
-import { SubmitCashCountDto, VerifyCashCountDto } from './dto/cash-reconciliation.dto';
+import { SubmitCashCountDto, SubmitMasterCashBatchDto, VerifyCashCountDto } from './dto/cash-reconciliation.dto';
 import { PosCashReconciliationService } from './pos-cash-reconciliation.service';
 
 @Controller('pos-register-closing')
@@ -22,6 +22,12 @@ export class PosCashReconciliationController {
   @RequirePermission('SALES_BILLING')
   submit(@Body() dto: SubmitCashCountDto, @Headers('x-pos-terminal-credential') credential: string | undefined, @CurrentUser() user: TenantPrincipal) {
     return this.service.submit(dto, credential, user);
+  }
+
+  @Post('submit-master-batch')
+  @RequirePermission('SALES_BILLING')
+  submitMasterBatch(@Body() dto: SubmitMasterCashBatchDto, @Headers('x-pos-terminal-credential') credential: string | undefined, @CurrentUser() user: TenantPrincipal) {
+    return this.service.submitMasterBatch(dto, credential, user);
   }
 
   @Get('verification-queue')

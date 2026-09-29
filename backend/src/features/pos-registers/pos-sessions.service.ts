@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { DataSource, EntityManager, In } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull } from 'typeorm';
 import { tenantBusinessClock } from '../../common/business-date';
 import { TenantPrincipal } from '../auth/auth.types';
 import { Location } from '../locations/locations.entity';
@@ -85,10 +85,14 @@ export class PosSessionsService {
       action = 'PAIR_TERMINAL';
       blockedReason = 'Pair this billing browser to a terminal at this location.';
     } else if (cashierSession?.status === PosCashierSessionStatus.PENDING_VERIFICATION) {
-      blockedReason = 'Cash count submitted. Billing remains blocked until an independent verifier approves it or requests a recount.';
+      blockedReason = config.registerMode === PosRegisterMode.MASTER_REGISTER
+        ? 'Master cash batch submitted. Billing remains blocked until an independent verifier confirms it or requests a corrected submission.'
+        : 'Cash count submitted. Billing remains blocked until an independent verifier approves it or requests a recount.';
     } else if (cashierSession?.status === PosCashierSessionStatus.RECOUNT_REQUIRED) {
       action = 'RECOUNT_CASH';
-      blockedReason = 'The verifier rejected the prior count. Submit an audited recount before billing can continue.';
+      blockedReason = config.registerMode === PosRegisterMode.MASTER_REGISTER
+        ? 'The verifier rejected the prior master cash batch. Submit an audited corrected batch before billing can continue.'
+        : 'The verifier rejected the prior count. Submit an audited recount before billing can continue.';
     } else if (!cashierSession) {
       action = config.registerMode === PosRegisterMode.MASTER_REGISTER ? 'START_CASHIER_SESSION' : 'OPEN_TERMINAL_REGISTER';
       blockedReason = config.registerMode === PosRegisterMode.MASTER_REGISTER
@@ -251,6 +255,46 @@ export class PosSessionsService {
       lock: { mode: 'pessimistic_write' },
     });
     if (!register) throw new ForbiddenException('The linked terminal register is inactive or unavailable.');
+    return { terminal, pairing, config, register, registerSession, cashierSession };
+  }
+
+  async requireMasterClosingSession(manager: EntityManager, credential: string | undefined, user: TenantPrincipal): Promise<ActivePosSession> {
+    const { pairing, terminal } = await this.pairing(manager, credential, user, true);
+    const config = await this.config(manager, terminal.locationId, user, true);
+    if (config.registerMode !== PosRegisterMode.MASTER_REGISTER) throw new BadRequestException('This location uses terminal-register cash counting.');
+    const cashierSession = await manager.getRepository(PosCashierSession).findOne({
+      where: {
+        tenantId: user.tenantId,
+        locationId: terminal.locationId,
+        cashierUserId: user.userId,
+        posTerminalId: terminal.posTerminalId,
+        status: In([PosCashierSessionStatus.ACTIVE, PosCashierSessionStatus.RECOUNT_REQUIRED]),
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!cashierSession) throw new ForbiddenException('An active cashier session or requested corrected batch for this user and paired terminal is required.');
+    const registerSession = await manager.getRepository(PosRegisterSession).findOne({
+      where: {
+        posRegisterSessionId: cashierSession.posRegisterSessionId,
+        tenantId: user.tenantId,
+        locationId: terminal.locationId,
+        status: PosRegisterSessionStatus.OPEN,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!registerSession) throw new ConflictException('The shared master register session is not open.');
+    const register = await manager.getRepository(PosCashRegister).findOne({
+      where: {
+        posCashRegisterId: registerSession.posCashRegisterId,
+        tenantId: user.tenantId,
+        locationId: terminal.locationId,
+        isActive: true,
+        registerMode: PosRegisterMode.MASTER_REGISTER,
+        posTerminalId: IsNull(),
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!register) throw new ForbiddenException('The linked master register is inactive or unavailable.');
     return { terminal, pairing, config, register, registerSession, cashierSession };
   }
 

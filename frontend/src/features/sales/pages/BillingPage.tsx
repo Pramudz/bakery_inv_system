@@ -111,11 +111,13 @@ export function BillingPage() {
   const cashSummaryQuery = useQuery({
     queryKey: ["pos-register-closing", "current-summary", sessionQuery.data?.cashierSession?.posCashierSessionId],
     queryFn: posRegistersApi.currentCashSummary,
-    enabled: cashCountOpen && sessionQuery.data?.config?.registerMode === "TERMINAL_REGISTER",
+    enabled: cashCountOpen && Boolean(sessionQuery.data?.config?.registerMode),
     retry: false,
   });
   const submitCashCount = useMutation({
-    mutationFn: () => posRegistersApi.submitCashCount(Number(countedCash), countSubmissionKey),
+    mutationFn: () => sessionQuery.data?.config?.registerMode === "MASTER_REGISTER"
+      ? posRegistersApi.submitMasterCashBatch(countSubmissionKey)
+      : posRegistersApi.submitCashCount(Number(countedCash), countSubmissionKey),
     onSuccess: () => {
       setCashCountOpen(false);
       setCountedCash("");
@@ -889,30 +891,30 @@ export function BillingPage() {
                   </div>
                 )
               )}
-              {sessionReady && sessionQuery.data?.config?.registerMode === "TERMINAL_REGISTER" && (
+              {sessionReady && (
                 <div className="pos-session-action">
-                  <div><strong>Shift active</strong><p>Count the drawer and submit it for independent verification when the shift ends.</p></div>
-                  <button className="btn btn-secondary" onClick={() => setCashCountOpen(true)}>Sign off / Count cash</button>
+                  <div><strong>Shift active</strong><p>{sessionQuery.data?.config?.registerMode === "MASTER_REGISTER" ? "Review the automatically tracked batch and submit it for master-cash confirmation when the shift ends." : "Count the drawer and submit it for independent verification when the shift ends."}</p></div>
+                  <button className="btn btn-secondary" onClick={() => setCashCountOpen(true)}>{sessionQuery.data?.config?.registerMode === "MASTER_REGISTER" ? "Sign off" : "Sign off / Count cash"}</button>
                 </div>
               )}
             </div>
           )}
           {cashCountOpen && (
             <div className="card cash-count-card">
-              <div className="sales-card-head"><div><h2>Count cash and sign off</h2><p>Submitting immediately blocks checkout and collections until verification or recount.</p></div></div>
+              <div className="sales-card-head"><div><h2>{sessionQuery.data?.config?.registerMode === "MASTER_REGISTER" ? "Review batch and sign off" : "Count cash and sign off"}</h2><p>{sessionQuery.data?.config?.registerMode === "MASTER_REGISTER" ? "These system-tracked amounts are unconfirmed master cash until an authorized verifier records the master cashier's confirmation." : "Submitting immediately blocks checkout and collections until verification or recount."}</p></div></div>
               {cashSummaryQuery.isPending ? <p>Calculating the shift summary...</p> : cashSummaryQuery.isError ? <div className="error-box">{cashSummaryQuery.error.message}</div> : cashSummaryQuery.data && <>
                 <div className="cash-summary-grid">
-                  <div><small>Opening balance</small><strong>LKR {cashSummaryQuery.data.openingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
+                  {cashSummaryQuery.data.registerMode === "TERMINAL_REGISTER" && <div><small>Opening balance</small><strong>LKR {cashSummaryQuery.data.openingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>}
                   <div><small>Cash sales (net)</small><strong>LKR {cashSummaryQuery.data.cash.sales.net.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
                   <div><small>Cash collections (net)</small><strong>LKR {cashSummaryQuery.data.cash.collections.net.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
                   <div><small>Cash paid out</small><strong>LKR {cashSummaryQuery.data.cash.paidOut.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
-                  <div className="expected"><small>Expected cash</small><strong>LKR {cashSummaryQuery.data.expectedCash.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
+                  <div className="expected"><small>{cashSummaryQuery.data.registerMode === "MASTER_REGISTER" ? "Unconfirmed master cash" : "Expected cash"}</small><strong>LKR {cashSummaryQuery.data.expectedCash.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
                 </div>
                 <div className="cash-detail-line">Tendered LKR {cashSummaryQuery.data.cash.received.tendered.toFixed(2)} · Applied LKR {cashSummaryQuery.data.cash.received.applied.toFixed(2)} · Change LKR {cashSummaryQuery.data.cash.received.change.toFixed(2)}</div>
                 <div className="pos-session-action">
-                  <label>Counted cash (LKR)<input className="control" type="number" min="0" step="0.01" value={countedCash} onChange={(event) => { setCountedCash(event.target.value); submitCashCount.reset(); }} /></label>
+                  {cashSummaryQuery.data.registerMode === "TERMINAL_REGISTER" && <label>Counted cash (LKR)<input className="control" type="number" min="0" step="0.01" value={countedCash} onChange={(event) => { setCountedCash(event.target.value); submitCashCount.reset(); }} /></label>}
                   <button className="btn btn-secondary" onClick={() => setCashCountOpen(false)}>Cancel</button>
-                  <button className="btn btn-primary" disabled={submitCashCount.isPending || countedCash === "" || !Number.isFinite(Number(countedCash)) || Number(countedCash) < 0} onClick={() => submitCashCount.mutate()}>{submitCashCount.isPending ? "Submitting..." : "Submit count and sign off"}</button>
+                  <button className="btn btn-primary" disabled={submitCashCount.isPending || (cashSummaryQuery.data.registerMode === "TERMINAL_REGISTER" && (countedCash === "" || !Number.isFinite(Number(countedCash)) || Number(countedCash) < 0))} onClick={() => submitCashCount.mutate()}>{submitCashCount.isPending ? "Submitting..." : cashSummaryQuery.data.registerMode === "MASTER_REGISTER" ? "Submit batch and sign off" : "Submit count and sign off"}</button>
                   {submitCashCount.isError && <div className="error-box">{submitCashCount.error.message}</div>}
                 </div>
               </>}
