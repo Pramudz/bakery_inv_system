@@ -2962,6 +2962,51 @@ button {
   font-size: 13px;
 }
 
+.credit-decision {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid #efc773;
+  border-radius: 9px;
+  background: #fff9eb;
+  color: #68470d;
+}
+
+.credit-decision > div,
+.credit-decision label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.credit-decision > div {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.credit-decision strong {
+  font-size: 10px;
+}
+
+.credit-decision span,
+.credit-decision small {
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.credit-decision label {
+  align-items: center;
+  justify-content: flex-start;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.credit-decision.ready {
+  border-color: #73c89b;
+  background: #effaf4;
+  color: #175f3c;
+}
+
 .pos-checkout-card .payment-finish {
   margin-top: 0;
   padding-top: 0;

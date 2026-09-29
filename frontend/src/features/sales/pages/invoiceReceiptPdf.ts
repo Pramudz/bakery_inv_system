@@ -1,9 +1,8 @@
 import { invoiceReceiptModel } from './invoiceReceiptModel';
 
 export function downloadInvoiceReceipt(invoice: Record<string, any>) {
-    const { cart, paidTotal, total, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, completedInvoice, receiptDate, unitPrice, lineNet } = invoiceReceiptModel(invoice);
+    const { cart, paidTotal, total, outstandingBalance, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, completedInvoice, receiptDate, unitPrice, lineNet } = invoiceReceiptModel(invoice);
     const paidAmount = paidTotal,
-      balance = Math.max(0, total - paidAmount),
       change = Math.max(0, paidAmount - total);
     const escapePdf = (value: string) =>
       value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
@@ -105,14 +104,12 @@ export function downloadInvoiceReceipt(invoice: Record<string, any>) {
     summary("Total discount", `- LKR ${discount.toFixed(2)}`);
     rule();
     y -= 13;
-    summary("Grand Total", `LKR ${total.toFixed(2)}`, true);
+    summary("Original Total", `LKR ${total.toFixed(2)}`, true);
     rule();
     y -= 13;
-    summary("Paid amount", `LKR ${paidAmount.toFixed(2)}`);
-    summary(
-      change > 0 ? "Change" : "Balance",
-      `LKR ${(change || balance).toFixed(2)}`,
-    );
+    summary("Paid Amount", `LKR ${paidAmount.toFixed(2)}`);
+    summary("Outstanding Balance", `LKR ${outstandingBalance.toFixed(2)}`);
+    if (change > 0) summary("Change", `LKR ${change.toFixed(2)}`);
     summary("Payment method", method);
     summary(
       "Payment status",

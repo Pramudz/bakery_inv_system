@@ -32,6 +32,10 @@ export class Invoice extends AuditEntity {
   @Column({ name: 'balance_amount', type: 'decimal', precision: 18, scale: 2, default: 0 }) balanceAmount!: string;
   @Column({ name: 'payment_status', type: 'varchar', length: 20 }) paymentStatus!: string;
   @Column({ name: 'invoice_status', type: 'varchar', length: 20, default: 'COMPLETED' }) invoiceStatus!: string;
+  @Column({ name: 'is_credit_sale', default: false }) isCreditSale!: boolean;
+  @Column({ name: 'credit_authorized_by_user_id', type: 'bigint', nullable: true }) creditAuthorizedByUserId!: number | null;
+  @ManyToOne(() => User, { nullable: true, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'credit_authorized_by_user_id' }) creditAuthorizedByUser!: User | null;
+  @Column({ name: 'credit_authorized_at', type: 'datetime', nullable: true }) creditAuthorizedAt!: Date | null;
   @Column({ name: 'receipt_snapshot', type: 'json', nullable: true }) receiptSnapshot!: Record<string, any> | null;
   @Column({ name: 'created_by_user_id', type: 'bigint' }) createdByUserId!: number;
   @ManyToOne(() => User, { nullable: false, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'created_by_user_id' }) createdByUser!: User;

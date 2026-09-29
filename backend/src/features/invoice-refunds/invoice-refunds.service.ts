@@ -95,6 +95,11 @@ export class InvoiceRefundsService {
       const subtotal = money(prepared.reduce((sum, x) => sum + x.gross, 0));
       const discountTotal = money(prepared.reduce((sum, x) => sum + x.discount, 0));
       const refundTotal = money(prepared.reduce((sum, x) => sum + x.total, 0));
+      for (const payment of dto.payments ?? []) {
+        if (!Number.isFinite(payment.amount) || payment.amount <= 0 || money(payment.amount) !== payment.amount) {
+          throw new BadRequestException('Refund payment amounts must be positive with at most two decimal places.');
+        }
+      }
       const paymentTotal = money((dto.payments ?? []).reduce((sum, x) => sum + Number(x.amount), 0));
       if (paymentTotal > refundTotal) throw new BadRequestException('Refund payments cannot exceed the refund total.');
       const remainingPayment = await this.remainingPayment(invoice, manager);
@@ -119,7 +124,7 @@ export class InvoiceRefundsService {
       }
       const fullyReturned = invoice.details.every((line) => (previous.get(Number(line.invoiceDetailId)) ?? 0) + (dto.details.find((item) => item.invoiceDetailId === Number(line.invoiceDetailId))?.quantity ?? 0) >= Number(line.quantity));
       invoice.invoiceStatus = fullyReturned ? 'FULLY_REFUNDED' : 'PARTIALLY_REFUNDED';
-      await manager.getRepository(Invoice).save(invoice);
+      await this.recalculateInvoicePayments(manager, invoice);
       return this.getWithManager(manager, refund.invoiceRefundId, user.tenantId);
     });
   }
@@ -135,10 +140,10 @@ export class InvoiceRefundsService {
       await manager.getRepository(InvoicePaymentReversal).save(manager.getRepository(InvoicePaymentReversal).create({ invoicePaymentId: payment.invoicePaymentId, reversalAmount: payment.amount, reason: dto.reason.trim(), reversedAt: new Date(), reversedByUserId: user.userId }));
       payment.isReversed = true; payment.reversedAt = new Date(); await manager.getRepository(InvoicePayment).save(payment);
       if (dto.replacementPaymentMethodId && dto.replacementAmount) {
-        const otherPayments = await manager.getRepository(InvoicePayment).findBy({ invoiceId, isReversed: false });
-        const alreadyApplied = money(otherPayments.reduce((sum, row) => sum + Number(row.amount), 0));
-        const remaining = money(Math.max(0, Number(invoice.grandTotal) - alreadyApplied));
+        const beforeReplacement = await this.invoicePaymentState(manager, invoice);
+        const remaining = beforeReplacement.balance;
         const [replacement] = await this.paymentProcessing.prepare(manager, user.tenantId, [{ paymentMethodId: dto.replacementPaymentMethodId, paymentChannelId: dto.replacementPaymentChannelId, amount: dto.replacementAmount, referenceNumber: dto.referenceNumber }], remaining);
+        const replacementBalance = money(remaining - replacement.applied);
         await manager.getRepository(InvoicePayment).save(manager.getRepository(InvoicePayment).create({
           invoiceId, paymentMethodId: replacement.method.paymentMethodId, paymentMethodTypeSnapshot: replacement.method.paymentMethodType,
           paymentChannelId: replacement.channel?.paymentChannelId ?? null, paymentChannelCodeSnapshot: replacement.channel?.code ?? null,
@@ -146,6 +151,8 @@ export class InvoiceRefundsService {
           amount: replacement.applied.toFixed(2), tenderedAmount: replacement.tendered.toFixed(2), changeAmount: replacement.change.toFixed(2),
           referenceNumber: replacement.referenceNumber, paidAt: new Date(), createdByUserId: user.userId, isReversed: false, reversedAt: null,
           collectionKey: payment.collectionKey ? randomUUID() : null,
+          balanceBefore: payment.collectionKey ? remaining.toFixed(2) : null,
+          balanceAfter: payment.collectionKey ? replacementBalance.toFixed(2) : null,
         }));
       }
       await this.recalculateInvoicePayments(manager, invoice);
@@ -181,11 +188,28 @@ export class InvoiceRefundsService {
     await manager.getRepository(InventoryLedger).save(manager.getRepository(InventoryLedger).create({ tenantId: user.tenantId, locationId: invoice.locationId, productId: detail.productId, movementDate: new Date(), movementType: 'SALE_RETURN', sourceDocumentType: 'INVOICE_REFUND', sourceDocumentId: detail.invoiceRefundId, sourceDocumentLineId: detail.invoiceRefundDetailId, quantityIn: detail.quantity, quantityOut: '0', unitCost: String(cost), movementValue: String(money(Number(detail.quantity) * cost)), quantityBefore: String(before), quantityAfter: String(after), averageCostBefore: String(cost), averageCostAfter: String(cost), createdByUserId: user.userId }));
   }
   private async recalculateInvoicePayments(manager: EntityManager, invoice: Invoice) {
+    const state = await this.invoicePaymentState(manager, invoice);
+    invoice.tenderedAmount = state.tendered.toFixed(2);
+    invoice.paidAmount = state.paid.toFixed(2);
+    invoice.changeAmount = state.change.toFixed(2);
+    invoice.balanceAmount = state.balance.toFixed(2);
+    invoice.paymentStatus = state.balance === 0 ? 'PAID' : state.netPaid === 0 ? 'UNPAID' : 'PARTIALLY_PAID';
+    await manager.getRepository(Invoice).save(invoice);
+  }
+  private async invoicePaymentState(manager: EntityManager, invoice: Invoice) {
     const payments = await manager.getRepository(InvoicePayment).findBy({ invoiceId: invoice.invoiceId, isReversed: false });
     const tendered = money(payments.reduce((sum, x) => sum + Number(x.tenderedAmount), 0));
     const paid = money(payments.reduce((sum, x) => sum + Number(x.amount), 0));
     const change = money(payments.reduce((sum, x) => sum + Number(x.changeAmount), 0));
-    invoice.tenderedAmount = tendered.toFixed(2); invoice.paidAmount = paid.toFixed(2); invoice.changeAmount = change.toFixed(2); invoice.balanceAmount = Math.max(0, Number(invoice.grandTotal) - paid).toFixed(2); invoice.paymentStatus = paid === 0 ? 'UNPAID' : paid < Number(invoice.grandTotal) ? 'PARTIALLY_PAID' : 'PAID'; await manager.getRepository(Invoice).save(invoice);
+    const refunds = await manager.getRepository(InvoiceRefund).find({
+      where: { invoiceId: invoice.invoiceId, tenantId: invoice.tenantId, status: 'COMPLETED' },
+      relations: { payments: true },
+    });
+    const refundedTotal = money(refunds.reduce((sum, refund) => sum + Number(refund.refundTotal), 0));
+    const refundedPayment = money(refunds.reduce((sum, refund) => sum + refund.payments.reduce((paymentSum, payment) => paymentSum + Number(payment.amount), 0), 0));
+    const effectiveTotal = money(Math.max(0, Number(invoice.grandTotal) - refundedTotal));
+    const netPaid = money(Math.max(0, paid - refundedPayment));
+    return { tendered, paid, change, netPaid, balance: money(Math.max(0, effectiveTotal - netPaid)) };
   }
   private assertLocationAccess(locationId: number, user: TenantPrincipal) {
     if (user.accessScope === 'LOCATION' && !user.assignedLocationIds.map(Number).includes(Number(locationId))) {

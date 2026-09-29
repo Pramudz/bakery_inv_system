@@ -53,7 +53,7 @@ export class AuthorizationCatalogService implements OnModuleInit {
     for (const code of inventoryPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: inventory.moduleId, code, name: code.replace(/_/g, ' ').toLowerCase(), isActive: true }));
     const sales = byCode.get('SALES')!;
     const salesPermissions = [
-      'SALES_BILLING', 'SALES_INVOICE_VIEW', 'SALES_PAYMENT_COLLECT',
+      'SALES_BILLING', 'SALES_CREDIT_AUTHORIZE', 'SALES_INVOICE_VIEW', 'SALES_PAYMENT_COLLECT',
       'SALES_REFUND_VIEW', 'SALES_REFUND_CREATE',
       'SALES_ADJUSTMENT_VIEW', 'SALES_ADJUSTMENT_CREATE',
       'SALES_PAYMENT_REVERSE', 'SALES_PAYMENT_METHOD_VIEW', 'SALES_PAYMENT_METHOD_MANAGE',

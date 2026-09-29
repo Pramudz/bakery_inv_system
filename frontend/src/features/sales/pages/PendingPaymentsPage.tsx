@@ -11,7 +11,7 @@ import { PaymentReceiptContent, receiptNumber } from './PaymentReceipt';
 import { paymentChannelsApi } from '../api/paymentChannelsApi';
 
 const money = (value: string | number) => Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const customerName = (invoice: PendingInvoice) => invoice.customer?.customerName ?? 'Walk-in Customer';
+const customerName = (invoice: PendingInvoice) => invoice.customer?.customerName ?? 'Historical anonymous sale';
 const matches = (invoice: PendingInvoice, query: string) =>
   `${invoice.invoiceNumber} ${customerName(invoice)} ${invoice.customer?.phone ?? ''} ${invoice.customer?.mobile ?? ''}`.toLowerCase().includes(query.trim().toLowerCase());
 
@@ -66,6 +66,7 @@ export function PendingPaymentsPage() {
   });
 
   const begin = (invoice: PendingInvoice) => {
+    if (!(invoice.collectionEligible ?? Boolean(invoice.customer))) return;
     receive.reset();
     setValidation('');
     setSelected(invoice);
@@ -143,7 +144,7 @@ export function PendingPaymentsPage() {
             <td><strong className="sales-id">{invoice.invoiceNumber}</strong><small className="refund-code">{new Date(invoice.invoiceDate).toLocaleDateString()}</small></td>
             <td><strong>{customerName(invoice)}</strong><small className="refund-code">{invoice.customer?.mobile || invoice.customer?.phone || 'No phone recorded'}</small></td><td>{invoice.location?.name}</td>
             <td><SalesBadge status={invoice.paymentStatus === 'UNPAID' ? 'Unpaid' : 'Partially Paid'} /></td><td className="right">{money(invoice.grandTotal)}</td><td className="right">{money(invoice.paidAmount)}</td><td className="right pending-balance">LKR {money(invoice.balanceAmount)}</td>
-            <td className="right"><button className="btn btn-primary" onClick={() => begin(invoice)}>Receive Payment</button></td>
+            <td className="right"><button className="btn btn-primary" disabled={!(invoice.collectionEligible ?? Boolean(invoice.customer))} title={!invoice.customer ? 'Historical anonymous balances are readable but cannot receive a customer collection.' : undefined} onClick={() => begin(invoice)}>{invoice.customer ? 'Receive Payment' : 'Read only'}</button></td>
           </tr>)}</tbody></table></div> :
         <div className="sales-table-wrap"><table className="table"><thead><tr><th>Receipt / date</th><th>Invoice</th><th>Customer</th><th>Method</th><th className="right">Received</th><th>Status</th><th /></tr></thead>
           <tbody>{history.isPending ? <tr><td colSpan={7}>Loading payment history…</td></tr> : !receipts.length ? <tr><td colSpan={7} className="pending-empty">No payment receipts {query ? 'match your search' : 'recorded yet'}.</td></tr> : pagedReceipts.map((payment) => <tr key={payment.invoicePaymentId}>
@@ -165,7 +166,7 @@ export function PendingPaymentsPage() {
         </nav>
       </div>
       </>}
-      <p className="pending-note">Amounts are in LKR. Invoices with returns are excluded; review them in Refunds before collecting further payment.</p>
+      <p className="pending-note">Amounts are in LKR. Partially refunded invoices use their recalculated balance. Historical anonymous unpaid invoices remain visible but read-only.</p>
     </div>
     {createPortal(<dialog ref={dialog} className="pending-dialog" aria-labelledby="pending-dialog-title" onCancel={(event) => { event.preventDefault(); close(); }}>
       <div className="modal-head"><div><h2 id="pending-dialog-title">{receipt ? 'Payment Receipt' : 'Receive Payment'}</h2><p>{receipt ? receiptNumber(receipt.invoicePaymentId) : selected?.invoiceNumber}</p></div><button className="icon-btn" aria-label="Close" disabled={receive.isPending} onClick={close}>×</button></div>

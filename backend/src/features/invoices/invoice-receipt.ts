@@ -2,11 +2,12 @@ import { Invoice } from './invoice.entity';
 
 export function snapshotInvoiceReceipt(invoice: Invoice) {
   return {
-    version: 1,
+    version: 2,
     invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate, saleType: invoice.saleType,
     subtotal: invoice.subtotal, discountTotal: invoice.discountTotal, grandTotal: invoice.grandTotal,
     tenderedAmount: invoice.tenderedAmount, paidAmount: invoice.paidAmount, balanceAmount: invoice.balanceAmount,
     changeAmount: invoice.changeAmount, paymentStatus: invoice.paymentStatus,
+    isCreditSale: invoice.isCreditSale, creditAuthorizedAt: invoice.creditAuthorizedAt,
     customer: invoice.customer ? { customerName: invoice.customer.customerName } : null,
     details: [...invoice.details].sort((a, b) => Number(a.invoiceDetailId) - Number(b.invoiceDetailId)).map((line) => ({
       invoiceDetailId: line.invoiceDetailId, quantity: line.quantity, unitPrice: line.unitPrice,

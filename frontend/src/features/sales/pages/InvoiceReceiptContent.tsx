@@ -2,7 +2,7 @@ import { invoiceReceiptModel } from './invoiceReceiptModel';
 import './invoice-receipt.css';
 
 export function InvoiceReceiptContent({ invoice }: { invoice: Record<string, any> }) {
-  const { cart, paidTotal, tenderedTotal, changeTotal, total, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, completedInvoice, receiptDate, unitPrice, lineNet } = invoiceReceiptModel(invoice);
+  const { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, completedInvoice, receiptDate, unitPrice, lineNet } = invoiceReceiptModel(invoice);
   return (<div className="receipt-preview">
               <div className="receipt-business">
                 <h3>ERP CORE BAKERY</h3>
@@ -77,7 +77,7 @@ export function InvoiceReceiptContent({ invoice }: { invoice: Record<string, any
                   <b>- LKR {discount.toLocaleString()}</b>
                 </div>
                 <div className="receipt-total">
-                  <span>Grand Total</span>
+                  <span>Original Total</span>
                   <b>LKR {total.toLocaleString()}</b>
                 </div>
                 <div>
@@ -85,13 +85,14 @@ export function InvoiceReceiptContent({ invoice }: { invoice: Record<string, any
                   <b>LKR {tenderedTotal.toLocaleString()}</b>
                 </div>
                 <div>
-                  <span>Applied to invoice</span>
+                  <span>Paid Amount</span>
                   <b>LKR {paidTotal.toLocaleString()}</b>
                 </div>
                 <div>
-                  <span>{changeTotal > 0 ? "Change given" : "Balance"}</span>
-                  <b>LKR {(changeTotal > 0 ? changeTotal : Math.max(0, total - paidTotal)).toLocaleString()}</b>
+                  <span>Outstanding Balance</span>
+                  <b>LKR {outstandingBalance.toLocaleString()}</b>
                 </div>
+                {changeTotal > 0 && <div><span>Change Given</span><b>LKR {changeTotal.toLocaleString()}</b></div>}
                 <div>
                   <span>Payment method</span>
                   <b>{method}</b>

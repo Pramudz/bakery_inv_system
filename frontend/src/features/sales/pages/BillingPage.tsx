@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { customersApi } from "../../customers/api/customersApi";
 import { InvoiceQuote, invoicesApi } from "../api/invoicesApi";
 import { InvoiceReceiptContent } from "./InvoiceReceiptContent";
@@ -14,6 +15,7 @@ import {
   validatePaymentDraft,
   validatePaymentSequence,
 } from "../paymentDraft";
+import { useAuth } from "../../auth/AuthContext";
 
 type SaleType = "Retail" | "Wholesale";
 type Product = {
@@ -42,6 +44,8 @@ type PaymentFieldErrors = Partial<
 >;
 
 export function BillingPage() {
+  const navigate = useNavigate();
+  const { permissions, role } = useAuth();
   const saleTypeSection = useRef<HTMLDivElement>(null);
   const productSection = useRef<HTMLDivElement>(null);
   const cartSection = useRef<HTMLDivElement>(null);
@@ -57,6 +61,7 @@ export function BillingPage() {
   const [selectedCustomer, setSelectedCustomer] =
     useState<CustomerOption | null>(null);
   const [newCustomer, setNewCustomer] = useState(false);
+  const [sellOnCredit, setSellOnCredit] = useState(false);
   const [paymentMethodId, setPaymentMethodId] = useState(0);
   const [paid, setPaid] = useState("");
   const [paymentChannelId, setPaymentChannelId] = useState("");
@@ -192,6 +197,10 @@ export function BillingPage() {
       : paymentSummary.applied > 0
         ? "Partially paid"
         : "Unpaid";
+  const hasPermission = (code: string) => role?.code === "TENANT_ADMIN" || permissions.includes(code);
+  const canAuthorizeCredit = hasPermission("SALES_CREDIT_AUTHORIZE");
+  const creditRequired = paymentSummary.remaining > 0;
+  const creditReady = !creditRequired || (Boolean(selectedCustomer) && sellOnCredit && canAuthorizeCredit);
   const submitGuard = useRef(false);
   const invoiceMutation = useMutation({
     mutationFn: ({
@@ -226,6 +235,7 @@ export function BillingPage() {
           paymentChannelId: x.paymentChannelId,
           referenceNumber: x.referenceNumber,
         })),
+        sellOnCredit: creditRequired && sellOnCredit,
         acceptPriceChanges,
       }),
     onSuccess: (invoice) => {
@@ -333,6 +343,18 @@ export function BillingPage() {
     }
     if (paymentSequenceError) {
       setPaymentValidation({ form: paymentSequenceError });
+      return;
+    }
+    if (creditRequired && !selectedCustomer) {
+      setPaymentValidation({ form: "Select an existing customer before completing a sale with an outstanding balance." });
+      return;
+    }
+    if (creditRequired && !sellOnCredit) {
+      setPaymentValidation({ form: "Explicitly choose Sell on credit before creating the customer receivable." });
+      return;
+    }
+    if (creditRequired && !canAuthorizeCredit) {
+      setPaymentValidation({ form: "Your role does not have SALES_CREDIT_AUTHORIZE permission." });
       return;
     }
     submitGuard.current = true;
@@ -597,6 +619,7 @@ export function BillingPage() {
     setCustomerQuery("");
     setSelectedCustomer(null);
     setNewCustomer(false);
+    setSellOnCredit(false);
     setPaymentMethodId(0);
     setPaid("");
     setPaymentChannelId("");
@@ -983,6 +1006,7 @@ export function BillingPage() {
                   onClick={() => {
                     setNewCustomer(true);
                     setSelectedCustomer(null);
+                    setSellOnCredit(false);
                     setCustomerQuery("");
                   }}
                 >
@@ -993,6 +1017,7 @@ export function BillingPage() {
                   onClick={() => {
                     setNewCustomer(false);
                     setSelectedCustomer(null);
+                    setSellOnCredit(false);
                     setCustomerQuery("");
                   }}
                 >
@@ -1010,6 +1035,7 @@ export function BillingPage() {
                 onChange={(e) => {
                   setCustomerQuery(e.target.value);
                   setSelectedCustomer(null);
+                  setSellOnCredit(false);
                   setNewCustomer(false);
                 }}
                 placeholder="Search customer..."
@@ -1028,6 +1054,7 @@ export function BillingPage() {
                       key={x.code}
                       onClick={() => {
                         setSelectedCustomer(x);
+                        setSellOnCredit(false);
                         setCustomerQuery(x.code);
                       }}
                     >
@@ -1355,6 +1382,32 @@ export function BillingPage() {
                 <b>LKR {paymentSummary.change.toLocaleString()}</b>
               </div>
             </div>
+            {creditRequired && (
+              <div className={`credit-decision ${creditReady ? "ready" : "attention"}`}>
+                <div>
+                  <strong>Customer credit</strong>
+                  <span>
+                    LKR {paymentSummary.remaining.toLocaleString()} will remain outstanding
+                    {selectedCustomer ? ` for ${selectedCustomer.name}` : ". Select an existing customer."}
+                  </span>
+                </div>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={sellOnCredit}
+                    disabled={!selectedCustomer || !canAuthorizeCredit}
+                    onChange={(event) => {
+                      setSellOnCredit(event.target.checked);
+                      setPaymentValidation((errors) => ({ ...errors, form: undefined }));
+                    }}
+                  />
+                  Sell on credit
+                </label>
+                {!canAuthorizeCredit && (
+                  <small>Requires SALES_CREDIT_AUTHORIZE permission.</small>
+                )}
+              </div>
+            )}
             <div className="payment-finish">
               <button
                 className="pos-complete"
@@ -1365,6 +1418,7 @@ export function BillingPage() {
                   quoteQuery.isPending ||
                   quoteQuery.isError ||
                   !activeQuote ||
+                  !creditReady ||
                   Boolean(
                     editingPaymentId || paid.trim() || paymentSequenceError,
                   )
@@ -1442,6 +1496,18 @@ export function BillingPage() {
               <InvoiceReceiptContent invoice={completedInvoice} />
             )}
             <div className="modal-foot receipt-actions">
+              {Number(completedInvoice?.balanceAmount ?? 0) > 0 && hasPermission("SALES_PAYMENT_COLLECT") && (
+                <button
+                  data-receipt-action
+                  className="btn btn-primary"
+                  onClick={() => {
+                    resetSale();
+                    navigate("/pending-payments");
+                  }}
+                >
+                  Collect balance later
+                </button>
+              )}
               <button
                 autoFocus
                 data-receipt-action

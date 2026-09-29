@@ -17,6 +17,9 @@ import { snapshotInvoiceReceipt } from './invoice-receipt';
 import { PosPriceLine, PosPricingService, PosSaleType } from './pos-pricing.service';
 import { QuoteInvoiceDto } from './dto/quote-invoice.dto';
 import { createHash } from 'node:crypto';
+import { Permission } from '../permissions/permissions.entity';
+import { RolePermission } from '../role-permissions/role-permissions.entity';
+import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
@@ -24,15 +27,16 @@ const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 10
 export class InvoicesService {
   constructor(private readonly dataSource: DataSource, private readonly pricing: PosPricingService, private readonly paymentProcessing: PaymentProcessingService = new PaymentProcessingService()) {}
 
-  pendingPayments(user: TenantPrincipal) {
-    return this.dataSource.getRepository(Invoice).find({
+  async pendingPayments(user: TenantPrincipal) {
+    const invoices = await this.dataSource.getRepository(Invoice).find({
       where: {
-        tenantId: user.tenantId, invoiceStatus: 'COMPLETED', balanceAmount: MoreThan('0'),
+        tenantId: user.tenantId, invoiceStatus: In(['COMPLETED', 'PARTIALLY_REFUNDED']), balanceAmount: MoreThan('0'),
         ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}),
       },
       relations: { customer: true, location: true },
       order: { invoiceDate: 'ASC', invoiceId: 'ASC' },
     });
+    return invoices.map((invoice) => ({ ...invoice, collectionEligible: invoice.customerId !== null }));
   }
 
   collectionHistory(user: TenantPrincipal) {
@@ -65,7 +69,10 @@ export class InvoicesService {
         }
         return existing;
       }
-      if (invoice.invoiceStatus !== 'COMPLETED') throw new BadRequestException('Only completed invoices without refunds can receive payments here.');
+      if (!['COMPLETED', 'PARTIALLY_REFUNDED'].includes(invoice.invoiceStatus)) throw new BadRequestException('This invoice cannot receive payments.');
+      if (!invoice.customerId || !(await manager.getRepository(Customer).findOneBy({ customerId: invoice.customerId, tenantId: user.tenantId }))) {
+        throw new BadRequestException('A customer-owned invoice is required for a later collection. Historical anonymous balances remain read-only.');
+      }
       const before = money(Number(invoice.balanceAmount));
       if (before <= 0) throw new BadRequestException('This invoice has no remaining balance.');
       const [prepared] = await this.paymentProcessing.prepare(manager, user.tenantId, [dto], before);
@@ -94,7 +101,7 @@ export class InvoicesService {
         tenantId: user.tenantId,
         ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}),
       },
-      relations: { customer: true, location: true, payments: { paymentMethod: true, paymentChannel: true } },
+      relations: { customer: true, location: true, creditAuthorizedByUser: true, payments: { paymentMethod: true, paymentChannel: true } },
       order: { invoiceId: 'DESC' },
     });
   }
@@ -102,7 +109,7 @@ export class InvoicesService {
   async get(id: number, user: TenantPrincipal) {
     const invoice = await this.dataSource.getRepository(Invoice).findOne({
       where: { invoiceId: id, tenantId: user.tenantId },
-      relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true, paymentChannel: true } },
+      relations: { customer: true, location: true, creditAuthorizedByUser: true, details: { product: true }, payments: { paymentMethod: true, paymentChannel: true } },
     });
     if (!invoice) throw new NotFoundException('Invoice not found.');
     this.assertLocationAccess(invoice.locationId, user);
@@ -190,6 +197,13 @@ export class InvoicesService {
       const tenderedAmount = money(preparedPayments.reduce((sum, payment) => sum + payment.tendered, 0));
       const paidAmount = money(preparedPayments.reduce((sum, payment) => sum + payment.applied, 0));
       const changeAmount = money(preparedPayments.reduce((sum, payment) => sum + payment.change, 0));
+      const balanceAmount = money(grandTotal - paidAmount);
+      const isCreditSale = balanceAmount > 0;
+      if (isCreditSale) {
+        if (!dto.sellOnCredit) throw new BadRequestException('The invoice is underpaid. Explicitly choose Sell on credit to create a customer receivable.');
+        if (!dto.customerId) throw new BadRequestException('Select an existing customer before selling on credit.');
+        await this.assertCreditAuthorization(manager, user);
+      }
 
       const invoiceRepo = manager.getRepository(Invoice);
       const invoice = await invoiceRepo.save(invoiceRepo.create({
@@ -207,9 +221,12 @@ export class InvoicesService {
         paidAmount: paidAmount.toFixed(2),
         tenderedAmount: tenderedAmount.toFixed(2),
         changeAmount: changeAmount.toFixed(2),
-        balanceAmount: money(grandTotal - paidAmount).toFixed(2),
+        balanceAmount: balanceAmount.toFixed(2),
         paymentStatus: paidAmount === 0 ? 'UNPAID' : paidAmount < grandTotal ? 'PARTIALLY_PAID' : 'PAID',
         invoiceStatus: 'COMPLETED',
+        isCreditSale,
+        creditAuthorizedByUserId: isCreditSale ? user.userId : null,
+        creditAuthorizedAt: isCreditSale ? new Date() : null,
         createdByUserId: user.userId,
       }));
       invoice.invoiceNumber = this.invoiceNumber(invoice.invoiceId);
@@ -330,6 +347,7 @@ export class InvoicesService {
       saleType: dto.saleType,
       details,
       payments,
+      sellOnCredit: Boolean(dto.sellOnCredit),
     })).digest('hex');
   }
 
@@ -353,6 +371,16 @@ export class InvoicesService {
   private isRetryableDeadlock(error: unknown) {
     const candidate = error as { code?: string; errno?: number; driverError?: { code?: string; errno?: number } };
     return (candidate.driverError?.code ?? candidate.code) === 'ER_LOCK_DEADLOCK' || (candidate.driverError?.errno ?? candidate.errno) === 1213;
+  }
+
+  private async assertCreditAuthorization(manager: EntityManager, user: TenantPrincipal) {
+    if (user.roleCode === 'TENANT_ADMIN') return;
+    const permission = await manager.getRepository(Permission).findOneBy({ code: 'SALES_CREDIT_AUTHORIZE', isActive: true });
+    if (!permission) throw new ForbiddenException('Credit-sale authorization is unavailable.');
+    const enabled = await manager.getRepository(TenantModule).findOneBy({ tenantId: user.tenantId, moduleId: permission.moduleId, isEnabled: true });
+    if (!enabled) throw new ForbiddenException('The Sales module is not enabled for this tenant.');
+    const grant = await manager.getRepository(RolePermission).findOneBy({ roleId: user.roleId, permissionId: permission.permissionId });
+    if (!grant) throw new ForbiddenException('SALES_CREDIT_AUTHORIZE permission is required to sell on credit.');
   }
 
   private async issueStock(manager: EntityManager, invoice: Invoice, detail: InvoiceDetail, user: TenantPrincipal) {
@@ -380,6 +408,6 @@ export class InvoicesService {
   }
 
   private async getWithManager(manager: EntityManager, id: number, tenantId: number) {
-    return manager.getRepository(Invoice).findOne({ where: { invoiceId: id, tenantId }, relations: { customer: true, location: true, details: { product: true }, payments: { paymentMethod: true, paymentChannel: true } } });
+    return manager.getRepository(Invoice).findOne({ where: { invoiceId: id, tenantId }, relations: { customer: true, location: true, creditAuthorizedByUser: true, details: { product: true }, payments: { paymentMethod: true, paymentChannel: true } } });
   }
 }

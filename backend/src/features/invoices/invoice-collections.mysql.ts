@@ -9,6 +9,7 @@ import { InvoicePayment } from './invoice-payment.entity';
 import { PaymentMethod } from '../payment-methods/payment-methods.entity';
 import { TenantPrincipal } from '../auth/auth.types';
 import { Product } from '../products/products.entity';
+import { Customer } from '../customers/customers.entity';
 
 test('local MySQL collection, receipt history and tenant/location isolation (rolled back)', async () => {
   assert.ok(['localhost', '127.0.0.1', '::1'].includes(process.env.DB_HOST ?? ''), 'Local database required');
@@ -22,10 +23,13 @@ test('local MySQL collection, receipt history and tenant/location isolation (rol
     assert.ok(base, 'An existing local invoice is needed for fixture foreign keys');
     const method = await manager.getRepository(PaymentMethod).findOneBy({ tenantId: base.tenantId, isActive: true });
     assert.ok(method, 'An active local payment method is needed');
-    const user = { tenantId: Number(base.tenantId), userId: Number(base.createdByUserId), accessScope: 'TENANT', assignedLocationIds: [] } as unknown as TenantPrincipal;
+    const customer = await manager.getRepository(Customer).save(manager.getRepository(Customer).create({
+      tenantId: base.tenantId, customerCode: `COL-${randomUUID()}`, customerName: 'Collection test customer', isActive: true,
+    }));
+    const user = { tenantId: Number(base.tenantId), userId: Number(base.createdByUserId), roleCode: 'TENANT_ADMIN', accessScope: 'TENANT', assignedLocationIds: [] } as unknown as TenantPrincipal;
     const repo = manager.getRepository(Invoice);
     const invoice = await repo.save(repo.create({
-      tenantId: base.tenantId, locationId: base.locationId, customerId: base.customerId,
+      tenantId: base.tenantId, locationId: base.locationId, customerId: customer.customerId,
       checkoutKey: randomUUID(), checkoutFingerprint: randomUUID().replace(/-/g, '').padEnd(64, '0'),
       invoiceNumber: `TEST-${randomUUID()}`, invoiceDate: new Date(), saleType: 'RETAIL',
       subtotal: '5000.00', discountTotal: '0.00', grandTotal: '5000.00', paidAmount: '0.00',
@@ -62,7 +66,7 @@ test('local MySQL collection, receipt history and tenant/location isolation (rol
       tenantId: base.tenantId, sku: `RECEIPT-TEST-${randomUUID()}`, productName: 'Original receipt cake',
       categoryId: template.categoryId, baseUnitId: template.baseUnitId, isActive: true, isSellable: true, isStockItem: false,
     }));
-    const created = await service.create({ checkoutKey: randomUUID(), locationId: Number(base.locationId), saleType: 'RETAIL',
+    const created = await service.create({ checkoutKey: randomUUID(), locationId: Number(base.locationId), customerId: Number(customer.customerId), saleType: 'RETAIL', sellOnCredit: true,
       details: [{ productId: Number(product.productId), quantity: 2, unitPrice: 2500, discountAmount: 500 }],
       payments: [{ paymentMethodId: Number(method.paymentMethodId), amount: 2000 }],
     }, user);

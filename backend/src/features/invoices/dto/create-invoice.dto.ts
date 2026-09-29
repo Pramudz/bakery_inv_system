@@ -28,5 +28,6 @@ export class CreateInvoiceDto {
   @IsIn(['RETAIL', 'WHOLESALE']) saleType!: string;
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => CreateInvoiceDetailDto) details!: CreateInvoiceDetailDto[];
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => CreateInvoicePaymentDto) payments?: CreateInvoicePaymentDto[];
+  @IsOptional() @IsBoolean() sellOnCredit?: boolean;
   @IsOptional() @IsBoolean() acceptPriceChanges?: boolean;
 }

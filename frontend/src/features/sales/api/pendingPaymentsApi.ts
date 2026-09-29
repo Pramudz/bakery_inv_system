@@ -8,6 +8,8 @@ export type PendingInvoice = {
   paidAmount: string;
   balanceAmount: string;
   paymentStatus: string;
+  isCreditSale?: boolean;
+  collectionEligible?: boolean;
   customer: { customerName: string; phone: string | null; mobile: string | null } | null;
   location: { locationId: number; name: string };
 };

@@ -16,7 +16,7 @@ export function invoiceReceiptModel(invoice: Record<string, any>) {
   }));
   const date = new Date(original.invoiceDate);
   const receiptDate = Number.isNaN(date.getTime()) ? '' : date.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Colombo' });
-  return { cart, paidTotal, tenderedTotal, changeTotal, total, subtotal: Number(original.subtotal), discount: Number(original.discountTotal), method,
+  return { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance: Math.max(0, total - paidTotal), subtotal: Number(original.subtotal), discount: Number(original.discountTotal), method,
     paymentStatus: paidTotal >= total && total > 0 ? 'Full Paid' : paidTotal > 0 ? 'Partially Paid' : 'None Paid',
     saleType: original.saleType === 'WHOLESALE' ? 'Wholesale' : 'Retail',
     selectedCustomer: original.customer ? { name: original.customer.customerName } : null,

@@ -49,6 +49,7 @@ export type CreateInvoiceInput = {
   saleType: 'RETAIL' | 'WHOLESALE';
   details: { productId: number; quantity: number; unitPrice?: number; discountPercentage?: number; discountAmount?: number; quotedPriceListItemId?: number; quotedPriceListItemDiscountId?: number; quotedUnitPrice?: number; quotedDiscountAmount?: number }[];
   payments: { paymentMethodId: number; amount: number; paymentChannelId?: number; referenceNumber?: string }[];
+  sellOnCredit?: boolean;
   acceptPriceChanges?: boolean;
 };
 
