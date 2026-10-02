@@ -4,6 +4,8 @@ import {
   AUTH_UNAUTHORIZED_EVENT,
 } from '../features/auth/auth.types';
 
+export const POS_TERMINAL_CREDENTIAL_KEY = 'erp_pos_terminal_credential';
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -29,6 +31,11 @@ async function request<T>(
 
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const terminalCredential = localStorage.getItem(POS_TERMINAL_CREDENTIAL_KEY);
+  if (terminalCredential) {
+    headers.set('X-POS-Terminal-Credential', terminalCredential);
   }
 
   const response = await fetch(`${env.apiUrl}${path}`, {

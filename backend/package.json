@@ -7,8 +7,13 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
+    "db:bootstrap": "npm run build && node scripts/bootstrap-database.cjs",
+    "migration:show": "npm run build && typeorm migration:show -d dist/data-source.js",
     "migration:run": "npm run build && typeorm migration:run -d dist/data-source.js",
     "test": "npm run build && node --test dist/features/**/*.spec.js",
+    "test:sales:mysql": "npm run build && node --test dist/features/invoices/invoice-checkout-idempotency.mysql.js",
+    "test:pos-master-batches:mysql": "npm run build && node --test dist/features/pos-registers/pos-master-batches.mysql.js",
+    "test:pos-master-closing:mysql": "npm run build && node --test dist/features/pos-registers/pos-master-batches.mysql.js",
     "test:grn:mysql": "npm run build && node --test dist/features/goods-receipts/goods-receipt-reversal.mysql.js",
     "test:adjustments:mysql": "npm run build && node --test dist/features/inventory-adjustments/inventory-adjustments.mysql.js",
     "test:conversions:mysql": "npm run build && node --test dist/features/inventory-conversions/inventory-conversions.mysql.js"

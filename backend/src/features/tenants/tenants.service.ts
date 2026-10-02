@@ -88,7 +88,7 @@ export class TenantsService {
       const defaultModules = [
         ['MASTER_DATA', 'Master Data'], ['PRODUCT', 'Products'], ['SUPPLIER', 'Suppliers'],
         ['LOCATION', 'Locations'], ['PRICING', 'Pricing'], ['USER_MANAGEMENT', 'User Management'],
-        ['INVENTORY', 'Inventory'],
+        ['INVENTORY', 'Inventory'], ['SALES', 'Sales'],
       ];
       for (const [code, name] of defaultModules) {
         let module = await moduleRepository.findOneBy({ code });

@@ -32,6 +32,13 @@ import { UserSessionsPage } from "../features/user-sessions/pages/UserSessionsPa
 import { PurchaseOrdersPage } from "../features/purchasing/pages/PurchaseOrdersPage";
 import { PurchaseOrderScreen } from "../features/purchasing/pages/PurchaseOrderScreen";
 import { GoodsReceiptsPage } from "../features/purchasing/pages/GoodsReceiptsPage";
+import { CustomersPage } from "../features/customers/pages/CustomersPage";
+import { BillingPage } from "../features/sales/pages/BillingPage";
+import { PendingPaymentsPage } from "../features/sales/pages/PendingPaymentsPage";
+import { RefundsPage } from "../features/sales/pages/RefundsPage";
+import { PaymentMethodsPage } from "../features/sales/pages/PaymentMethodsPage";
+import { CardChannelsPage } from "../features/sales/pages/CardChannelsPage";
+import { SalesPage } from "../features/sales/pages/SalesPage";
 import { GoodsReceiptScreen } from "../features/purchasing/pages/GoodsReceiptScreen";
 import { GoodsReceiptReversalScreen } from "../features/purchasing/pages/GoodsReceiptReversalScreen";
 import { InventoryAdjustmentsPage } from "../features/inventory-adjustments/pages/InventoryAdjustmentsPage";
@@ -39,6 +46,10 @@ import { InventoryAdjustmentScreen } from "../features/inventory-adjustments/pag
 import { InventoryAdjustmentReasonsPage } from "../features/inventory-adjustments/pages/InventoryAdjustmentReasonsPage";
 import { InventoryConversionsPage } from "../features/inventory-conversions/pages/InventoryConversionsPage";
 import { InventoryConversionScreen } from "../features/inventory-conversions/pages/InventoryConversionScreen";
+import { PosRegistersPage } from "../features/pos-registers/pages/PosRegistersPage";
+import { PosRegisterVerificationPage } from "../features/pos-registers/pages/PosRegisterVerificationPage";
+import { PosMasterClosingPage } from "../features/pos-registers/pages/PosMasterClosingPage";
+import { PosRegisterManagementPage } from "../features/pos-registers/pages/PosRegisterManagementPage";
 
 const tenantChildren = [
   { path: "my-tenant", element: <TenantProfilePage /> },
@@ -66,6 +77,17 @@ const tenantChildren = [
   { path: "purchase-orders/:id", element: <PurchaseOrderScreen mode="view" /> },
   { path: "purchase-orders/:id/edit", element: <PurchaseOrderScreen mode="edit" /> },
   { path: "goods-receipts", element: <GoodsReceiptsPage /> },
+  { path: "customers", element: <CustomersPage /> },
+  { path: "sales", element: <SalesPage /> },
+  { path: "billing", element: <BillingPage /> },
+  { path: "pending-payments", element: <PendingPaymentsPage /> },
+  { path: "refunds", element: <RefundsPage /> },
+  { path: "payment-methods", element: <PaymentMethodsPage /> },
+  { path: "card-channels", element: <CardChannelsPage /> },
+  { path: "pos-registers", element: <PosRegistersPage /> },
+  { path: "pos-register-verification", element: <PosRegisterVerificationPage /> },
+  { path: "pos-master-closing", element: <PosMasterClosingPage /> },
+  { path: "pos-register-management", element: <PosRegisterManagementPage /> },
   { path: "goods-receipts/reverse", element: <GoodsReceiptReversalScreen /> },
   { path: "goods-receipts/direct/new", element: <GoodsReceiptScreen mode="create-direct" /> },
   { path: "goods-receipts/po/new", element: <GoodsReceiptScreen mode="create-po-based" /> },

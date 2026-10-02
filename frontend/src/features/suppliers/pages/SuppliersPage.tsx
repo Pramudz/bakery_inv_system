@@ -7,13 +7,13 @@ import { type Supplier, type SupplierInput, suppliersApi } from "../api/supplier
 
 const emptyForm = (): SupplierInput => ({
   supplierCode: "", supplierName: "", isActive: true, contactName: "", phone: "", mobile: "", email: "",
-  addressLine1: "", addressLine2: "", city: "", districtOrState: "", postalCode: "", countryCode: "",
+  addressLine1: "", addressLine2: "", city: "", districtOrState: "",
 });
 const toForm = (supplier: Supplier): SupplierInput => ({
   supplierCode: supplier.supplierCode, supplierName: supplier.supplierName, isActive: supplier.isActive,
   contactName: supplier.contactName ?? "", phone: supplier.phone ?? "", mobile: supplier.mobile ?? "", email: supplier.email ?? "",
   addressLine1: supplier.addressLine1 ?? "", addressLine2: supplier.addressLine2 ?? "", city: supplier.city ?? "",
-  districtOrState: supplier.districtOrState ?? "", postalCode: supplier.postalCode ?? "", countryCode: supplier.countryCode ?? "",
+  districtOrState: supplier.districtOrState ?? "",
 });
 
 export function SuppliersPage() {
@@ -101,7 +101,6 @@ export function SuppliersPage() {
     event.preventDefault();
     const errors: string[] = [];
     if (!form.supplierName.trim()) errors.push("Supplier name is required.");
-    if (form.countryCode && form.countryCode.length !== 2) errors.push("Country must be a two-letter code.");
     if (errors.length) { setFieldErrors(errors); return; }
     setFieldErrors([]);
     setApiError("");
@@ -109,7 +108,6 @@ export function SuppliersPage() {
       ...form,
       supplierCode: form.supplierCode?.trim().toUpperCase() || undefined,
       supplierName: form.supplierName.trim(),
-      countryCode: form.countryCode?.toUpperCase() || "",
     };
     save.mutate({ data, id: editing?.supplierId });
   };
@@ -179,7 +177,7 @@ export function SuppliersPage() {
             {loadingEdit ? <div className="empty">Loading supplier...</div> : <>
               <section className="form-section"><h3>General</h3><div className="form-grid"><Field label="Code" value={form.supplierCode} onChange={(value) => change("supplierCode", value.toUpperCase())} disabled={Boolean(editing)} placeholder="Leave blank to auto-generate SUP-000001" hint={editing ? "Supplier code cannot be changed after creation." : "Leave blank to auto-generate SUP-000001"} /><Field label="Name" value={form.supplierName} onChange={(value) => change("supplierName", value)} required /><label className="check"><input type="checkbox" checked={form.isActive} onChange={(event) => change("isActive", event.target.checked)} /> Active</label></div></section>
               <section className="form-section"><h3>Contact</h3><div className="form-grid"><Field label="Contact name" value={form.contactName} onChange={(value) => change("contactName", value)} /><Field label="Phone" value={form.phone} onChange={(value) => change("phone", value)} /><Field label="Mobile" value={form.mobile} onChange={(value) => change("mobile", value)} /><Field label="Email" type="email" value={form.email} onChange={(value) => change("email", value)} /></div></section>
-              <section className="form-section"><h3>Address</h3><div className="form-grid"><Field label="Address line 1" value={form.addressLine1} onChange={(value) => change("addressLine1", value)} /><Field label="Address line 2" value={form.addressLine2} onChange={(value) => change("addressLine2", value)} /><Field label="City" value={form.city} onChange={(value) => change("city", value)} /><Field label="District / State" value={form.districtOrState} onChange={(value) => change("districtOrState", value)} /><Field label="Postal code" value={form.postalCode} onChange={(value) => change("postalCode", value)} /><Field label="Country" value={form.countryCode} onChange={(value) => change("countryCode", value.toUpperCase().slice(0, 2))} placeholder="LK" /></div></section>
+              <section className="form-section"><h3>Address</h3><div className="form-grid"><Field label="Address line 1" value={form.addressLine1} onChange={(value) => change("addressLine1", value)} /><Field label="Address line 2" value={form.addressLine2} onChange={(value) => change("addressLine2", value)} /><Field label="City" value={form.city} onChange={(value) => change("city", value)} /><Field label="District / State" value={form.districtOrState} onChange={(value) => change("districtOrState", value)} /></div></section>
               {fieldErrors.map((error) => <div className="error-text" key={error}>{error}</div>)}
               {apiError && <div className="error-box">{apiError}</div>}
             </>}

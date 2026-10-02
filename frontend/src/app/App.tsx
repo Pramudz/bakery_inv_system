@@ -16,6 +16,18 @@ const tenantGroups = [
     ],
   },
   {
+    title: "Sales",
+    items: [
+      ["Sales", "/sales"],
+      ["Billing", "/billing"],
+      ["Pending Payments", "/pending-payments"],
+      ["Refunds", "/refunds"],
+      ["Payment Methods", "/payment-methods"],
+      ["Card Channels", "/card-channels"],
+      ["Register Management", "/pos-register-management"],
+    ],
+  },
+  {
     title: "Organization",
     items: [
       ["Users", "/users"],
@@ -38,6 +50,10 @@ const tenantGroups = [
   {
     title: "Supply & Pricing",
     items: [["Suppliers", "/suppliers"]],
+  },
+  {
+    title: "Customers",
+    items: [["Customers", "/customers"]],
   },
   {
     title: "Purchasing",
@@ -71,6 +87,16 @@ const tenantGroups = [
 ] as const;
 
 const moduleForPath: Record<string, string> = {
+  "/sales": "SALES",
+  "/billing": "SALES",
+  "/pending-payments": "SALES",
+  "/refunds": "SALES",
+  "/payment-methods": "SALES",
+  "/card-channels": "SALES",
+  "/pos-registers": "SALES",
+  "/pos-register-verification": "SALES",
+  "/pos-master-closing": "SALES",
+  "/pos-register-management": "SALES",
   "/users": "USER_MANAGEMENT",
   "/roles": "USER_MANAGEMENT",
   "/permissions": "USER_MANAGEMENT",
@@ -97,6 +123,15 @@ const moduleForPath: Record<string, string> = {
 };
 
 const viewPermissionForPath: Record<string, string> = {
+  "/sales": "SALES_INVOICE_VIEW",
+  "/billing": "SALES_BILLING",
+  "/pending-payments": "SALES_PAYMENT_COLLECT",
+  "/refunds": "SALES_REFUND_VIEW",
+  "/payment-methods": "SALES_PAYMENT_METHOD_VIEW",
+  "/card-channels": "SALES_PAYMENT_METHOD_VIEW",
+  "/pos-registers": "SALES_POS_REGISTER_ADMIN",
+  "/pos-register-verification": "SALES_REGISTER_VERIFY",
+  "/pos-master-closing": "SALES_REGISTER_CLOSE",
   "/users": "USER_VIEW",
   "/roles": "ROLE_VIEW",
   "/permissions": "PERMISSION_VIEW",
@@ -120,6 +155,17 @@ const viewPermissionForPath: Record<string, string> = {
   "/inventory/adjustments": "INVENTORY_ADJUSTMENT_VIEW",
   "/inventory/value-adjustments": "INVENTORY_VALUE_ADJUSTMENT_VIEW",
   "/inventory/adjustment-reasons": "INVENTORY_ADJUSTMENT_VIEW",
+};
+
+const viewAnyPermissionForPath: Record<string, string[]> = {
+  "/pos-register-management": [
+    "SALES_BILLING",
+    "SALES_POS_REGISTER_ADMIN",
+    "SALES_REGISTER_OPEN",
+    "SALES_REGISTER_CLOSE",
+    "SALES_REGISTER_VERIFY",
+    "SALES_REGISTER_PAYOUT",
+  ],
 };
 
 export default function App() {
@@ -149,8 +195,11 @@ export default function App() {
               !moduleForPath[path] ||
               modules.some((module) => module.code === moduleForPath[path]);
             const permission = viewPermissionForPath[path];
+            const anyPermissions = viewAnyPermissionForPath[path];
             return (
-              moduleAllowed && (!permission || permissions.includes(permission))
+              moduleAllowed &&
+              (!permission || permissions.includes(permission)) &&
+              (!anyPermissions || anyPermissions.some((code) => permissions.includes(code)))
             );
           })
         : group.items,

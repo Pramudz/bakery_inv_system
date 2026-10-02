@@ -33,6 +33,10 @@ import { PlatformSessionsModule } from './features/platform-sessions/platform-se
 import { SecurityModule } from './features/auth/security.module';
 import { UserLocationModule } from './features/user-locations/user-locations.module';
 import { TenantModulesModule } from './features/tenant-modules/tenant-modules.module';
+import { CustomerModule } from './features/customers/customers.module';
+import { PaymentMethodsModule } from './features/payment-methods/payment-methods.module';
+import { InvoicesModule } from './features/invoices/invoices.module';
+import { InvoiceRefundsModule } from './features/invoice-refunds/invoice-refunds.module';
 import { GoodsReceiptsModule } from './features/goods-receipts/goods-receipts.module';
 import { InventoryAgeLayerModule } from './features/inventory-age-layers/inventory-age-layer.module';
 import { InventoryBalanceModule } from './features/inventory-balance/inventory-balance.module';
@@ -42,6 +46,8 @@ import { ProductSupplierUnitsModule } from './features/product-supplier-units/pr
 import { PriceListItemDiscountModule } from './features/price-list-item-discounts/price-list-item-discounts.module';
 import { InventoryAdjustmentsModule } from './features/inventory-adjustments/inventory-adjustments.module';
 import { InventoryConversionsModule } from './features/inventory-conversions/inventory-conversions.module';
+import { PaymentChannelsModule } from './features/payment-channels/payment-channels.module';
+import { PosRegistersModule } from './features/pos-registers/pos-registers.module';
 
 
 @Module({
@@ -79,6 +85,12 @@ import { InventoryConversionsModule } from './features/inventory-conversions/inv
     TenantsModule,
     UsersModule,
     CategoryModule,
+    CustomerModule,
+    PaymentMethodsModule,
+    PaymentChannelsModule,
+    PosRegistersModule,
+    InvoicesModule,
+    InvoiceRefundsModule,
     SupplierModule,
     LocationModule,
     UnitOfMeasureModule,

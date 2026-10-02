@@ -172,15 +172,23 @@ export class PriceListItemDiscountService {
   }
 
   async resolveSellingPrice(dto: ResolveSellingPriceDto, tenantId: number) {
+    return this.resolveSellingPriceWithManager(dto, tenantId, this.dataSource.manager);
+  }
+
+  async resolveSellingPriceWithManager(dto: ResolveSellingPriceDto, tenantId: number, manager: EntityManager) {
     const at = validDate(dto.transactionDate, 'Transaction Date');
     const quantity = decimal4(dto.quantity);
-    const rows = await this.dataSource.manager.getRepository(PriceListItem).createQueryBuilder('price')
+    const rows = await manager.getRepository(PriceListItem).createQueryBuilder('price')
+      .innerJoin('price.priceList', 'priceList')
+      .innerJoin('price.productUnit', 'productUnit')
       .where('price.tenantId = :tenantId AND price.productId = :productId AND price.productUnitId = :productUnitId AND price.priceListId = :priceListId AND price.isActive = 1', { tenantId, productId: dto.productId, productUnitId: dto.productUnitId, priceListId: dto.priceListId })
+      .andWhere('priceList.tenantId = :tenantId AND priceList.isActive = 1')
+      .andWhere('productUnit.productId = :productId AND productUnit.isActive = 1 AND productUnit.isBaseUnit = 1 AND productUnit.isSalesUnit = 1 AND productUnit.conversionFactor = 1')
       .andWhere('price.effectiveFrom <= :at AND (price.effectiveTo IS NULL OR price.effectiveTo >= :at)', { at })
       .orderBy('price.minimumQuantity', 'DESC').addOrderBy('price.effectiveFrom', 'DESC').getMany();
     const price = rows.find((row) => decimal4(row.minimumQuantity) <= quantity);
     if (!price) throw new NotFoundException('No valid selling price was found.');
-    const discount = await this.findActiveDiscount(Number(price.priceListItemId), tenantId, at);
+    const discount = await this.findActiveDiscount(Number(price.priceListItemId), tenantId, at, manager);
     const breakdown = discount ? discountBreakdown(price.sellingPrice, discount.discountType, discount.discountValue) : null;
     // Future SaleLine integration must snapshot: priceListId, priceListItemId,
     // priceListItemDiscountId, originalUnitPrice, discountType, discountValue,

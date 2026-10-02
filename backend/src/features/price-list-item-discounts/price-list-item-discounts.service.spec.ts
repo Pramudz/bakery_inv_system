@@ -40,7 +40,7 @@ test('publishing rejects overlapping active or scheduled discounts', async () =>
 test('retail and wholesale price items resolve their own discounts independently', async () => {
   const prices = [{ ...parent }, { ...parent, priceListItemId: 12, priceListId: 6, sellingPrice: '80.00' }];
   let priceParams: any; let discountParams: any;
-  const priceBuilder: any = { where: (_sql: string, params: any) => { priceParams = params; return priceBuilder; }, andWhere: () => priceBuilder, orderBy: () => priceBuilder, addOrderBy: () => priceBuilder, getMany: async () => prices.filter((row) => row.priceListId === priceParams.priceListId) };
+  const priceBuilder: any = { innerJoin: () => priceBuilder, where: (_sql: string, params: any) => { priceParams = params; return priceBuilder; }, andWhere: () => priceBuilder, orderBy: () => priceBuilder, addOrderBy: () => priceBuilder, getMany: async () => prices.filter((row) => row.priceListId === priceParams.priceListId) };
   const discountBuilder: any = { where: (_sql: string, params: any) => { discountParams = params; return discountBuilder; }, andWhere: () => discountBuilder, orderBy: () => discountBuilder, getOne: async () => discountParams.priceListItemId === 11 ? { priceListItemDiscountId: 21, tenantId: 7, priceListItemId: 11, discountType: PriceListItemDiscountType.PERCENTAGE, discountValue: '10', effectiveFrom: new Date('2026-01-01'), effectiveTo: null, isActive: true } : { priceListItemDiscountId: 22, tenantId: 7, priceListItemId: 12, discountType: PriceListItemDiscountType.FIXED_AMOUNT, discountValue: '5', effectiveFrom: new Date('2026-01-01'), effectiveTo: null, isActive: true } };
   const manager: any = { getRepository: (entity: any) => entity === PriceListItem ? { createQueryBuilder: () => priceBuilder, findOneBy: async (where: any) => prices.find((row) => row.priceListItemId === where.priceListItemId && row.tenantId === where.tenantId) } : { createQueryBuilder: () => discountBuilder } };
   const service = new PriceListItemDiscountService({} as any, { manager } as any);
@@ -102,4 +102,31 @@ test('ending a discount preserves its parent price', async () => {
   await service.endDiscount(41, { effectiveTo: '2026-03-01T00:00:00Z' }, 7, 2);
   assert.equal(discount.endedBy, 2);
   assert.equal(parent.effectiveTo, originalParentEnd);
+});
+
+test('resolution ignores expired and future rows and applies the best quantity tier', async () => {
+  const at = new Date('2026-06-01T12:00:00Z');
+  const rows = [
+    { ...parent, priceListItemId: 91, sellingPrice: '70', minimumQuantity: '10', effectiveFrom: new Date('2026-01-01'), effectiveTo: null },
+    { ...parent, priceListItemId: 92, sellingPrice: '100', minimumQuantity: '1', effectiveFrom: new Date('2026-01-01'), effectiveTo: null },
+    { ...parent, priceListItemId: 93, sellingPrice: '50', minimumQuantity: '1', effectiveFrom: new Date('2026-07-01'), effectiveTo: null },
+    { ...parent, priceListItemId: 94, sellingPrice: '60', minimumQuantity: '1', effectiveFrom: new Date('2025-01-01'), effectiveTo: new Date('2025-12-31') },
+  ];
+  let queryAt = at;
+  const builder: any = {
+    innerJoin: () => builder,
+    where: () => builder,
+    andWhere: (_sql: string, params?: any) => { if (params?.at) queryAt = new Date(params.at); return builder; },
+    orderBy: () => builder,
+    addOrderBy: () => builder,
+    getMany: async () => rows.filter((row) => row.effectiveFrom <= queryAt && (!row.effectiveTo || row.effectiveTo >= queryAt)).sort((a, b) => Number(b.minimumQuantity) - Number(a.minimumQuantity)),
+  };
+  const manager: any = { getRepository: (entity: any) => entity === PriceListItem ? { createQueryBuilder: () => builder, findOneBy: async ({ priceListItemId }: any) => rows.find((row) => row.priceListItemId === priceListItemId) } : { createQueryBuilder: () => ({ where() { return this; }, andWhere() { return this; }, orderBy() { return this; }, getOne: async () => null }) } };
+  const service = new PriceListItemDiscountService({} as any, { manager } as any);
+  const bulk = await service.resolveSellingPriceWithManager({ productId: 10, productUnitId: 3, priceListId: 5, quantity: '12', transactionDate: at.toISOString() }, 7, manager);
+  const single = await service.resolveSellingPriceWithManager({ productId: 10, productUnitId: 3, priceListId: 5, quantity: '2', transactionDate: at.toISOString() }, 7, manager);
+  assert.equal(bulk.priceListItemId, 91);
+  assert.equal(bulk.originalUnitPrice, '70.0000');
+  assert.equal(single.priceListItemId, 92);
+  assert.equal(single.originalUnitPrice, '100.0000');
 });

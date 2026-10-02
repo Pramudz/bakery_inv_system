@@ -6,6 +6,8 @@ type Field = {
   label: string;
   type?: string;
   required?: boolean;
+  readOnly?: boolean;
+  placeholder?: string;
   emptyValue?: unknown;
   options?:
     | { label: string; value: string | number }[]
@@ -55,6 +57,25 @@ export function CrudPage({
     mutationFn: (id: number) => api.deactivate!(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: [queryKey] }),
   });
+  const idOf = (row: any) =>
+    row.id ??
+    row.customerId ??
+    row.tenantId ??
+    row.userId ??
+    row.categoryId ??
+    row.brandId ??
+    row.supplierId ??
+    row.locationId ??
+    row.productId ??
+    row.productSupplierId ??
+    row.productUnitId ??
+    row.unitId ??
+    row.attributeId ??
+    row.identifierTypeId ??
+    row.priceListId ??
+    row.moduleId ??
+    row.permissionId ??
+    row.roleId;
   const start = (row: any) => {
     setEditing(row);
     setForm({ ...row });
@@ -64,7 +85,7 @@ export function CrudPage({
     e.preventDefault();
     const data = Object.fromEntries(
       fields.flatMap((f) =>
-        form[f.name] === undefined
+        f.readOnly || form[f.name] === undefined
           ? []
           : form[f.name] === "" && f.emptyValue === undefined
             ? []
@@ -89,7 +110,7 @@ export function CrudPage({
             setOpen(true);
           }}
         >
-          + New
+          ＋ New {title.replace(/s$/, "").toLowerCase()}
         </button>
       </div>
       <div className="card">
@@ -99,7 +120,7 @@ export function CrudPage({
               {columns.map((c) => (
                 <th key={c.key}>{c.label}</th>
               ))}
-              <th>Actions</th>
+              <th className="right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -113,7 +134,7 @@ export function CrudPage({
               </tr>
             ) : (
               (q.data ?? []).map((r: any) => (
-                <tr key={r.id}>
+                <tr key={idOf(r)}>
                   {columns.map((c) => (
                     <td key={c.key}>
                       {typeof r[c.key] === "boolean" ? (
@@ -126,37 +147,18 @@ export function CrudPage({
                         </span>
                       ) : (
                         String(
-                          (c.key === "id"
-                            ? (r.id ??
-                              r.tenantId ??
-                              r.userId ??
-                              r.categoryId ??
-                              r.supplierId ??
-                              r.locationId ??
-                              r.productId ??
-                              r.productSupplierId ??
-                              r.unitId)
-                            : r[c.key]) ?? "—",
+                          (c.key === "id" ? idOf(r) : r[c.key]) ?? "—",
                         )
                       )}
                     </td>
                   ))}
-                  <td>
+                  <td className="right actions">
                     <button
-                      className="btn btn-secondary"
+                      className="btn btn-ghost"
                       onClick={() =>
                         start({
                           ...r,
-                          id:
-                            r.id ??
-                            r.tenantId ??
-                            r.userId ??
-                            r.categoryId ??
-                            r.supplierId ??
-                            r.locationId ??
-                            r.productId ??
-                            r.unitId ??
-                            r.productSupplierId,
+                          id: idOf(r),
                         })
                       }
                     >
@@ -164,9 +166,9 @@ export function CrudPage({
                     </button>
                     {api.deactivate && r.isActive !== false && (
                       <button
-                        className="btn btn-danger"
-                        style={{ marginLeft: 6 }}
-                        onClick={() => deactivate.mutate(r.id)}
+                        className="btn btn-danger-soft"
+                        onClick={() => deactivate.mutate(idOf(r))}
+                        disabled={deactivate.isPending}
                       >
                         Deactivate
                       </button>
@@ -196,11 +198,15 @@ export function CrudPage({
                         : f.options;
                     return (
                       <div className="field" key={f.name}>
-                        <label>{f.label}</label>
+                        <label>
+                          {f.label}
+                          {f.required && <span className="required">*</span>}
+                        </label>
                         {options ? (
                           <select
-                            className="select"
+                            className="control"
                             required={f.required}
+                            disabled={f.readOnly}
                             value={form[f.name] ?? ""}
                             onChange={(e) =>
                               setForm({ ...form, [f.name]: e.target.value })
@@ -215,8 +221,11 @@ export function CrudPage({
                           </select>
                         ) : (
                           <input
+                            className="control"
                             type={f.type ?? "text"}
                             required={f.required}
+                            disabled={f.readOnly}
+                            placeholder={f.placeholder}
                             value={form[f.name] ?? ""}
                             onChange={(e) =>
                               setForm({ ...form, [f.name]: e.target.value })
@@ -228,7 +237,7 @@ export function CrudPage({
                   })}
                 </div>
                 {mutation.isError && (
-                  <div className="error">
+                  <div className="error-box">
                     {(mutation.error as Error).message}
                   </div>
                 )}

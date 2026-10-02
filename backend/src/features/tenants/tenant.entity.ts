@@ -7,11 +7,13 @@ import { Brand } from '../brands/brands.entity';
 import { UnitOfMeasure } from '../units/units.entity';
 import { Product } from '../products/products.entity';
 import { Supplier } from '../suppliers/suppliers.entity';
+import { Customer } from '../customers/customers.entity';
 import { PriceList } from '../price-lists/price-lists.entity';
 import { Location } from '../locations/locations.entity';
 import { Attribute } from '../attributes/attributes.entity';
 import { UserLocation } from '../user-locations/user-locations.entity';
 import { TenantModule } from '../tenant-modules/tenant-modules.entity';
+import { PaymentMethod } from '../payment-methods/payment-methods.entity';
 import { GoodsReceipt } from '../goods-receipts/goods-receipt.entity';
 import { InventoryAgeLayer } from '../inventory-age-layers/inventory-age-layer.entity';
 import { InventoryBalance } from '../inventory-balance/inventory-balance.entity';
@@ -48,6 +50,7 @@ export class Tenant extends AuditEntity {
   @OneToMany(() => UnitOfMeasure, (unit) => unit.tenant) units!: UnitOfMeasure[];
   @OneToMany(() => Product, (product) => product.tenant) products!: Product[];
   @OneToMany(() => Supplier, (supplier) => supplier.tenant) suppliers!: Supplier[];
+  @OneToMany(() => Customer, (customer) => customer.tenant) customers!: Customer[];
   @OneToMany(() => PriceList, (priceList) => priceList.tenant) priceLists!: PriceList[];
   @OneToMany(() => Location, (location) => location.tenant) locations!: Location[];
   @OneToMany(() => Attribute, (attribute) => attribute.tenant) attributes!: Attribute[];
@@ -58,4 +61,5 @@ export class Tenant extends AuditEntity {
   @OneToMany(() => InventoryBalance, (balance) => balance.tenant) inventoryBalances!: InventoryBalance[];
   @OneToMany(() => InventoryLedger, (ledger) => ledger.tenant) inventoryLedgers!: InventoryLedger[];
   @OneToMany(() => InventoryAgeLayer, (layer) => layer.tenant) inventoryAgeLayers!: InventoryAgeLayer[];
+  @OneToMany(() => PaymentMethod, (paymentMethod) => paymentMethod.tenant) paymentMethods!: PaymentMethod[];
 }

@@ -8,10 +8,11 @@ import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 const MODULES = [
   ['MASTER_DATA', 'Master Data'], ['PRODUCT', 'Products'], ['SUPPLIER', 'Suppliers'],
   ['LOCATION', 'Locations'], ['PRICING', 'Pricing'], ['USER_MANAGEMENT', 'User Management'],
-  ['PURCHASING', 'Purchasing'], ['INVENTORY', 'Inventory'], ['CUSTOMER', 'Customer']
+  ['PURCHASING', 'Purchasing'], ['INVENTORY', 'Inventory'], ['CUSTOMER', 'Customer'],
+  ['SALES', 'Sales']
 ] as const;
 const PERMISSIONS = [
-  ['MASTER_DATA', 'CATEGORY'], ['MASTER_DATA', 'BRAND'], ['MASTER_DATA', 'UNIT'], ['MASTER_DATA', 'ATTRIBUTE'], ['MASTER_DATA', 'IDENTIFIER_TYPE'],
+  ['MASTER_DATA', 'CATEGORY'], ['MASTER_DATA', 'BRAND'], ['MASTER_DATA', 'UNIT'], ['MASTER_DATA', 'ATTRIBUTE'], ['MASTER_DATA', 'IDENTIFIER_TYPE'], ['MASTER_DATA', 'CUSTOMER'],
   ['PRODUCT', 'PRODUCT'], ['PRODUCT', 'PRODUCT_UNIT'], ['PRODUCT', 'PRODUCT_IDENTIFIER'], ['PRODUCT', 'PRODUCT_ATTRIBUTE'],
   ['SUPPLIER', 'SUPPLIER'], ['SUPPLIER', 'PRODUCT_SUPPLIER'],
   ['LOCATION', 'LOCATION'], ['LOCATION', 'PRODUCT_LOCATION'],
@@ -50,6 +51,14 @@ export class AuthorizationCatalogService implements OnModuleInit {
       'INVENTORY_VALUE_ADJUSTMENT_VIEW', 'INVENTORY_VALUE_ADJUSTMENT_CREATE', 'INVENTORY_VALUE_ADJUSTMENT_UPDATE', 'INVENTORY_VALUE_ADJUSTMENT_POST', 'INVENTORY_VALUE_ADJUSTMENT_CANCEL',
     ];
     for (const code of inventoryPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: inventory.moduleId, code, name: code.replace(/_/g, ' ').toLowerCase(), isActive: true }));
+    const sales = byCode.get('SALES')!;
+    const salesPermissions = [
+      'SALES_BILLING', 'SALES_CREDIT_AUTHORIZE', 'SALES_POS_REGISTER_ADMIN', 'SALES_REGISTER_OPEN', 'SALES_REGISTER_CLOSE', 'SALES_REGISTER_VERIFY', 'SALES_REGISTER_PAYOUT', 'SALES_INVOICE_VIEW', 'SALES_PAYMENT_COLLECT',
+      'SALES_REFUND_VIEW', 'SALES_REFUND_CREATE',
+      'SALES_ADJUSTMENT_VIEW', 'SALES_ADJUSTMENT_CREATE',
+      'SALES_PAYMENT_REVERSE', 'SALES_PAYMENT_METHOD_VIEW', 'SALES_PAYMENT_METHOD_MANAGE',
+    ];
+    for (const code of salesPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: sales.moduleId, code, name: code.replace(/_/g, ' ').toLowerCase(), isActive: true }));
     const tenantProfilePermission = 'TENANT_PROFILE_UPDATE';
     const masterData = byCode.get('MASTER_DATA')!;
     if (!await permissions.findOneBy({ code: tenantProfilePermission })) await permissions.save(permissions.create({ moduleId: masterData.moduleId, code: tenantProfilePermission, name: 'Update own tenant profile', description: 'Update the authenticated tenant company profile and logo.', isActive: true }));
