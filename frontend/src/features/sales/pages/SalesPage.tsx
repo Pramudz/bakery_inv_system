@@ -1,14 +1,15 @@
-import { FormEvent, useMemo, useState } from 'react';
+﻿import { FormEvent, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { invoicesApi } from '../api/invoicesApi';
 import { paymentMethodsApi } from '../api/paymentMethodsApi';
 import { SalesBadge, SalesStat } from './SalesUi';
 import { PaymentReceiptDialog, receiptNumber } from './PaymentReceipt';
-import { PaymentReceipt, pendingPaymentsApi } from '../api/pendingPaymentsApi';
+import { PaymentReceipt } from '../api/pendingPaymentsApi';
 import { useAuth } from '../../auth/AuthContext';
 import { InvoiceReceiptDialog } from './InvoiceReceiptDialog';
 import { paymentChannelsApi } from '../api/paymentChannelsApi';
+import { saleBillReference } from './saleBillReference';
 import './sales-history.css';
 
 const money = (value: unknown) => Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -33,8 +34,7 @@ export function SalesPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [correcting, setCorrecting] = useState<any | null>(null);
   const [correction, setCorrection] = useState({ reversalKey: crypto.randomUUID(), reason: '', replacementPaymentMethodId: '', replacementPaymentChannelId: '', replacementAmount: '', referenceNumber: '', cashPayout: false });
-  const invoices = useQuery({ queryKey: ['invoices', ...queryScope], queryFn: invoicesApi.list });
-  const payments = useQuery({ queryKey: ['payment-receipts', ...queryScope], queryFn: pendingPaymentsApi.history });
+  const history = useQuery({ queryKey: ['invoice-history', page, limit, query, status, recordType, ...queryScope], queryFn: () => invoicesApi.history({ page, limit, search: query, status, recordType }) });
   const details = useQuery({ queryKey: ['invoice', selectedId, ...queryScope], queryFn: () => invoicesApi.get(selectedId!), enabled: selectedId !== null });
   const methods = useQuery({ queryKey: ['payment-methods', ...queryScope], queryFn: paymentMethodsApi.list });
   const channels = useQuery({ queryKey: ['payment-channels', 'active'], queryFn: () => paymentChannelsApi.list(true), enabled: Boolean(correcting) });
@@ -49,43 +49,29 @@ export function SalesPage() {
       referenceNumber: correction.referenceNumber || undefined,
       cashPayout: correction.cashPayout,
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['invoices'] }); queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] }); queryClient.invalidateQueries({ queryKey: ['pending-payments'] }); queryClient.invalidateQueries({ queryKey: ['payment-receipts'] }); setCorrecting(null); setCorrection({ reversalKey: crypto.randomUUID(), reason: '', replacementPaymentMethodId: '', replacementPaymentChannelId: '', replacementAmount: '', referenceNumber: '', cashPayout: false }); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['invoice-history'] }); queryClient.invalidateQueries({ queryKey: ['invoices'] }); queryClient.invalidateQueries({ queryKey: ['invoice', selectedId] }); queryClient.invalidateQueries({ queryKey: ['pending-payments'] }); queryClient.invalidateQueries({ queryKey: ['payment-receipts'] }); setCorrecting(null); setCorrection({ reversalKey: crypto.randomUUID(), reason: '', replacementPaymentMethodId: '', replacementPaymentChannelId: '', replacementAmount: '', referenceNumber: '', cashPayout: false }); },
   });
-  const rows = useMemo(() => {
-    const invoiceMap = new Map((invoices.data ?? []).map((invoice) => [String(invoice.invoiceId), invoice]));
-    const records = [
-      ...(invoices.data ?? []).map((invoice) => ({ key: `invoice-${invoice.invoiceId}`, type: 'INVOICE', date: invoice.invoiceDate, invoice, payment: null as PaymentReceipt | null })),
-      ...(payments.data ?? []).map((payment) => ({ key: `payment-${payment.invoicePaymentId}`, type: 'PAYMENT', date: payment.paidAt, invoice: invoiceMap.get(String(payment.invoiceId)) ?? payment.invoice, payment })),
-    ];
-    return records.filter((record) => {
-      const search = `${record.invoice.invoiceNumber} ${record.invoice.customer?.customerName ?? ''} ${record.payment ? receiptNumber(record.payment.invoicePaymentId) : ''} ${record.payment?.referenceNumber ?? ''}`.toLowerCase();
-      return search.includes(query.trim().toLowerCase()) && (recordType === 'ALL' || record.type === recordType) && (status === 'ALL' || record.invoice.invoiceStatus === status);
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime() || b.key.localeCompare(a.key, undefined, { numeric: true }));
-  }, [invoices.data, payments.data, query, status, recordType]);
-  const totalPages = Math.max(1, Math.ceil(rows.length / limit));
+  const rows = history.data?.items ?? [];
+  const historyTotal = history.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(historyTotal / limit));
   const currentPage = Math.min(page, totalPages);
-  const pagedRows = rows.slice((currentPage - 1) * limit, currentPage * limit);
-  const loadingHistory = invoices.isLoading || payments.isLoading;
+  const pagedRows = rows;
+  const loadingHistory = history.isLoading;
   const visiblePages = [...new Set([1, currentPage - 1, currentPage, currentPage + 1, totalPages])]
     .filter((number) => number >= 1 && number <= totalPages)
     .sort((a, b) => a - b);
-  const today = new Date().toDateString();
-  const todayRows = (invoices.data ?? []).filter((x) => new Date(x.invoiceDate).toDateString() === today);
-  const paid = (invoices.data ?? []).filter((x) => x.paymentStatus === 'PAID');
-  const refunded = (invoices.data ?? []).filter((x) => x.invoiceStatus.includes('REFUNDED'));
-  const creditSales = (invoices.data ?? []).filter((x) => x.isCreditSale);
-  const outstanding = (invoices.data ?? []).reduce((sum, invoice) => sum + Number(invoice.balanceAmount), 0);
+  const stats = history.data?.stats;
   const canCollect = role?.code === 'TENANT_ADMIN' || permissions.includes('SALES_PAYMENT_COLLECT');
 
   return <div>
     <div className="page-head"><div><div className="eyebrow">SALES</div><h1>Invoice History</h1><p>View invoices, item details, payments, refunds and payment corrections.</p></div></div>
-    <div className="sales-stats"><SalesStat label="Today's Sales" value={`LKR ${money(todayRows.reduce((n, x) => n + Number(x.grandTotal), 0))}`} note={`${todayRows.length} original invoices`} tone="blue"/><SalesStat label="Paid Invoices" value={String(paid.length)} note="Fully paid" tone="green"/><SalesStat label="Credit Sales" value={String(creditSales.length)} note="Originally authorized on credit" tone="amber"/><SalesStat label="Outstanding" value={`LKR ${money(outstanding)}`} note="Current invoice balances" tone="red"/><SalesStat label="Refunded" value={String(refunded.length)} note="Partial or full" tone="red"/></div>
+    <div className="sales-stats"><SalesStat label="Today's Sales" value={`LKR ${money(stats?.todaySales ?? 0)}`} note={`${stats?.todayCount ?? 0} original invoices`} tone="blue"/><SalesStat label="Paid Invoices" value={String(stats?.paidCount ?? 0)} note="Fully paid" tone="green"/><SalesStat label="Credit Sales" value={String(stats?.creditCount ?? 0)} note="Originally authorized on credit" tone="amber"/><SalesStat label="Outstanding" value={`LKR ${money(stats?.outstanding ?? 0)}`} note="Current invoice balances" tone="red"/><SalesStat label="Refunded" value={String(stats?.refundedCount ?? 0)} note="Partial or full" tone="red"/></div>
     <div className="card"><div className="sales-card-head"><div><h2>Invoices &amp; payments</h2><p>Original invoices and later payments, newest first. Sales totals count invoices only.</p></div></div><div className="sales-toolbar"><div className="sales-search"><span>⌕</span><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Invoice, receipt number or customer..." aria-label="Search sales history"/></div><select className="control sales-filter" aria-label="Record type" value={recordType} onChange={(event) => { setRecordType(event.target.value); setPage(1); }}><option value="ALL">All records</option><option value="INVOICE">Invoices only</option><option value="PAYMENT">Payments only</option></select><select className="control sales-filter" aria-label="Invoice status" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="ALL">All statuses</option><option value="COMPLETED">Completed</option><option value="PARTIALLY_REFUNDED">Partially refunded</option><option value="FULLY_REFUNDED">Fully refunded</option></select></div>
-      {(invoices.isError || payments.isError) && <div className="error-box" role="alert">{invoices.error?.message || payments.error?.message}<button className="btn btn-secondary" onClick={() => { void invoices.refetch(); void payments.refetch(); }}>Retry</button></div>}
+      {(history.isError) && <div className="error-box" role="alert">{history.error?.message}<button className="btn btn-secondary" onClick={() => { void history.refetch(); }}>Retry</button></div>}
       <div className="sales-table-wrap"><table className="table sales-history-table"><thead><tr><th>Record</th><th>Invoice / receipt</th><th>Date &amp; time</th><th>Customer</th><th>Payment Method</th><th>Payment Status</th><th>Status</th><th className="right">Amount</th><th className="right">Actions</th></tr></thead>
-        <tbody>{invoices.isLoading || payments.isLoading ? <tr><td colSpan={9}>Loading history...</td></tr> : !rows.length ? <tr><td colSpan={9}>{invoices.isError || payments.isError ? 'History could not be loaded.' : 'No records match your filters.'}</td></tr> : pagedRows.map(({ key, invoice, payment, date }) => <tr key={key}>
+        <tbody>{history.isLoading ? <tr><td colSpan={9}>Loading history...</td></tr> : !rows.length ? <tr><td colSpan={9}>{history.isError ? 'History could not be loaded.' : 'No records match your filters.'}</td></tr> : pagedRows.map(({ key, invoice, payment, date }) => <tr key={key}>
           <td><strong>{payment ? 'Later collection' : invoice.isCreditSale ? 'Original credit sale' : 'Original sale'}</strong></td>
-          <td>{payment ? <><strong className="sales-id">{receiptNumber(payment.invoicePaymentId)}</strong><small className="refund-code">{invoice.invoiceNumber}</small></> : <strong className="sales-id">{invoice.invoiceNumber}</strong>}</td>
+          <td>{payment ? <><strong className="sales-id">{receiptNumber(payment.invoicePaymentId)}</strong><small className="refund-code">{saleBillReference(invoice)}</small></> : <strong className="sales-id">{saleBillReference(invoice)}</strong>}</td>
           <td>{new Date(date).toLocaleString()}</td><td>{invoice.customer?.customerName ?? 'Walk-in Customer'}</td><td>{payment ? payment.paymentMethod.paymentMethodName : originalPaymentMethods(invoice)}</td>
           <td><SalesBadge status={payment ? payment.isReversed ? 'Reversed' : Number(payment.balanceAfter) === 0 ? 'Paid' : 'Partially Paid' : statusLabel(invoice.paymentStatus)} /></td>
           <td><SalesBadge status={payment ? payment.isReversed ? 'Reversed' : 'Received' : statusLabel(invoice.invoiceStatus)} /></td>
@@ -94,7 +80,7 @@ export function SalesPage() {
         </tr>)}</tbody>
       </table></div>
       <div className="toolbar sales-history-pagination">
-        <span aria-live="polite">{loadingHistory ? 'Loading history...' : `Showing ${rows.length ? (currentPage - 1) * limit + 1 : 0}–${Math.min(currentPage * limit, rows.length)} of ${rows.length} records`}</span>
+        <span aria-live="polite">{loadingHistory ? 'Loading history...' : `Showing ${historyTotal ? (currentPage - 1) * limit + 1 : 0}–${Math.min(currentPage * limit, historyTotal)} of ${historyTotal} records`}</span>
         <nav className="sales-history-page-controls" aria-label="Invoice history pagination">
           <button className="btn btn-secondary" disabled={loadingHistory || currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Previous</button>
           {visiblePages.map((number, index) => <span className="sales-history-page-number" key={number}>
@@ -108,7 +94,7 @@ export function SalesPage() {
         </nav>
       </div>
     </div>
-    {selectedId !== null && <div className="modal-bg"><div className="modal invoice-detail-modal"><div className="modal-head"><div><h2>{details.data?.invoiceNumber ?? 'Invoice details'}</h2><p>{details.data ? `${details.data.customer?.customerName ?? 'Walk-in Customer'} · ${new Date(details.data.invoiceDate).toLocaleString()}` : 'Loading...'}</p></div><button className="icon-btn" onClick={() => setSelectedId(null)}>×</button></div>{details.data && <div className="modal-body">
+    {selectedId !== null && <div className="modal-bg"><div className="modal invoice-detail-modal"><div className="modal-head"><div><h2>{details.data ? saleBillReference(details.data) : 'Invoice details'}</h2><p>{details.data ? `${details.data.customer?.customerName ?? 'Walk-in Customer'} · ${new Date(details.data.invoiceDate).toLocaleString()}` : 'Loading...'}</p></div><button className="icon-btn" onClick={() => setSelectedId(null)}>×</button></div>{details.data && <div className="modal-body">
       <div className="invoice-detail-summary"><div><span>Original total</span><strong>LKR {money(details.data.grandTotal)}</strong></div><div><span>Payments received</span><strong>LKR {money(details.data.paidAmount)}</strong></div><div><span>Outstanding balance</span><strong>LKR {money(details.data.balanceAmount)}</strong></div></div>
       {details.data.isCreditSale && <p><strong>Credit sale</strong> · authorized {details.data.creditAuthorizedAt ? new Date(details.data.creditAuthorizedAt).toLocaleString() : 'on the original sale'}{details.data.creditAuthorizedByUser?.username ? ` by ${details.data.creditAuthorizedByUser.username}` : ''}.</p>}
       <h3>Items</h3><table className="table"><thead><tr><th>Product</th><th>Qty</th><th className="right">Price</th><th className="right">Discount</th><th className="right">Net</th></tr></thead><tbody>{details.data.details.map((line: any) => <tr key={line.invoiceDetailId}><td><strong>{line.product.productName}</strong><small className="refund-code">{line.product.sku}</small></td><td>{Number(line.quantity)}</td><td className="right">{money(line.unitPrice)}</td><td className="right">{money(line.discountAmount)}</td><td className="right"><strong>{money(line.netTotal)}</strong></td></tr>)}</tbody></table>

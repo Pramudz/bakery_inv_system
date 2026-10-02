@@ -166,6 +166,27 @@ test('approved master sign-off releases the terminal for the next cashier withou
   assert.equal(f.state.registerSessions[0].status, PosRegisterSessionStatus.OPEN);
 });
 
+test('unpaired master cashiers share one register but keep separate nullable-terminal sessions', async () => {
+  const f = fixture(PosRegisterMode.MASTER_REGISTER, true);
+  await f.service.openMaster({ locationId: 11, openingBalance: 100 }, user({ userId: 99 }));
+  const first = await f.service.startCashier(undefined, user(), 11);
+  const second = await f.service.startCashier(undefined, user({ userId: 12 }), 11);
+  assert.equal(first.terminal, null);
+  assert.equal(second.terminal, null);
+  assert.equal(f.state.cashierSessions.length, 2);
+  assert.ok(f.state.cashierSessions.every((row) => row.posTerminalId === null));
+  assert.equal(first.registerSession.posRegisterSessionId, second.registerSession.posRegisterSessionId);
+  const context = await f.service.context(11, undefined, user());
+  assert.equal(context.canBill, true);
+  assert.equal(context.action, null);
+  const active = await f.service.requireCashierSession((f.service as any).dataSource.manager, undefined, user(), 11);
+  assert.equal(active.terminal, null);
+  const closing = await f.service.requireMasterClosingSession((f.service as any).dataSource.manager, undefined, user());
+  assert.equal(closing.cashierSession.posCashierSessionId, first.cashierSession.posCashierSessionId);
+  const terminal = fixture(PosRegisterMode.TERMINAL_REGISTER);
+  await assert.rejects(terminal.service.startCashier(undefined, user(), 11), /Terminal mode requires a paired browser/);
+});
+
 test('a closed master register session is never resumed and the next opening balance is explicit', async () => {
   const f = fixture(PosRegisterMode.MASTER_REGISTER);
   await f.service.openMaster({ locationId: 11, openingBalance: 500 }, user({ userId: 99, roleCode: 'TENANT_ADMIN' }));

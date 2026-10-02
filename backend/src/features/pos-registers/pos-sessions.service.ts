@@ -13,8 +13,8 @@ import { PosTerminalPairing } from './pos-terminal-pairing.entity';
 import { PosTerminal } from './pos-terminal.entity';
 
 export type ActivePosSession = {
-  terminal: PosTerminal;
-  pairing: PosTerminalPairing;
+  terminal: PosTerminal | null;
+  pairing: PosTerminalPairing | null;
   config: PosLocationConfig;
   register: PosCashRegister;
   registerSession: PosRegisterSession;
@@ -52,12 +52,12 @@ export class PosSessionsService {
     if (register) {
       registerSession = await this.dataSource.getRepository(PosRegisterSession).findOneBy({ tenantId: user.tenantId, posCashRegisterId: register.posCashRegisterId, status: In(this.ongoingRegisterStatuses()) });
     }
-    if (registerSession && terminal) {
+    if (registerSession && (terminal || config?.registerMode === PosRegisterMode.MASTER_REGISTER)) {
       cashierSession = await this.dataSource.getRepository(PosCashierSession).findOneBy({
         tenantId: user.tenantId,
         posRegisterSessionId: registerSession.posRegisterSessionId,
         cashierUserId: user.userId,
-        posTerminalId: terminal.posTerminalId,
+        posTerminalId: terminal ? terminal.posTerminalId : IsNull(),
         status: In(this.ongoingCashierStatuses()),
       });
     }
@@ -81,7 +81,7 @@ export class PosSessionsService {
     } else if (config.registerMode === PosRegisterMode.MASTER_REGISTER && !registerSession) {
       action = 'OPEN_MASTER_REGISTER';
       blockedReason = 'An authorized manager must open the location master register.';
-    } else if (!terminal) {
+    } else if (!terminal && config.registerMode === PosRegisterMode.TERMINAL_REGISTER) {
       action = 'PAIR_TERMINAL';
       blockedReason = 'Pair this billing browser to a terminal at this location.';
     } else if (cashierSession?.status === PosCashierSessionStatus.PENDING_VERIFICATION) {
@@ -108,7 +108,7 @@ export class PosSessionsService {
       register: register ? this.registerView(register) : null,
       registerSession: registerSession ? this.registerSessionView(registerSession) : null,
       cashierSession: cashierSession ? this.cashierSessionView(cashierSession) : null,
-      canBill: Boolean(config && pairing && terminal && cashierSession?.status === PosCashierSessionStatus.ACTIVE && registerSession?.status === PosRegisterSessionStatus.OPEN),
+      canBill: Boolean(config && !pairingIssue && (config.registerMode === PosRegisterMode.MASTER_REGISTER || pairing && terminal) && cashierSession?.status === PosCashierSessionStatus.ACTIVE && registerSession?.status === PosRegisterSessionStatus.OPEN),
       action,
       blockedReason,
     };
@@ -175,8 +175,24 @@ export class PosSessionsService {
     });
   }
 
-  async startCashier(credential: string | undefined, user: TenantPrincipal) {
+  async startCashier(credential: string | undefined, user: TenantPrincipal, locationId?: number) {
     return this.dataSource.transaction(async (manager) => {
+      if (!credential?.trim()) {
+        if (!Number.isSafeInteger(locationId) || !locationId || locationId < 1) throw new BadRequestException('A location is required to start an unpaired master cashier session.');
+        const config = await this.config(manager, locationId, user, true);
+        if (config.registerMode !== PosRegisterMode.MASTER_REGISTER) throw new ForbiddenException('Terminal mode requires a paired browser.');
+        const register = await manager.getRepository(PosCashRegister).findOne({ where: { tenantId: user.tenantId, locationId, registerMode: PosRegisterMode.MASTER_REGISTER, posTerminalId: IsNull(), isActive: true }, lock: { mode: 'pessimistic_write' } });
+        if (!register) throw new BadRequestException('The master register is not open.');
+        const registerSession = await this.openRegisterSession(manager, register, true);
+        if (!registerSession || registerSession.status !== PosRegisterSessionStatus.OPEN) throw new ConflictException('The master register is not open for cashier transactions.');
+        const active = await manager.getRepository(PosCashierSession).findOne({ where: { tenantId: user.tenantId, cashierUserId: user.userId, status: In(this.ongoingCashierStatuses()) }, lock: { mode: 'pessimistic_write' } });
+        if (active) {
+          if (active.status === PosCashierSessionStatus.ACTIVE && active.posTerminalId == null && Number(active.posRegisterSessionId) === Number(registerSession.posRegisterSessionId)) return this.sessionResult(register, registerSession, active, null, true);
+          throw new ConflictException('This cashier has another active or unresolved session.');
+        }
+        const cashier = await this.createCashierSession(manager, registerSession, null, user, new Date());
+        return this.sessionResult(register, registerSession, cashier, null, false);
+      }
       const { pairing, terminal } = await this.pairing(manager, credential, user, true);
       const config = await this.config(manager, terminal.locationId, user, true);
       if (config.registerMode !== PosRegisterMode.MASTER_REGISTER) throw new BadRequestException('This location uses a terminal register. Open the terminal register instead.');
@@ -203,6 +219,17 @@ export class PosSessionsService {
   }
 
   async requireCashierSession(manager: EntityManager, credential: string | undefined, user: TenantPrincipal, locationId: number, lock = true): Promise<ActivePosSession> {
+    if (!credential?.trim()) {
+      const config = await this.config(manager, locationId, user, lock);
+      if (config.registerMode !== PosRegisterMode.MASTER_REGISTER) throw new ForbiddenException('Terminal mode requires a paired browser.');
+      const cashierSession = await manager.getRepository(PosCashierSession).findOne({ where: { tenantId: user.tenantId, locationId, cashierUserId: user.userId, posTerminalId: IsNull(), status: PosCashierSessionStatus.ACTIVE }, ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}) });
+      if (!cashierSession) throw new ForbiddenException('An active unpaired master cashier session is required.');
+      const registerSession = await manager.getRepository(PosRegisterSession).findOne({ where: { posRegisterSessionId: cashierSession.posRegisterSessionId, tenantId: user.tenantId, locationId, status: PosRegisterSessionStatus.OPEN }, ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}) });
+      if (!registerSession) throw new ForbiddenException('The master register is not open.');
+      const register = await manager.getRepository(PosCashRegister).findOne({ where: { posCashRegisterId: registerSession.posCashRegisterId, tenantId: user.tenantId, locationId, registerMode: PosRegisterMode.MASTER_REGISTER, posTerminalId: IsNull(), isActive: true }, ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}) });
+      if (!register) throw new ForbiddenException('The master register is unavailable.');
+      return { terminal: null, pairing: null, config, register, registerSession, cashierSession };
+    }
     const { pairing, terminal } = await this.pairing(manager, credential, user, lock);
     if (Number(terminal.locationId) !== Number(locationId)) throw new ForbiddenException('The paired terminal belongs to a different location.');
     const config = await this.config(manager, locationId, user, lock);
@@ -262,6 +289,17 @@ export class PosSessionsService {
   }
 
   async requireMasterClosingSession(manager: EntityManager, credential: string | undefined, user: TenantPrincipal): Promise<ActivePosSession> {
+    if (!credential?.trim()) {
+      const cashierSession = await manager.getRepository(PosCashierSession).findOne({ where: { tenantId: user.tenantId, cashierUserId: user.userId, posTerminalId: IsNull(), status: In([PosCashierSessionStatus.ACTIVE, PosCashierSessionStatus.RECOUNT_REQUIRED]) }, lock: { mode: 'pessimistic_write' } });
+      if (!cashierSession) throw new ForbiddenException('An active or recount-required unpaired master cashier session is required.');
+      const config = await this.config(manager, cashierSession.locationId, user, true);
+      if (config.registerMode !== PosRegisterMode.MASTER_REGISTER) throw new ForbiddenException('The location no longer uses a master register.');
+      const registerSession = await manager.getRepository(PosRegisterSession).findOne({ where: { posRegisterSessionId: cashierSession.posRegisterSessionId, tenantId: user.tenantId, locationId: cashierSession.locationId, status: PosRegisterSessionStatus.OPEN }, lock: { mode: 'pessimistic_write' } });
+      if (!registerSession) throw new ConflictException('The master register is not open.');
+      const register = await manager.getRepository(PosCashRegister).findOne({ where: { posCashRegisterId: registerSession.posCashRegisterId, tenantId: user.tenantId, locationId: cashierSession.locationId, registerMode: PosRegisterMode.MASTER_REGISTER, posTerminalId: IsNull(), isActive: true }, lock: { mode: 'pessimistic_write' } });
+      if (!register) throw new ForbiddenException('The master register is unavailable.');
+      return { terminal: null, pairing: null, config, register, registerSession, cashierSession };
+    }
     const { pairing, terminal } = await this.pairing(manager, credential, user, true);
     const config = await this.config(manager, terminal.locationId, user, true);
     if (config.registerMode !== PosRegisterMode.MASTER_REGISTER) throw new BadRequestException('This location uses terminal-register cash counting.');
@@ -379,6 +417,7 @@ export class PosSessionsService {
         posTerminalId: terminal ? terminal.posTerminalId : null,
         registerMode: config.registerMode,
         registerKey,
+        receiptCode: terminal ? null : 'MASTER',
         displayName: terminal ? terminal.displayName : 'Master Register',
         isActive: true,
       }));
@@ -406,14 +445,14 @@ export class PosSessionsService {
     });
   }
 
-  private createCashierSession(manager: EntityManager, registerSession: PosRegisterSession, terminal: PosTerminal, user: TenantPrincipal, now: Date) {
+  private createCashierSession(manager: EntityManager, registerSession: PosRegisterSession, terminal: PosTerminal | null, user: TenantPrincipal, now: Date) {
     const repo = manager.getRepository(PosCashierSession);
     return repo.save(repo.create({
       posRegisterSessionId: registerSession.posRegisterSessionId,
       tenantId: user.tenantId,
-      locationId: terminal.locationId,
+      locationId: terminal?.locationId ?? registerSession.locationId,
       cashierUserId: user.userId,
-      posTerminalId: terminal.posTerminalId,
+      posTerminalId: terminal?.posTerminalId ?? null,
       startedAt: now,
       endedAt: null,
       endedByUserId: null,
@@ -427,8 +466,8 @@ export class PosSessionsService {
     return 'A conflicting cashier session is already active.';
   }
 
-  private sessionResult(register: PosCashRegister, registerSession: PosRegisterSession, cashierSession: PosCashierSession, terminal: PosTerminal, resumed: boolean) {
-    return { register: this.registerView(register), registerSession: this.registerSessionView(registerSession), cashierSession: this.cashierSessionView(cashierSession), terminal: this.terminalView(terminal), resumed };
+  private sessionResult(register: PosCashRegister, registerSession: PosRegisterSession, cashierSession: PosCashierSession, terminal: PosTerminal | null, resumed: boolean) {
+    return { register: this.registerView(register), registerSession: this.registerSessionView(registerSession), cashierSession: this.cashierSessionView(cashierSession), terminal: terminal ? this.terminalView(terminal) : null, resumed };
   }
 
   private registerView(register: PosCashRegister) {

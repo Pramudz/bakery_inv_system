@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { TenantPrincipal } from '../auth/auth.types';
 import { InvoiceDetail } from '../invoices/invoice-detail.entity';
@@ -21,15 +21,35 @@ import { CreateInvoiceAdjustmentDto } from './dto/create-invoice-adjustment.dto'
 import { createHash, randomUUID } from 'node:crypto';
 import { ActivePosSession, PosSessionsService } from '../pos-registers/pos-sessions.service';
 import { PosCashFundingSource, PosCashMovement, PosCashMovementDirection, PosCashMovementType } from '../pos-registers/pos-cash-movement.entity';
+import { tenantBusinessClock } from '../../common/business-date';
+import { nextPosReceiptNumber } from '../invoices/pos-receipt-number';
+import { posReceiptHeader } from '../invoices/pos-receipt-header';
+import { PosRegisterMode } from '../pos-registers/pos-location-config.entity';
+import { snapshotRefundReceipt } from './invoice-refund-receipt';
+import { PosPrintService } from '../pos-print/pos-print.service';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class InvoiceRefundsService {
-  constructor(private readonly dataSource: DataSource, private readonly posSessions: PosSessionsService, private readonly paymentProcessing: PaymentProcessingService = new PaymentProcessingService()) {}
+  constructor(private readonly dataSource: DataSource, private readonly posSessions: PosSessionsService, private readonly paymentProcessing: PaymentProcessingService = new PaymentProcessingService(), @Optional() private readonly posPrint?: PosPrintService) {}
 
   list(user: TenantPrincipal) {
     return this.dataSource.getRepository(InvoiceRefund).find({ where: { tenantId: user.tenantId, ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}) }, relations: { invoice: { customer: true }, location: true }, order: { invoiceRefundId: 'DESC' } });
+  }
+  async page(user: TenantPrincipal, requestedPage: number, requestedLimit: number, search = '') {
+    const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+    const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, 100) : 20;
+    const query = this.dataSource.getRepository(InvoiceRefund).createQueryBuilder('refund')
+      .leftJoinAndSelect('refund.invoice', 'invoice')
+      .leftJoinAndSelect('invoice.customer', 'customer')
+      .leftJoinAndSelect('refund.location', 'location')
+      .where('refund.tenantId = :tenantId', { tenantId: user.tenantId });
+    if (user.accessScope === 'LOCATION') query.andWhere('refund.locationId IN (:...locationIds)', { locationIds: user.assignedLocationIds.length ? user.assignedLocationIds : [-1] });
+    const term = search.trim().slice(0, 100);
+    if (term) query.andWhere('(CAST(refund.refundNo AS CHAR) LIKE :term OR refund.refundNumber LIKE :term OR refund.printedLocationCode LIKE :term OR refund.businessDate LIKE :term OR invoice.printedLocationCode LIKE :term OR invoice.printedRegisterCode LIKE :term OR invoice.businessDate LIKE :term OR customer.customerName LIKE :term)', { term: `%${term}%` });
+    const [items, total] = await query.orderBy('refund.invoiceRefundId', 'DESC').skip((page - 1) * limit).take(limit).getManyAndCount();
+    return { items, total, page, limit };
   }
   async get(id: number, user: TenantPrincipal) {
     const row = await this.dataSource.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: id, tenantId: user.tenantId }, relations: { invoice: { customer: true }, location: true, details: { product: true, invoiceDetail: true }, payments: { paymentMethod: true, paymentChannel: true } } });
@@ -72,7 +92,33 @@ export class InvoiceRefundsService {
     if (!invoice) throw new NotFoundException('Invoice not found.');
     this.assertLocationAccess(invoice.locationId, user);
     const sums = await this.refundedQuantities(invoice.details.map((x) => x.invoiceDetailId));
-    return { ...invoice, refundablePaymentAmount: await this.remainingPayment(invoice), details: invoice.details.map((line) => ({ ...line, refundedQuantity: sums.get(Number(line.invoiceDetailId)) ?? 0, refundableQuantity: Math.max(0, Number(line.quantity) - (sums.get(Number(line.invoiceDetailId)) ?? 0)) })) };
+    const refundedAmounts = await this.refundedAmounts(invoice.details.map((x) => x.invoiceDetailId));
+    const previousRefunds = await this.dataSource.getRepository(InvoiceRefund).find({ where: { invoiceId: id, tenantId: user.tenantId, status: 'COMPLETED' }, relations: { payments: true }, order: { invoiceRefundId: 'ASC' } });
+    return { ...invoice, previousRefunds, originalPaymentPosition: { paidAmount: invoice.receiptSnapshot?.paidAmount ?? invoice.paidAmount, balanceAmount: invoice.receiptSnapshot?.balanceAmount ?? invoice.balanceAmount }, refundablePaymentAmount: await this.remainingPayment(invoice), details: invoice.details.map((line) => ({ ...line, refundedQuantity: sums.get(Number(line.invoiceDetailId)) ?? 0, refundableQuantity: Math.max(0, Number(line.quantity) - (sums.get(Number(line.invoiceDetailId)) ?? 0)), refundableAmount: money(Math.max(0, Number(line.netTotal) - (refundedAmounts.get(Number(line.invoiceDetailId)) ?? 0))) })) };
+  }
+
+  async reprint(id: number, user: TenantPrincipal) {
+    return this.dataSource.transaction(async (manager) => {
+      const refund = await manager.getRepository(InvoiceRefund).findOneBy({ invoiceRefundId: id, tenantId: user.tenantId });
+      if (!refund) throw new NotFoundException('Refund not found.');
+      this.assertLocationAccess(refund.locationId, user);
+      if (!refund.receiptSnapshot) throw new BadRequestException('No archived refund receipt exists for this legacy record.');
+      return this.posPrint!.auditReprint(manager, 'REFUND', id, user, refund.locationId);
+    });
+  }
+
+  async lookupSale(businessDate: string, locationCode: string, registerCode: string, billNo: number, user: TenantPrincipal) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate) || !Number.isSafeInteger(billNo) || billNo < 1 || !locationCode?.trim() || !registerCode?.trim()) {
+      throw new BadRequestException('Enter the Date, Location, POS/Register, and Bill No exactly as printed on the sale receipt.');
+    }
+    const rows = await this.dataSource.getRepository(Invoice).find({ where: {
+      tenantId: user.tenantId, businessDate, printedLocationCode: locationCode.trim().toUpperCase(),
+      printedRegisterCode: registerCode.trim().toUpperCase(), billNo,
+    }, take: 2 });
+    if (!rows.length) throw new NotFoundException('No sale matches those printed receipt fields. Check all four fields.');
+    if (rows.length > 1) throw new ConflictException('The printed reference is ambiguous. Contact an administrator.');
+    this.assertLocationAccess(rows[0].locationId, user);
+    return this.refundableInvoice(rows[0].invoiceId, user);
   }
 
   async create(dto: CreateInvoiceRefundDto, user: TenantPrincipal, credential?: string) {
@@ -88,20 +134,33 @@ export class InvoiceRefundsService {
       const invoice = await manager.getRepository(Invoice).findOne({ where: { invoiceId: dto.invoiceId, tenantId: user.tenantId }, relations: { details: { product: true } }, lock: { mode: 'pessimistic_write' } });
       if (!invoice) throw new NotFoundException('Invoice not found.');
       this.assertLocationAccess(invoice.locationId, user);
+      const committed = await manager.getRepository(InvoiceRefund).findOneBy({ tenantId: user.tenantId, refundKey });
+      if (committed) {
+        if (committed.refundFingerprint !== refundFingerprint) throw new ConflictException('This refund key was already used for different refund data.');
+        return this.getWithManager(manager, committed.invoiceRefundId, user.tenantId);
+      }
       if (invoice.invoiceStatus === 'FULLY_REFUNDED') throw new BadRequestException('Invoice is already fully refunded.');
       const requestedIds = dto.details.map((x) => x.invoiceDetailId);
       if (new Set(requestedIds).size !== requestedIds.length) throw new BadRequestException('A refund line cannot be selected more than once.');
       const originalLines = invoice.details.filter((x) => requestedIds.includes(Number(x.invoiceDetailId)));
       if (originalLines.length !== requestedIds.length) throw new BadRequestException('One or more invoice lines are invalid.');
       const previous = await this.refundedQuantities(invoice.details.map((line) => line.invoiceDetailId), manager);
+      const previousAmounts = await this.refundedAmounts(invoice.details.map((line) => line.invoiceDetailId), manager);
       const prepared = dto.details.map((request) => {
         const line = originalLines.find((x) => Number(x.invoiceDetailId) === request.invoiceDetailId)!;
         const refundable = Number(line.quantity) - (previous.get(Number(line.invoiceDetailId)) ?? 0);
         if (request.quantity > refundable) throw new BadRequestException(`Refund quantity exceeds the available quantity for ${line.product.productName}.`);
         const ratio = request.quantity / Number(line.quantity);
-        const gross = money(Number(line.grossTotal) * ratio);
-        const discount = money(Number(line.discountAmount) * ratio);
-        return { request, line, gross, discount, total: money(gross - discount) };
+        let gross = money(Number(line.grossTotal) * ratio);
+        let discount = money(Number(line.discountAmount) * ratio);
+        const remainingAmount = money(Math.max(0, Number(line.netTotal) - (previousAmounts.get(Number(line.invoiceDetailId)) ?? 0)));
+        const total = request.quantity === refundable ? remainingAmount : money(gross - discount);
+        if (total > remainingAmount) throw new BadRequestException(`Refund amount exceeds the remaining value for ${line.product.productName}.`);
+        if (request.quantity === refundable) {
+          gross = Math.max(gross, total);
+          discount = money(gross - total);
+        }
+        return { request, line, gross, discount, total };
       });
       const subtotal = money(prepared.reduce((sum, x) => sum + x.gross, 0));
       const discountTotal = money(prepared.reduce((sum, x) => sum + x.discount, 0));
@@ -127,7 +186,7 @@ export class InvoiceRefundsService {
       }
 
       const repo = manager.getRepository(InvoiceRefund);
-      const refund = await repo.save(repo.create({ tenantId: user.tenantId, locationId: invoice.locationId, refundKey, refundFingerprint, posTerminalId: activeSession?.terminal.posTerminalId ?? null, posRegisterSessionId: activeSession?.registerSession.posRegisterSessionId ?? null, posCashierSessionId: activeSession?.cashierSession.posCashierSessionId ?? null, invoiceId: invoice.invoiceId, refundNumber: `PENDING-${Date.now()}-${user.userId}`, refundDate: new Date(), reason: dto.reason.trim(), subtotal: subtotal.toFixed(2), discountTotal: discountTotal.toFixed(2), refundTotal: refundTotal.toFixed(2), status: 'COMPLETED', createdByUserId: user.userId, approvedByUserId: null }));
+      const refund = await repo.save(repo.create({ tenantId: user.tenantId, locationId: invoice.locationId, refundKey, refundFingerprint, posTerminalId: activeSession?.terminal?.posTerminalId ?? null, posRegisterSessionId: activeSession?.registerSession.posRegisterSessionId ?? null, posCashierSessionId: activeSession?.cashierSession.posCashierSessionId ?? null, invoiceId: invoice.invoiceId, refundNumber: `PENDING-${Date.now()}-${user.userId}`, refundDate: new Date(), reason: dto.reason.trim(), subtotal: subtotal.toFixed(2), discountTotal: discountTotal.toFixed(2), refundTotal: refundTotal.toFixed(2), status: 'COMPLETED', createdByUserId: user.userId, approvedByUserId: null }));
       refund.refundNumber = this.refundNumber(refund.invoiceRefundId);
       await repo.save(refund);
       for (const item of prepared) {
@@ -140,7 +199,7 @@ export class InvoiceRefundsService {
           paymentChannelId: channel?.paymentChannelId ?? null, paymentChannelCodeSnapshot: channel?.code ?? null,
           paymentChannelNameSnapshot: channel?.name ?? null,
           amount: money(payment.amount).toFixed(2), referenceNumber, refundedAt: new Date(), createdByUserId: user.userId,
-          posTerminalId: activeSession?.terminal.posTerminalId ?? null,
+          posTerminalId: activeSession?.terminal?.posTerminalId ?? null,
           posRegisterSessionId: activeSession?.registerSession.posRegisterSessionId ?? null,
           posCashierSessionId: activeSession?.cashierSession.posCashierSessionId ?? null,
         }));
@@ -168,7 +227,22 @@ export class InvoiceRefundsService {
       const fullyReturned = invoice.details.every((line) => (previous.get(Number(line.invoiceDetailId)) ?? 0) + (dto.details.find((item) => item.invoiceDetailId === Number(line.invoiceDetailId))?.quantity ?? 0) >= Number(line.quantity));
       invoice.invoiceStatus = fullyReturned ? 'FULLY_REFUNDED' : 'PARTIALLY_REFUNDED';
       await this.recalculateInvoicePayments(manager, invoice);
-      return this.getWithManager(manager, refund.invoiceRefundId, user.tenantId);
+      const clock = await tenantBusinessClock(manager, user.tenantId);
+      const header = await posReceiptHeader(manager, user.tenantId, invoice.locationId, user.userId);
+      refund.businessDate = clock.businessDate;
+      refund.printedLocationCode = header.locationCode;
+      refund.printedRegisterCode = activeSession
+        ? activeSession.config.registerMode === PosRegisterMode.MASTER_REGISTER ? activeSession.register.receiptCode || 'MASTER' : activeSession.terminal!.terminalCode.trim().toUpperCase()
+        : null;
+      refund.refundNo = await nextPosReceiptNumber(manager, 'REFUND', user.tenantId, clock.businessDate, header.locationCode);
+      refund.issuedAt = clock.now;
+      const completed = (await this.getWithManager(manager, refund.invoiceRefundId, user.tenantId))!;
+      Object.assign(completed, { businessDate: refund.businessDate, printedLocationCode: refund.printedLocationCode, printedRegisterCode: refund.printedRegisterCode, refundNo: refund.refundNo, issuedAt: refund.issuedAt });
+      refund.receiptSnapshot = snapshotRefundReceipt(completed, invoice, header);
+      await repo.save(refund);
+      await this.posPrint?.enqueue(manager, 'REFUND', refund.invoiceRefundId, user.tenantId, invoice.locationId, activeSession?.terminal?.posTerminalId ?? null, refund.receiptSnapshot);
+      completed.receiptSnapshot = refund.receiptSnapshot;
+      return completed;
     });
   }
 
@@ -232,7 +306,7 @@ export class InvoiceRefundsService {
           collectionKey: payment.collectionKey ? randomUUID() : null,
           balanceBefore: payment.collectionKey ? remaining.toFixed(2) : null,
           balanceAfter: payment.collectionKey ? replacementBalance.toFixed(2) : null,
-          posTerminalId: activeSession!.terminal.posTerminalId,
+          posTerminalId: activeSession!.terminal?.posTerminalId ?? null,
           posRegisterSessionId: activeSession!.registerSession.posRegisterSessionId,
           posCashierSessionId: activeSession!.cashierSession.posCashierSessionId,
         }));
@@ -332,6 +406,18 @@ export class InvoiceRefundsService {
     if (!ids.length) return new Map<number, number>();
     const rows = await repo.createQueryBuilder('detail').innerJoin('detail.invoiceRefund', 'refund', 'refund.status = :status', { status: 'COMPLETED' }).select('detail.invoiceDetailId', 'invoiceDetailId').addSelect('SUM(detail.quantity)', 'quantity').where({ invoiceDetailId: In(ids) }).groupBy('detail.invoiceDetailId').getRawMany();
     return new Map(rows.map((x) => [Number(x.invoiceDetailId), Number(x.quantity)]));
+  }
+  private async refundedAmounts(ids: number[], manager?: EntityManager) {
+    if (!ids.length) return new Map<number, number>();
+    const rows = await (manager ?? this.dataSource.manager).getRepository(InvoiceRefundDetail)
+      .createQueryBuilder('detail')
+      .innerJoin('detail.invoiceRefund', 'refund', 'refund.status = :status', { status: 'COMPLETED' })
+      .select('detail.invoiceDetailId', 'invoiceDetailId')
+      .addSelect('SUM(detail.refundAmount)', 'amount')
+      .where({ invoiceDetailId: In(ids) })
+      .groupBy('detail.invoiceDetailId')
+      .getRawMany();
+    return new Map(rows.map((row) => [Number(row.invoiceDetailId), money(Number(row.amount ?? 0))]));
   }
   private async restoreStock(manager: EntityManager, invoice: Invoice, detail: InvoiceRefundDetail, user: TenantPrincipal) {
     const repo = manager.getRepository(InventoryBalance);

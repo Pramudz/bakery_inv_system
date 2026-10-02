@@ -13,6 +13,7 @@ import { PosCashierSession } from '../pos-registers/pos-cashier-session.entity';
 @Entity('tbl_invoice_refund')
 @Index('uq_invoice_refund_tenant_number', ['tenantId', 'refundNumber'], { unique: true })
 @Index('uq_invoice_refund_tenant_key', ['tenantId', 'refundKey'], { unique: true })
+@Index('uq_refund_printed_number', ['tenantId', 'businessDate', 'printedLocationCode', 'refundNo'], { unique: true })
 export class InvoiceRefund extends AuditEntity {
   @PrimaryGeneratedColumn({ name: 'invoice_refund_id', type: 'bigint' }) invoiceRefundId!: number;
   @Column({ name: 'tenant_id', type: 'bigint' }) tenantId!: number;
@@ -30,6 +31,12 @@ export class InvoiceRefund extends AuditEntity {
   @Column({ name: 'invoice_id', type: 'bigint' }) invoiceId!: number;
   @ManyToOne(() => Invoice, { nullable: false, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'invoice_id' }) invoice!: Invoice;
   @Column({ name: 'refund_number', type: 'varchar', length: 50 }) refundNumber!: string;
+  @Column({ name: 'business_date', type: 'date', nullable: true }) businessDate!: string | null;
+  @Column({ name: 'refund_no', type: 'int', unsigned: true, nullable: true }) refundNo!: number | null;
+  @Column({ name: 'printed_location_code', type: 'varchar', length: 50, nullable: true }) printedLocationCode!: string | null;
+  @Column({ name: 'printed_register_code', type: 'varchar', length: 50, nullable: true }) printedRegisterCode!: string | null;
+  @Column({ name: 'issued_at', type: 'datetime', precision: 3, nullable: true }) issuedAt!: Date | null;
+  @Column({ name: 'receipt_snapshot', type: 'json', nullable: true }) receiptSnapshot!: Record<string, any> | null;
   @Column({ name: 'refund_date', type: 'datetime' }) refundDate!: Date;
   @Column({ name: 'reason', type: 'varchar', length: 255 }) reason!: string;
   @Column({ name: 'subtotal', type: 'decimal', precision: 18, scale: 2 }) subtotal!: string;

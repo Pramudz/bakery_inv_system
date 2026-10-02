@@ -15,10 +15,14 @@ import { InvoicePaymentReversal } from './invoice-payment-reversal.entity';
 import { PosCashFundingSource, PosCashMovement, PosCashMovementType } from '../pos-registers/pos-cash-movement.entity';
 import { REQUIRE_PERMISSION } from '../auth/require-permission.decorator';
 import { InvoiceRefundsController } from './invoice-refunds.controller';
+import { Tenant } from '../tenants/tenant.entity';
+import { Location } from '../locations/locations.entity';
+import { User } from '../users/user.entity';
 
 function fixture(paidAmount = '20') {
+  let lastNumber = 0;
   const invoice = { invoiceId: '1', tenantId: 1, locationId: 3, invoiceStatus: 'PARTIALLY_REFUNDED', grandTotal: '50', paidAmount, tenderedAmount: paidAmount, changeAmount: '0', balanceAmount: '15', paymentStatus: Number(paidAmount) > 0 ? 'PARTIALLY_PAID' : 'UNPAID', details: [{
-    invoiceDetailId: '12', quantity: '5', grossTotal: '50', discountAmount: '0',
+    invoiceDetailId: '12', quantity: '5', grossTotal: '50', discountAmount: '0', netTotal: '50',
     unitPrice: '10', discountPercentage: '0', productId: 8, product: { productName: 'Bread', isStockItem: false },
   }] };
   const refunds: any[] = [{ invoiceRefundId: 9, invoiceId: '1', tenantId: 1, locationId: 3, status: 'COMPLETED', refundTotal: '20', payments: [{ invoiceRefundPaymentId: 7, amount: '5' }] }];
@@ -29,8 +33,11 @@ function fixture(paidAmount = '20') {
   for (const method of ['innerJoin', 'select', 'addSelect', 'where', 'groupBy']) {
     query[method] = () => query;
   }
-  query.getRawMany = async () => [{ invoiceDetailId: '12', quantity: '2' }];
-  const manager = { getRepository: (entity: unknown) => entity === Invoice
+  query.getRawMany = async () => [{ invoiceDetailId: '12', quantity: '2', amount: '20' }];
+  const manager = { query: async (statement: string, params: any[]) => { if (statement.includes('SELECT last_number')) return [{ last_number: lastNumber }]; if (statement.includes('UPDATE tbl_pos_receipt_counter')) lastNumber = Number(params[0]); return []; }, getRepository: (entity: unknown) => entity === Tenant ? { findOneBy: async () => ({ tenantId: 1, name: 'Test Bakery', timeZone: 'Asia/Colombo' }), findOneByOrFail: async () => ({ tenantId: 1, name: 'Test Bakery', timeZone: 'Asia/Colombo' }) }
+    : entity === Location ? { findOneByOrFail: async () => ({ locationId: 3, tenantId: 1, code: 'BANDA', name: 'Bandaragama', addressLine1: 'Main Road' }) }
+    : entity === User ? { findOneByOrFail: async () => ({ userId: 1, tenantId: 1, username: 'C17', firstName: 'Cashier' }) }
+    : entity === Invoice
     ? { findOne: async () => invoice, save: async (value: any) => Object.assign(invoice, value) }
     : entity === InvoiceRefund ? {
       find: async () => refunds,
@@ -57,8 +64,8 @@ function fixture(paidAmount = '20') {
     : { create: (value: any) => value, save: async (value: any) => value, findOneBy: async () => null } };
   const service = new InvoiceRefundsService({
     ...manager, manager, transaction: (run: any) => run(manager),
-  } as any, { requireCashierSession: async () => ({ terminal: { posTerminalId: 21 }, registerSession: { posRegisterSessionId: 22 }, cashierSession: { posCashierSessionId: 23 } }), requireOpenMasterRegisterSession: async () => ({ registerSession: { posRegisterSessionId: 88 } }) } as any);
-  return { service, invoice, activePayments, cashMovements, refunds, reversals, user: { tenantId: 1, userId: 1, accessScope: 'TENANT', assignedLocationIds: [] } as any };
+  } as any, { requireCashierSession: async () => ({ terminal: { posTerminalId: 21, terminalCode: 'POS1' }, config: { registerMode: 'TERMINAL_REGISTER' }, register: { receiptCode: null }, registerSession: { posRegisterSessionId: 22 }, cashierSession: { posCashierSessionId: 23 } }), requireOpenMasterRegisterSession: async () => ({ registerSession: { posRegisterSessionId: 88 } }) } as any);
+  return { service, invoice, activePayments, cashMovements, refunds, reversals, query, user: { tenantId: 1, userId: 1, accessScope: 'TENANT', assignedLocationIds: [] } as any };
 }
 
 test('refundable quantities include prior refunds when MySQL returns string IDs', async () => {
@@ -81,6 +88,14 @@ test('prior refunds limit the quantity allowed for string invoice line IDs', asy
   await assert.rejects(service.create({ invoiceId: 1, reason: 'Return',
     details: [{ invoiceDetailId: 12, quantity: 4 }],
   }, user), /Refund quantity exceeds the available quantity/);
+});
+
+test('prior refund values prevent another partial return from exceeding the original line net', async () => {
+  const { service, query, user } = fixture();
+  query.getRawMany = async () => [{ invoiceDetailId: '12', quantity: '2', amount: '49.99' }];
+  await assert.rejects(service.create({ invoiceId: 1, reason: 'Return',
+    details: [{ invoiceDetailId: 12, quantity: 1 }],
+  }, user), /Refund amount exceeds the remaining value/);
 });
 
 test('lines outside the invoice remain rejected', async () => {

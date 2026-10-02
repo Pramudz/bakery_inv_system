@@ -31,7 +31,7 @@ export class PosSessionsController {
 
   @Post('cashier/start')
   @RequirePermission('SALES_BILLING')
-  startCashier(@Headers('x-pos-terminal-credential') credential: string | undefined, @CurrentUser() user: TenantPrincipal) {
-    return this.service.startCashier(credential, user);
+  startCashier(@Body() body: { locationId?: number }, @Headers('x-pos-terminal-credential') credential: string | undefined, @CurrentUser() user: TenantPrincipal) {
+    return this.service.startCashier(credential, user, body.locationId);
   }
 }

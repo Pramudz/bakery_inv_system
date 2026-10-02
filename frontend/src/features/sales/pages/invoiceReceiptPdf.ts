@@ -1,9 +1,9 @@
 import { invoiceReceiptModel } from './invoiceReceiptModel';
 
-export function downloadInvoiceReceipt(invoice: Record<string, any>) {
-    const { cart, paidTotal, total, outstandingBalance, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, completedInvoice, receiptDate, unitPrice, lineNet } = invoiceReceiptModel(invoice);
+export function downloadInvoiceReceipt(invoice: Record<string, any>, copy = false) {
+    const { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, receiptDate, unitPrice, lineNet, header, billNo, locationCode, registerCode } = invoiceReceiptModel(invoice);
     const paidAmount = paidTotal,
-      change = Math.max(0, paidAmount - total);
+      change = changeTotal;
     const escapePdf = (value: string) =>
       value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
     const pageWidth = 226.77,
@@ -34,25 +34,29 @@ export function downloadInvoiceReceipt(invoice: Record<string, any>) {
         `${strong ? "0.8" : "0.35"} w [${strong ? "" : "2 2"}] 0 d 14 ${y.toFixed(2)} m 212 ${y.toFixed(2)} l S [] 0 d`,
       );
     };
-    text("ERP CORE BAKERY", 0, 13, true, "center");
+    text(String(header?.companyName ?? 'Sale receipt'), 0, 13, true, "center");
     y -= 15;
-    text("Main Bakery Outlet - Colombo, Sri Lanka", 0, 5.5, true, "center");
+    text(String(header?.locationName ?? ''), 0, 5.5, true, "center");
     y -= 8;
-    text("Tel: 011 234 5678 - bakery@example.com", 0, 5, false, "center");
-    y -= 7;
-    text("Fresh bakery products made daily", 0, 5, false, "center");
+    for (const line of header?.locationAddress ?? []) { text(String(line).slice(0, 46), 0, 5, false, "center"); y -= 7; }
+    if (header?.locationPhone) { text(`Tel: ${header.locationPhone}`, 0, 5, false, "center"); y -= 7; }
     y -= 15;
-    text("SALES INVOICE", 0, 10, true, "center");
+    text(copy ? "SALE RECEIPT - COPY" : "SALE RECEIPT", 0, 10, true, "center");
     y -= 13;
     rule();
     y -= 12;
     text("Bill No", 14, 5);
-    text(completedInvoice?.invoiceNumber ?? "NEW INVOICE", 105, 5.5, true, "right");
+    text(billNo === null ? "LEGACY" : String(billNo).padStart(4, '0'), 105, 5.5, true, "right");
     text("Date", 119, 5);
     text(receiptDate, 212, 5.2, true, "right");
     y -= 11;
+    text("Location", 14, 5);
+    text(locationCode ?? '-', 105, 5.5, true, "right");
+    text("POS", 119, 5);
+    text(registerCode ?? '-', 212, 5.5, true, "right");
+    y -= 11;
     text("Cashier", 14, 5);
-    text("Counter User", 105, 5.5, true, "right");
+    text(String(header?.cashierCode ?? '-'), 105, 5.5, true, "right");
     text("Customer", 119, 5);
     text(
       (selectedCustomer?.name ?? "No customer").slice(0, 18),
@@ -108,6 +112,7 @@ export function downloadInvoiceReceipt(invoice: Record<string, any>) {
     rule();
     y -= 13;
     summary("Paid Amount", `LKR ${paidAmount.toFixed(2)}`);
+    if (change > 0) summary("Cash Tendered", `LKR ${tenderedTotal.toFixed(2)}`);
     summary("Outstanding Balance", `LKR ${outstandingBalance.toFixed(2)}`);
     if (change > 0) summary("Change", `LKR ${change.toFixed(2)}`);
     summary("Payment method", method);
@@ -166,7 +171,7 @@ export function downloadInvoiceReceipt(invoice: Record<string, any>) {
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${completedInvoice?.invoiceNumber ?? "invoice"}-receipt.pdf`;
+    link.download = `sale-${billNo == null ? 'legacy' : String(billNo).padStart(4, '0')}-receipt.pdf`;
     document.body.appendChild(link);
     link.click();
     link.remove();

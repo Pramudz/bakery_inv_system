@@ -48,6 +48,7 @@ import { InventoryAdjustmentsModule } from './features/inventory-adjustments/inv
 import { InventoryConversionsModule } from './features/inventory-conversions/inventory-conversions.module';
 import { PaymentChannelsModule } from './features/payment-channels/payment-channels.module';
 import { PosRegistersModule } from './features/pos-registers/pos-registers.module';
+import { PosPrintModule } from './features/pos-print/pos-print.module';
 
 
 @Module({
@@ -89,6 +90,7 @@ import { PosRegistersModule } from './features/pos-registers/pos-registers.modul
     PaymentMethodsModule,
     PaymentChannelsModule,
     PosRegistersModule,
+    PosPrintModule,
     InvoicesModule,
     InvoiceRefundsModule,
     SupplierModule,

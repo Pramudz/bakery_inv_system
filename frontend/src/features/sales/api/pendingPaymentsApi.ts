@@ -3,6 +3,10 @@ import { apiClient } from '../../../services/apiClient';
 export type PendingInvoice = {
   invoiceId: number;
   invoiceNumber: string;
+  businessDate?: string | null;
+  printedLocationCode?: string | null;
+  printedRegisterCode?: string | null;
+  billNo?: number | null;
   invoiceDate: string;
   grandTotal: string;
   paidAmount: string;
@@ -41,6 +45,8 @@ export type ReceivePaymentInput = {
 export const pendingPaymentsApi = {
   list: () => apiClient.get<PendingInvoice[]>('/invoices/pending-payments'),
   history: () => apiClient.get<PaymentReceipt[]>('/invoices/payment-receipts'),
+  page: (page: number, limit: number, search: string, status: string) => apiClient.get<{ items: PendingInvoice[]; total: number; stats: { outstanding: number; partiallyPaid: number; unpaid: number } }>(`/invoices/pending-payments/page?${new URLSearchParams({ page: String(page), limit: String(limit), search, status })}`),
+  historyPage: (page: number, limit: number, search: string) => apiClient.get<{ items: PaymentReceipt[]; total: number; stats: { received: number } }>(`/invoices/payment-receipts/page?${new URLSearchParams({ page: String(page), limit: String(limit), search })}`),
   receive: (id: number, data: ReceivePaymentInput) =>
     apiClient.post<Omit<PaymentReceipt, 'invoice' | 'paymentMethod'>>(`/invoices/${id}/payments`, data),
 };

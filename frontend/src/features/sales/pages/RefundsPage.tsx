@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { invoiceAdjustmentsApi } from '../api/invoiceAdjustmentsApi';
 import { invoiceRefundsApi } from '../api/invoiceRefundsApi';
 import { invoicesApi } from '../api/invoicesApi';
+import { posPrintStatusApi } from '../api/posPrintStatusApi';
 import { paymentMethodsApi } from '../api/paymentMethodsApi';
 import { paymentChannelsApi } from '../api/paymentChannelsApi';
 import { SalesBadge } from './SalesUi';
@@ -13,10 +14,16 @@ type CorrectionMode = 'ITEM' | 'DISCOUNT';
 const money = (value: unknown) => Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[character]!);
 
+const saleReference = (sale: any) => sale?.billNo == null ? 'Legacy sale' : `${sale.businessDate} / ${sale.printedLocationCode} / ${sale.printedRegisterCode} / ${String(sale.billNo).padStart(4, '0')}`;
+const refundReference = (refund: any) => refund.refundNo == null ? 'Legacy refund' : `${refund.businessDate} / ${refund.printedLocationCode} / ${String(refund.refundNo).padStart(4, '0')}`;
+
 export function RefundsPage() {
   const queryClient = useQueryClient();
   const [params] = useSearchParams();
-  const [lookup, setLookup] = useState('');
+  const [receiptDate, setReceiptDate] = useState('');
+  const [locationCode, setLocationCode] = useState('');
+  const [registerCode, setRegisterCode] = useState('');
+  const [billNo, setBillNo] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [mode, setMode] = useState<CorrectionMode>('ITEM');
   const [quantities, setQuantities] = useState<Record<number, number>>({});
@@ -33,20 +40,28 @@ export function RefundsPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [historyMode, setHistoryMode] = useState<'REFUNDS' | 'ADJUSTMENTS'>('REFUNDS');
+  const [historySearch, setHistorySearch] = useState('');
   const [refundKey, setRefundKey] = useState(() => crypto.randomUUID());
+  const [completedRefund, setCompletedRefund] = useState<any>(null);
+  const completedPreview = useRef<HTMLIFrameElement>(null);
+  const completedPrintStatus = useQuery({
+    queryKey: ['pos-print-status', 'REFUND', completedRefund?.invoiceRefundId],
+    queryFn: () => posPrintStatusApi.get('REFUND', completedRefund.invoiceRefundId),
+    enabled: Boolean(completedRefund?.invoiceRefundId),
+    refetchInterval: (query) => ['PENDING', 'CLAIMED'].includes(query.state.data?.status ?? '') ? 3000 : false,
+  });
 
-  const invoices = useQuery({ queryKey: ['invoices'], queryFn: invoicesApi.list });
   const invoice = useQuery({ queryKey: ['refundable-invoice', selectedId], queryFn: () => invoicesApi.refundable(selectedId!), enabled: selectedId !== null });
   const methods = useQuery({ queryKey: ['payment-methods'], queryFn: paymentMethodsApi.list });
   const channels = useQuery({ queryKey: ['payment-channels', 'active'], queryFn: () => paymentChannelsApi.list(true) });
-  const refunds = useQuery({ queryKey: ['invoice-refunds'], queryFn: invoiceRefundsApi.list });
+  const refunds = useQuery({ queryKey: ['invoice-refunds', page, limit, historySearch], queryFn: () => invoiceRefundsApi.page(page, limit, historySearch) });
   const adjustments = useQuery({ queryKey: ['invoice-adjustments'], queryFn: invoiceAdjustmentsApi.list });
   const historyQuery = historyMode === 'REFUNDS' ? refunds : adjustments;
-  const total = historyQuery.data?.length ?? 0;
+  const total = historyMode === 'REFUNDS' ? refunds.data?.total ?? 0 : adjustments.data?.length ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / limit));
   const currentPage = Math.min(page, totalPages);
   const start = (currentPage - 1) * limit;
-  const pagedRefunds = (refunds.data ?? []).slice(start, start + limit);
+  const pagedRefunds = refunds.data?.items ?? [];
   const pagedAdjustments = (adjustments.data ?? []).slice(start, start + limit);
   const visiblePages = [...new Set([1, currentPage - 1, currentPage, currentPage + 1, totalPages])]
     .filter((number) => number >= 1 && number <= totalPages)
@@ -58,7 +73,12 @@ export function RefundsPage() {
     if (id > 0) setSelectedId(id);
   }, [params]);
   useEffect(() => {
-    if (invoice.data) setLookup(invoice.data.invoiceNumber);
+    if (invoice.data?.businessDate) {
+      setReceiptDate(invoice.data.businessDate);
+      setLocationCode(invoice.data.printedLocationCode ?? '');
+      setRegisterCode(invoice.data.printedRegisterCode ?? '');
+      setBillNo(String(invoice.data.billNo ?? ''));
+    }
   }, [invoice.data]);
   useEffect(() => {
     if (!paymentMethodId) {
@@ -70,9 +90,10 @@ export function RefundsPage() {
   const selectedLine = (invoice.data?.details ?? []).find((line: any) => line.invoiceDetailId === selectedLineId);
   const selectedMethod = (methods.data ?? []).find((method) => Number(method.paymentMethodId) === Number(paymentMethodId));
   const itemRefundTotal = useMemo(() => (invoice.data?.details ?? []).reduce((sum: number, line: any) => {
-    const ratio = (quantities[line.invoiceDetailId] ?? 0) / Number(line.quantity);
+    const quantity = quantities[line.invoiceDetailId] ?? 0;
+    const ratio = quantity / Number(line.quantity);
     const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
-    return round(sum + round(Number(line.grossTotal) * ratio) - round(Number(line.discountAmount) * ratio));
+    return round(sum + (quantity === Number(line.refundableQuantity) ? Number(line.refundableAmount) : round(Number(line.grossTotal) * ratio) - round(Number(line.discountAmount) * ratio)));
   }, 0), [invoice.data, quantities]);
   const remainingLines = (invoice.data?.details ?? []).filter((line: any) => Number(line.refundableQuantity) > 0);
   const fullRefund = mode === 'ITEM' && remainingLines.length > 0 && remainingLines.every((line: any) => quantities[line.invoiceDetailId] === Number(line.refundableQuantity));
@@ -99,12 +120,13 @@ export function RefundsPage() {
   const resetWork = () => {
     setQuantities({}); setStockReturns({}); setSelectedLineId(null); setCorrectedPercentage(''); setCorrectedAmount(''); setMessage(''); setRefundKey(crypto.randomUUID());
   };
-  const loadInvoice = () => {
-    const value = lookup.trim().toLowerCase();
-    const match = (invoices.data ?? []).find((row) => String(row.invoiceId) === value || row.invoiceNumber.toLowerCase() === value);
-    if (!match) { setMessage('Invoice was not found. Enter the complete invoice number.'); return; }
-    if (match.invoiceStatus === 'FULLY_REFUNDED') { setMessage('This invoice is already fully refunded.'); return; }
-    setSelectedId(match.invoiceId); setMessage(''); resetWork();
+  const loadInvoice = async () => {
+    setMessage('');
+    try {
+      const match = await invoiceRefundsApi.lookupSale({ businessDate: receiptDate, locationCode, registerCode, billNo: Number(billNo) });
+      if (match.invoiceStatus === 'FULLY_REFUNDED') { setMessage('This sale is already fully refunded.'); return; }
+      setSelectedId(match.invoiceId); resetWork();
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Sale receipt was not found.'); }
   };
   const selectDiscountLine = (line: any) => {
     setSelectedLineId(line.invoiceDetailId);
@@ -126,7 +148,7 @@ export function RefundsPage() {
       details: (invoice.data?.details ?? []).filter((line: any) => (quantities[line.invoiceDetailId] ?? 0) > 0).map((line: any) => ({ invoiceDetailId: line.invoiceDetailId, quantity: quantities[line.invoiceDetailId], returnToStock: stockReturns[line.invoiceDetailId] !== false })),
       payments: paymentMethodId && Number(settlementAmount) > 0 ? [{ paymentMethodId: Number(paymentMethodId), amount: Number(settlementAmount), paymentChannelId: paymentChannelId ? Number(paymentChannelId) : undefined, referenceNumber: paymentReference.trim() || undefined }] : [],
     }),
-    onSuccess: (result) => { resetWork(); setMessage(`Refund ${result.refundNumber} completed successfully.`); refreshData(); },
+    onSuccess: (result) => { setCompletedRefund(result); resetWork(); setMessage(`Refund ${result.refundNo == null ? result.refundNumber : String(result.refundNo).padStart(4, '0')} completed successfully.`); refreshData(); },
   });
   const createAdjustment = useMutation({
     mutationFn: () => invoiceAdjustmentsApi.create({ invoiceId: selectedId, invoiceDetailId: selectedLineId, reason, correctedDiscountAmount: Number(correctedAmount), paymentMethodId: paymentMethodId ? Number(paymentMethodId) : undefined }),
@@ -143,12 +165,22 @@ export function RefundsPage() {
         setMessage(`Settlement must be between 0 and LKR ${money(settlementLimit)}.`);
         return;
       }
-      if (fullRefund && !window.confirm(`Fully refund all remaining items on ${invoice.data?.invoiceNumber}?\nItem refund total: LKR ${money(correctionTotal)}\nMoney returned now: LKR ${money(payout)}\nStock will be restored only for checked Return Stock items.`)) return;
+      if (fullRefund && !window.confirm(`Fully refund all remaining items on Bill No ${invoice.data?.billNo == null ? 'legacy sale' : String(invoice.data.billNo).padStart(4, '0')}?\nItem refund total: LKR ${money(correctionTotal)}\nMoney returned now: LKR ${money(payout)}\nStock will be restored only for checked Return Stock items.`)) return;
       createRefund.mutate();
     } else createAdjustment.mutate();
   };
   const pending = createRefund.isPending || createAdjustment.isPending;
   const error = createRefund.error || createAdjustment.error;
+  const refundReceiptHtml = (record: any, copy = true) => {
+    const receipt = record.receiptSnapshot;
+    if (!receipt) return '<!doctype html><html><body><p>Original refund receipt was not archived for this legacy refund.</p></body></html>';
+    const field = (label: string, value: unknown) => `<div class="field"><span>${escapeHtml(label)}</span><b>${escapeHtml(value ?? '—')}</b></div>`;
+    const date = String(receipt.businessDate ?? '').split('-').reverse().join('/');
+    const time = receipt.issuedAt ? new Date(receipt.issuedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: receipt.header?.timeZone ?? 'Asia/Colombo' }) : '';
+    const original = receipt.originalSale;
+    const items = (receipt.details ?? []).map((line: any) => `<div class="item"><strong>${escapeHtml(line.product?.productName)}</strong><small>${escapeHtml(line.product?.sku)}</small><div>${escapeHtml(line.quantity)} × ${escapeHtml(money(line.unitPrice))} − ${escapeHtml(money(line.discountAmount))}<b>${escapeHtml(money(line.refundAmount))}</b></div></div>`).join('');
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Refund ${escapeHtml(receipt.refundNo)}</title><style>@page{size:80mm auto;margin:3mm}*{box-sizing:border-box}body{font:11px Arial,sans-serif;width:72mm;max-width:100%;margin:0 auto;color:#111}header{text-align:center;border-bottom:1px dashed #555;padding-bottom:8px}header h1{font-size:17px;margin:0}header h2{font-size:14px;margin:8px 0 0}header small{display:block;overflow-wrap:anywhere}.field{display:flex;justify-content:space-between;gap:10px;margin:5px 0}.field b{text-align:right;overflow-wrap:anywhere}.section{border-top:1px dashed #555;margin-top:9px;padding-top:7px}.item{border-top:1px dotted #aaa;padding:6px 0;overflow-wrap:anywhere}.item small{display:block}.item div{display:flex;justify-content:space-between;gap:5px}.total{font-size:14px;font-weight:bold}@media print{body{width:72mm}}</style></head><body><header><h1>${escapeHtml(receipt.header?.companyName)}</h1><strong>${escapeHtml(receipt.header?.locationName)}</strong>${(receipt.header?.locationAddress ?? []).map((line: string) => `<small>${escapeHtml(line)}</small>`).join('')}${receipt.header?.locationPhone ? `<small>Tel: ${escapeHtml(receipt.header.locationPhone)}</small>` : ''}<h2>REFUND RECEIPT${copy ? ' - COPY' : ''}</h2></header>${field('Date', `${date} ${time}`)}${field('Location', receipt.printedLocationCode)}${receipt.printedRegisterCode ? field('POS/Register', receipt.printedRegisterCode) : ''}${field('Refund No', receipt.refundNo == null ? 'Legacy' : String(receipt.refundNo).padStart(4, '0'))}${field('Processed by', `${receipt.header?.cashierCode ?? ''} ${receipt.header?.cashierName ?? ''}`)}<div class="section"><strong>Original sale</strong>${original ? `${field('Date', String(original.businessDate).split('-').reverse().join('/'))}${field('Location', original.locationCode)}${field('POS/Register', original.registerCode)}${field('Bill No', String(original.billNo).padStart(4, '0'))}` : '<p>Legacy sale: printed bill reference unavailable.</p>'}</div><div class="section">${items}</div><div class="section">${field('Subtotal', `LKR ${money(receipt.subtotal)}`)}${field('Discount', `LKR ${money(receipt.discountTotal)}`)}<div class="total">${field('Refund Total', `LKR ${money(receipt.refundTotal)}`)}</div>${(receipt.payments ?? []).map((payment: any) => field(payment.paymentMethod?.paymentMethodName ?? 'Payment', `LKR ${money(payment.amount)}`)).join('')}${field('Reason', receipt.reason)}</div></body></html>`;
+  };
   const receiptHtml = (documentType: 'REFUND' | 'ADJUSTMENT', record: any) => {
     const isRefund = documentType === 'REFUND';
     const number = isRefund ? record.refundNumber : record.adjustmentNumber;
@@ -159,7 +191,20 @@ export function RefundsPage() {
   };
   const outputReceipt = async (documentType: 'REFUND' | 'ADJUSTMENT', row: any, printOnly: boolean) => {
     const record = documentType === 'REFUND' ? await invoiceRefundsApi.get(row.invoiceRefundId) : row;
-    const isRefund = documentType === 'REFUND';
+    if (documentType === 'REFUND') {
+      await invoiceRefundsApi.reprint(record.invoiceRefundId);
+      const html = refundReceiptHtml(record);
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      if (printOnly) {
+        const frame = document.createElement('iframe'); frame.style.position = 'fixed'; frame.style.width = '1px'; frame.style.height = '1px'; frame.style.opacity = '0'; frame.src = url;
+        frame.onload = () => { frame.contentWindow?.focus(); frame.contentWindow?.print(); setTimeout(() => { frame.remove(); URL.revokeObjectURL(url); }, 60000); };
+        document.body.appendChild(frame);
+      } else {
+        const link = document.createElement('a'); link.href = url; link.download = `refund-${record.refundNo ?? record.invoiceRefundId}-receipt.html`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      return;
+    }
+    const isRefund = (documentType as 'REFUND' | 'ADJUSTMENT') === 'REFUND';
     const number = isRefund ? record.refundNumber : record.adjustmentNumber;
     const details = isRefund ? (record.details ?? []) : [record.invoiceDetail];
     const pageWidth = 226.77, pageHeight = 430 + details.length * 28;
@@ -215,10 +260,20 @@ export function RefundsPage() {
   return <div>
     <div className="page-head"><div><div className="eyebrow">SALES / CORRECTIONS</div><h1>Invoice Correction</h1><p>Load one invoice and correct its items, quantities or discounts.</p></div></div>
     <div className="card correction-workbench">
-      <div className="correction-load"><label className="field"><span>Invoice number</span><input className="control" value={lookup} onChange={(event) => setLookup(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') loadInvoice(); }} placeholder="INV-20260820-000001" list="invoice-options"/></label><datalist id="invoice-options">{(invoices.data ?? []).filter((row) => row.invoiceStatus !== 'FULLY_REFUNDED').map((row) => <option key={row.invoiceId} value={row.invoiceNumber}>{row.customer?.customerName ?? 'Walk-in Customer'}</option>)}</datalist><button className="btn btn-primary" onClick={loadInvoice} disabled={invoices.isLoading}>Load Invoice</button><button className="btn btn-secondary" onClick={() => { setLookup(''); setSelectedId(null); resetWork(); }}>Clear</button></div>
+      <div className="correction-load">
+        <label className="field"><span>Date</span><input className="control" type="date" value={receiptDate} onChange={(event) => setReceiptDate(event.target.value)}/></label>
+        <label className="field"><span>Location</span><input className="control" value={locationCode} onChange={(event) => setLocationCode(event.target.value.toUpperCase())} placeholder="BANDA"/></label>
+        <label className="field"><span>POS/Register</span><input className="control" value={registerCode} onChange={(event) => setRegisterCode(event.target.value.toUpperCase())} placeholder="POS1 or MASTER"/></label>
+        <label className="field"><span>Bill No</span><input className="control" type="number" min="1" value={billNo} onChange={(event) => setBillNo(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void loadInvoice(); }} placeholder="0001"/></label>
+        <button className="btn btn-primary" onClick={() => void loadInvoice()}>Find Sale</button>
+        <button className="btn btn-secondary" onClick={() => { setReceiptDate(''); setLocationCode(''); setRegisterCode(''); setBillNo(''); setSelectedId(null); resetWork(); }}>Clear</button>
+      </div>
       {message && <div className={message.includes('successfully') ? 'success-box' : 'error-box'}>{message}</div>}
+      {completedRefund?.receiptSnapshot && <div><h3>Refund receipt preview</h3><iframe ref={completedPreview} title="Refund receipt preview" srcDoc={refundReceiptHtml(completedRefund, false)} style={{ width: '80mm', maxWidth: '100%', height: 520, border: '1px solid #ddd' }}/><div><button className="btn btn-secondary" onClick={() => completedPreview.current?.contentWindow?.print()}>Browser print</button></div>{completedPrintStatus.data && <p role="status">Printer: {completedPrintStatus.data.status === 'BROWSER_ONLY' ? 'Browser print available; no print agent is configured.' : completedPrintStatus.data.status === 'PRINTED' ? 'Sent to the printer.' : completedPrintStatus.data.status === 'FAILED' ? `Print failed: ${completedPrintStatus.data.lastError ?? 'Check the printer.'} Ask an administrator to retry, or use Browser print.` : 'Waiting for the local print agent.'}</p>}</div>}
       {invoice.data && <>
-        <div className="correction-invoice-info"><div><span>Invoice</span><strong>{invoice.data.invoiceNumber}</strong></div><div><span>Date</span><strong>{new Date(invoice.data.invoiceDate).toLocaleString()}</strong></div><div><span>Customer</span><strong>{invoice.data.customer?.customerName ?? 'Walk-in Customer'}</strong></div><div><span>Location</span><strong>{invoice.data.location?.name}</strong></div><div><span>Status</span><SalesBadge status={invoice.data.invoiceStatus.replaceAll('_', ' ')}/></div></div>
+        <div className="correction-invoice-info"><div><span>Bill No</span><strong>{invoice.data.billNo == null ? 'Legacy' : String(invoice.data.billNo).padStart(4, '0')}</strong></div><div><span>Date</span><strong>{invoice.data.businessDate ?? new Date(invoice.data.invoiceDate).toLocaleDateString()}</strong></div><div><span>Location</span><strong>{invoice.data.printedLocationCode ?? invoice.data.location?.name}</strong></div><div><span>POS/Register</span><strong>{invoice.data.printedRegisterCode ?? '—'}</strong></div><div><span>Customer</span><strong>{invoice.data.customer?.customerName ?? 'Walk-in Customer'}</strong></div><div><span>Status</span><SalesBadge status={invoice.data.invoiceStatus.replaceAll('_', ' ')}/></div></div>
+        <p>Original paid: LKR {money(invoice.data.originalPaymentPosition?.paidAmount)} · Original credit balance: LKR {money(invoice.data.originalPaymentPosition?.balanceAmount)} · Available cash/card refund: LKR {money(invoice.data.refundablePaymentAmount)}</p>
+        {!!invoice.data.previousRefunds?.length && <div><strong>Previous refunds</strong><ul>{invoice.data.previousRefunds.map((previous: any) => <li key={previous.invoiceRefundId}>{previous.businessDate ?? ''} / {previous.printedLocationCode ?? ''} / {previous.refundNo == null ? previous.refundNumber : String(previous.refundNo).padStart(4, '0')} · LKR {money(previous.refundTotal)}</li>)}</ul></div>}
         <div className="correction-mode"><button className={mode === 'ITEM' ? 'active' : ''} onClick={() => { setMode('ITEM'); resetWork(); }}><b>Item / Quantity</b><small>Extra items, excess quantity or returns</small></button><button className={mode === 'DISCOUNT' ? 'active' : ''} onClick={() => { setMode('DISCOUNT'); resetWork(); }}><b>Discount % / Rs</b><small>Financial correction without stock movement</small></button></div>
         <div className="sales-card-head"><button type="button" className="btn btn-danger-soft" disabled={pending || invoice.isFetching || !remainingLines.length} onClick={selectFullRefund}>Full Refund</button><span>Select all remaining items, then review and confirm below.</span></div>
         <div className="correction-body"><div className="correction-lines"><table className="table"><thead>{mode === 'ITEM' ? <tr><th>Product</th><th>Sold</th><th>Available</th><th>Refund Qty</th><th>Return Stock</th><th className="right">Refund</th></tr> : <tr><th></th><th>Product</th><th>Gross</th><th>Original %</th><th>Original Rs</th><th>Correct %</th><th>Correct Rs</th><th className="right">Difference</th></tr>}</thead><tbody>{invoice.data.details.map((line: any) => mode === 'ITEM' ? <tr key={line.invoiceDetailId}><td><strong>{line.product.productName}</strong><small className="refund-code">{line.product.sku}</small></td><td>{Number(line.quantity)}</td><td>{Number(line.refundableQuantity)}</td><td><input className="control correction-number" type="number" min="0" max={Math.floor(Number(line.refundableQuantity))} step="1" inputMode="numeric" value={quantities[line.invoiceDetailId] || ''} onChange={(event) => setQuantities((values) => ({ ...values, [line.invoiceDetailId]: Math.min(Math.floor(Number(line.refundableQuantity)), Math.max(0, Math.floor(Number(event.target.value) || 0))) }))}/></td><td><label className="check"><input type="checkbox" checked={stockReturns[line.invoiceDetailId] !== false} onChange={(event) => setStockReturns((values) => ({ ...values, [line.invoiceDetailId]: event.target.checked }))}/> Yes</label></td><td className="right"><strong>LKR {money((quantities[line.invoiceDetailId] ?? 0) * Number(line.netTotal) / Number(line.quantity))}</strong></td></tr> : <tr className={selectedLineId === line.invoiceDetailId ? 'selected-row' : ''} key={line.invoiceDetailId}><td><input type="radio" checked={selectedLineId === line.invoiceDetailId} onChange={() => selectDiscountLine(line)}/></td><td><strong>{line.product.productName}</strong><small className="refund-code">{line.product.sku}</small></td><td>{money(line.grossTotal)}</td><td>{Number(line.discountPercentage)}%</td><td>{money(line.discountAmount)}</td><td>{selectedLineId === line.invoiceDetailId ? <input className="control correction-number" type="number" min="0" max="100" step="0.01" value={correctedPercentage} onChange={(event) => changeDiscountPercentage(event.target.value)}/> : '—'}</td><td>{selectedLineId === line.invoiceDetailId ? <input className="control correction-number" type="number" min="0" max={Number(line.grossTotal)} step="0.01" value={correctedAmount} onChange={(event) => changeDiscountAmount(event.target.value)}/> : '—'}</td><td className="right"><strong>{selectedLineId === line.invoiceDetailId ? `LKR ${money(adjustmentTotal)}` : '—'}</strong></td></tr>)}</tbody></table></div>
@@ -227,7 +282,7 @@ export function RefundsPage() {
         {error && <div className="error-box">{(error as Error).message}</div>}
       </>}
     </div>
-    <div className="card correction-history"><div className="sales-card-head"><div><h2>Correction History</h2><p>Previous quantity refunds and discount adjustments.</p></div><div className="correction-tabs"><button className={historyMode === 'REFUNDS' ? 'active' : ''} onClick={() => { setHistoryMode('REFUNDS'); setPage(1); }}>Item Refunds</button><button className={historyMode === 'ADJUSTMENTS' ? 'active' : ''} onClick={() => { setHistoryMode('ADJUSTMENTS'); setPage(1); }}>Discount Corrections</button></div></div>{historyMode === 'REFUNDS' ? <table className="table"><thead><tr><th>Refund</th><th>Invoice</th><th>Customer</th><th>Reason</th><th>Date</th><th className="right">Total</th><th className="right">Receipt</th></tr></thead><tbody>{historyQuery.isLoading ? <tr><td colSpan={7}>Loading history...</td></tr> : historyQuery.isError ? <tr><td colSpan={7}>Unable to load correction history.</td></tr> : !total ? <tr><td colSpan={7}><div className="empty">No records found.</div></td></tr> : pagedRefunds.map((row) => <tr key={row.invoiceRefundId}><td><strong className="sales-id">{row.refundNumber}</strong></td><td>{row.invoice?.invoiceNumber}</td><td>{row.invoice?.customer?.customerName ?? 'Walk-in Customer'}</td><td>{row.reason}</td><td>{new Date(row.refundDate).toLocaleString()}</td><td className="right"><strong>LKR {money(row.refundTotal)}</strong></td><td className="right"><div className="sales-history-actions"><button className="btn btn-edit-soft" onClick={() => outputReceipt('REFUND', row, true)}>Print</button><button className="btn btn-secondary" onClick={() => outputReceipt('REFUND', row, false)}>Download</button></div></td></tr>)}</tbody></table> : <table className="table"><thead><tr><th>Adjustment</th><th>Invoice</th><th>Product</th><th>Type</th><th>Corrected Discount</th><th>Status</th><th className="right">Amount</th><th className="right">Receipt</th></tr></thead><tbody>{historyQuery.isLoading ? <tr><td colSpan={8}>Loading history...</td></tr> : historyQuery.isError ? <tr><td colSpan={8}>Unable to load correction history.</td></tr> : !total ? <tr><td colSpan={8}><div className="empty">No records found.</div></td></tr> : pagedAdjustments.map((row) => <tr key={row.invoiceAdjustmentId}><td><strong className="sales-id">{row.adjustmentNumber}</strong></td><td>{row.invoice?.invoiceNumber}</td><td>{row.invoiceDetail?.product?.productName}</td><td><SalesBadge status={row.adjustmentType}/></td><td>{Number(row.correctedDiscountPercentage)}% / LKR {money(row.correctedDiscountAmount)}</td><td><SalesBadge status={row.status}/></td><td className="right"><strong>LKR {money(row.adjustmentAmount)}</strong></td><td className="right"><div className="sales-history-actions"><button className="btn btn-edit-soft" onClick={() => outputReceipt('ADJUSTMENT', row, true)}>Print</button><button className="btn btn-secondary" onClick={() => outputReceipt('ADJUSTMENT', row, false)}>Download</button></div></td></tr>)}</tbody></table>}
+    <div className="card correction-history"><div className="sales-card-head"><div><h2>Correction History</h2><p>Previous quantity refunds and discount adjustments.</p></div><div className="correction-tabs">{historyMode === "REFUNDS" && <input className="control" aria-label="Search refunds" placeholder="Search number, date, location or customer" value={historySearch} onChange={(event) => { setHistorySearch(event.target.value); setPage(1); }} />}<button className={historyMode === 'REFUNDS' ? 'active' : ''} onClick={() => { setHistoryMode('REFUNDS'); setPage(1); }}>Item Refunds</button><button className={historyMode === 'ADJUSTMENTS' ? 'active' : ''} onClick={() => { setHistoryMode('ADJUSTMENTS'); setPage(1); }}>Discount Corrections</button></div></div>{historyMode === 'REFUNDS' ? <table className="table"><thead><tr><th>Refund</th><th>Invoice</th><th>Customer</th><th>Reason</th><th>Date</th><th className="right">Total</th><th className="right">Receipt</th></tr></thead><tbody>{historyQuery.isLoading ? <tr><td colSpan={7}>Loading history...</td></tr> : historyQuery.isError ? <tr><td colSpan={7}>Unable to load correction history.</td></tr> : !total ? <tr><td colSpan={7}><div className="empty">No records found.</div></td></tr> : pagedRefunds.map((row) => <tr key={row.invoiceRefundId}><td><strong className="sales-id">{refundReference(row)}</strong></td><td>{saleReference(row.invoice)}</td><td>{row.invoice?.customer?.customerName ?? 'Walk-in Customer'}</td><td>{row.reason}</td><td>{new Date(row.refundDate).toLocaleString()}</td><td className="right"><strong>LKR {money(row.refundTotal)}</strong></td><td className="right"><div className="sales-history-actions"><button className="btn btn-edit-soft" onClick={() => outputReceipt('REFUND', row, true)}>Print</button><button className="btn btn-secondary" onClick={() => outputReceipt('REFUND', row, false)}>Download</button></div></td></tr>)}</tbody></table> : <table className="table"><thead><tr><th>Adjustment</th><th>Invoice</th><th>Product</th><th>Type</th><th>Corrected Discount</th><th>Status</th><th className="right">Amount</th><th className="right">Receipt</th></tr></thead><tbody>{historyQuery.isLoading ? <tr><td colSpan={8}>Loading history...</td></tr> : historyQuery.isError ? <tr><td colSpan={8}>Unable to load correction history.</td></tr> : !total ? <tr><td colSpan={8}><div className="empty">No records found.</div></td></tr> : pagedAdjustments.map((row) => <tr key={row.invoiceAdjustmentId}><td><strong className="sales-id">{row.adjustmentNumber}</strong></td><td>{saleReference(row.invoice)}</td><td>{row.invoiceDetail?.product?.productName}</td><td><SalesBadge status={row.adjustmentType}/></td><td>{Number(row.correctedDiscountPercentage)}% / LKR {money(row.correctedDiscountAmount)}</td><td><SalesBadge status={row.status}/></td><td className="right"><strong>LKR {money(row.adjustmentAmount)}</strong></td><td className="right"><div className="sales-history-actions"><button className="btn btn-edit-soft" onClick={() => outputReceipt('ADJUSTMENT', row, true)}>Print</button><button className="btn btn-secondary" onClick={() => outputReceipt('ADJUSTMENT', row, false)}>Download</button></div></td></tr>)}</tbody></table>}
       <div className="toolbar sales-history-pagination">
         <span aria-live="polite">{historyQuery.isLoading ? 'Loading history...' : `Showing ${total ? (currentPage - 1) * limit + 1 : 0}–${Math.min(currentPage * limit, total)} of ${total} records`}</span>
         <nav className="sales-history-page-controls" aria-label="Correction history pagination">

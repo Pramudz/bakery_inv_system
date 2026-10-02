@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantPrincipal } from '../auth/auth.types';
 import { TenantAuthGuard } from '../auth/tenant-auth.guard';
@@ -15,7 +15,10 @@ import { RequirePermission } from '../auth/require-permission.decorator';
 export class InvoiceRefundsController {
   constructor(private readonly service: InvoiceRefundsService) {}
   @Get('invoice-refunds') @RequirePermission('SALES_REFUND_VIEW') list(@CurrentUser() user: TenantPrincipal) { return this.service.list(user); }
+  @Get('invoice-refunds/page') @RequirePermission('SALES_REFUND_VIEW') page(@Query('page') page: string, @Query('limit') limit: string, @Query('search') search: string, @CurrentUser() user: TenantPrincipal) { return this.service.page(user, Number(page), Number(limit), search ?? ''); }
+  @Get('invoice-refunds/sale-lookup') @RequirePermission('SALES_REFUND_VIEW') lookupSale(@Query('businessDate') businessDate: string, @Query('locationCode') locationCode: string, @Query('registerCode') registerCode: string, @Query('billNo') billNo: string, @CurrentUser() user: TenantPrincipal) { return this.service.lookupSale(businessDate, locationCode, registerCode, Number(billNo), user); }
   @Get('invoice-refunds/:id') @RequirePermission('SALES_REFUND_VIEW') get(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.get(id, user); }
+  @Post('invoice-refunds/:id/reprint') @RequirePermission('SALES_REFUND_VIEW') reprint(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.reprint(id, user); }
   @Post('invoice-refunds') @RequirePermission('SALES_REFUND_CREATE') create(@Body() dto: CreateInvoiceRefundDto, @Headers('x-pos-terminal-credential') credential: string | undefined, @CurrentUser() user: TenantPrincipal) { return this.service.create(dto, user, credential); }
   @Get('invoice-adjustments') @RequirePermission('SALES_ADJUSTMENT_VIEW') listAdjustments(@CurrentUser() user: TenantPrincipal) { return this.service.listAdjustments(user); }
   @Post('invoice-adjustments') @RequirePermission('SALES_ADJUSTMENT_CREATE') createAdjustment(@Body() dto: CreateInvoiceAdjustmentDto, @CurrentUser() user: TenantPrincipal) { return this.service.createAdjustment(dto, user); }

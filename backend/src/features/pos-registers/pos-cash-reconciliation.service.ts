@@ -24,6 +24,10 @@ export class PosCashReconciliationService {
 
   async current(credential: string | undefined, user: TenantPrincipal) {
     return this.dataSource.transaction(async (manager) => {
+      if (!credential?.trim()) {
+        const active = await this.posSessions.requireMasterClosingSession(manager, credential, user);
+        return this.summary(manager, active.registerSession, active.cashierSession, PosRegisterMode.MASTER_REGISTER);
+      }
       try {
         const active = await this.posSessions.requireTerminalClosingSession(manager, credential, user);
         return this.summary(manager, active.registerSession, active.cashierSession, PosRegisterMode.TERMINAL_REGISTER);
@@ -226,7 +230,11 @@ export class PosCashReconciliationService {
       reversedPayments: { count: payments.filter((row) => row.isReversed).length, amount: money(payments.filter((row) => row.isReversed).reduce((sum, row) => sum + Number(row.amount), 0)) },
       creditSales: { count: creditInvoices.length, originalTotal: money(creditInvoices.reduce((sum, invoice) => sum + Number(invoice.grandTotal), 0)), originalCreditExtended, outstanding: money(creditInvoices.reduce((sum, invoice) => sum + Number(invoice.balanceAmount), 0)) },
       refunds: { count: refunds.length, total: money(refunds.reduce((sum, refund) => sum + Number(refund.refundTotal), 0)), paid: money(refunds.reduce((sum, refund) => sum + refund.payments.reduce((paymentSum, payment) => paymentSum + Number(payment.amount), 0), 0)) },
-      coveredPayments: payments.map((payment) => ({ invoicePaymentId: Number(payment.invoicePaymentId), paymentMethodType: payment.paymentMethodTypeSnapshot, applied: money(Number(payment.amount)), tendered: money(Number(payment.tenderedAmount)), change: money(Number(payment.changeAmount)), collectionKey: payment.collectionKey ?? null, paidAt: payment.paidAt, isReversed: payment.isReversed })),
+      receiptReferences: {
+        sales: invoices.filter((invoice) => invoice.billNo != null).map((invoice) => ({ businessDate: invoice.businessDate, locationCode: invoice.printedLocationCode, registerCode: invoice.printedRegisterCode, billNo: invoice.billNo })),
+        refunds: refunds.filter((refund) => refund.refundNo != null).map((refund) => ({ businessDate: refund.businessDate, locationCode: refund.printedLocationCode, refundNo: refund.refundNo })),
+      },
+      coveredPayments: payments.map((payment) => ({ invoicePaymentId: Number(payment.invoicePaymentId), saleReceipt: payment.invoice?.billNo == null ? null : { businessDate: payment.invoice.businessDate, locationCode: payment.invoice.printedLocationCode, registerCode: payment.invoice.printedRegisterCode, billNo: payment.invoice.billNo }, paymentMethodType: payment.paymentMethodTypeSnapshot, applied: money(Number(payment.amount)), tendered: money(Number(payment.tenderedAmount)), change: money(Number(payment.changeAmount)), collectionKey: payment.collectionKey ?? null, paidAt: payment.paidAt, isReversed: payment.isReversed })),
       historicalUnattributedExcluded: true, expectedNetContribution, unconfirmedMasterCash: registerMode === PosRegisterMode.MASTER_REGISTER ? expectedNetContribution : null, expectedCash,
       formula: registerMode === PosRegisterMode.MASTER_REGISTER
         ? 'cash receipts (tendered - change) + explicit cash-in movements - explicit cash-out movements; shared master opening balance is excluded from a cashier batch'
