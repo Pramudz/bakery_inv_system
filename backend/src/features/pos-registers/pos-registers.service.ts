@@ -15,6 +15,9 @@ import { PosTerminal } from './pos-terminal.entity';
 import { PosCashRegister } from './pos-cash-register.entity';
 import { PosCashierSession, PosCashierSessionStatus } from './pos-cashier-session.entity';
 import { PosRegisterSession, PosRegisterSessionStatus } from './pos-register-session.entity';
+import { PosCashReconciliation, PosCashReconciliationStatus } from './pos-cash-reconciliation.entity';
+import { PosMasterReconciliation } from './pos-master-reconciliation.entity';
+import { PosListQueryDto } from './dto/pos-list-query.dto';
 
 const ACTIVATION_MINUTES = 10;
 const ACTIVATION_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -23,76 +26,85 @@ const ACTIVATION_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export class PosRegistersService {
   constructor(private readonly dataSource: DataSource) {}
 
-  async locationConfigs(user: TenantPrincipal) {
-    const locations = await this.dataSource.getRepository(Location).find({
-      where: {
-        tenantId: user.tenantId,
-        ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}),
-      },
-      order: { name: 'ASC', locationId: 'ASC' },
-    });
+  async locationConfigs(query: PosListQueryDto, user: TenantPrincipal) {
+    const { page, limit, search } = this.page(query);
+    const builder = this.dataSource.getRepository(Location).createQueryBuilder('location')
+      .where('location.tenant_id = :tenantId', { tenantId: user.tenantId });
+    if (user.accessScope === 'LOCATION') builder.andWhere('location.location_id IN (:...locationIds)', { locationIds: user.assignedLocationIds.length ? user.assignedLocationIds : [-1] });
+    if (query.locationId) builder.andWhere('location.location_id = :locationId', { locationId: query.locationId });
+    if (query.status === 'ACTIVE') builder.andWhere('location.is_active = 1');
+    if (query.status === 'INACTIVE') builder.andWhere('location.is_active = 0');
+    if (search) builder.andWhere('(location.name LIKE :search OR location.code LIKE :search)', { search: `%${search}%` });
+    const [locations, total] = await builder.orderBy('location.name', 'ASC').addOrderBy('location.locationId', 'ASC').skip((page - 1) * limit).take(limit).getManyAndCount();
     const configs = locations.length ? await this.dataSource.getRepository(PosLocationConfig).findBy({
       tenantId: user.tenantId,
       locationId: In(locations.map((location) => location.locationId)),
     }) : [];
     const byLocation = new Map(configs.map((config) => [Number(config.locationId), config]));
-    return locations.map((location) => ({ location, config: byLocation.get(Number(location.locationId)) ?? null }));
+    return { items: locations.map((location) => ({ location, config: byLocation.get(Number(location.locationId)) ?? null })), page, limit, total };
   }
 
   async configureLocation(locationId: number, dto: ConfigurePosLocationDto, user: TenantPrincipal) {
     return this.dataSource.transaction(async (manager) => {
-      await this.location(manager, locationId, user, true);
+      await this.location(manager, locationId, user, true, true);
       const repo = manager.getRepository(PosLocationConfig);
       let config = await repo.findOne({ where: { tenantId: user.tenantId, locationId }, lock: { mode: 'pessimistic_write' } });
-      if (config && config.registerMode !== dto.registerMode) await this.assertNoOpenLocationSession(manager, locationId, user.tenantId);
+      if (config && config.registerMode !== dto.registerMode) await this.assertModeChangeAllowed(manager, locationId, user.tenantId);
       if (!config) config = repo.create({ tenantId: user.tenantId, locationId, registerMode: dto.registerMode });
       else config.registerMode = dto.registerMode;
       return repo.save(config);
     });
   }
 
-  async terminals(user: TenantPrincipal) {
-    const terminals = await this.dataSource.getRepository(PosTerminal).find({
-      where: {
-        tenantId: user.tenantId,
-        ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}),
-      },
-      relations: { location: true },
-      order: { terminalCode: 'ASC', posTerminalId: 'ASC' },
-    });
+  async terminals(query: PosListQueryDto, user: TenantPrincipal) {
+    const { page, limit, search } = this.page(query);
+    const builder = this.dataSource.getRepository(PosTerminal).createQueryBuilder('terminal')
+      .leftJoinAndSelect('terminal.location', 'location')
+      .where('terminal.tenant_id = :tenantId', { tenantId: user.tenantId });
+    if (user.accessScope === 'LOCATION') builder.andWhere('terminal.location_id IN (:...locationIds)', { locationIds: user.assignedLocationIds.length ? user.assignedLocationIds : [-1] });
+    if (query.locationId) builder.andWhere('terminal.location_id = :locationId', { locationId: query.locationId });
+    if (query.status === 'ACTIVE') builder.andWhere('terminal.is_active = 1');
+    if (query.status === 'INACTIVE') builder.andWhere('terminal.is_active = 0');
+    if (search) builder.andWhere('(terminal.terminal_code LIKE :search OR terminal.display_name LIKE :search OR location.name LIKE :search OR location.code LIKE :search)', { search: `%${search}%` });
+    const [terminals, total] = await builder.orderBy('location.name', 'ASC').addOrderBy('terminal.terminalCode', 'ASC').addOrderBy('terminal.posTerminalId', 'ASC').skip((page - 1) * limit).take(limit).getManyAndCount();
     const activePairings = terminals.length ? await this.dataSource.getRepository(PosTerminalPairing).findBy({
       tenantId: user.tenantId,
       posTerminalId: In(terminals.map((terminal) => terminal.posTerminalId)),
       revokedAt: IsNull(),
     }) : [];
     const pairingCounts = activePairings.reduce((counts, pairing) => counts.set(Number(pairing.posTerminalId), (counts.get(Number(pairing.posTerminalId)) ?? 0) + 1), new Map<number, number>());
-    return terminals.map((terminal) => this.terminalView(terminal, pairingCounts.get(Number(terminal.posTerminalId)) ?? 0));
+    return { items: terminals.map((terminal) => this.terminalView(terminal, pairingCounts.get(Number(terminal.posTerminalId)) ?? 0)), page, limit, total };
   }
 
   async createTerminal(dto: CreatePosTerminalDto, user: TenantPrincipal) {
     await this.location(this.dataSource.manager, dto.locationId, user, true);
     const repo = this.dataSource.getRepository(PosTerminal);
     const terminalCode = dto.terminalCode.trim().toUpperCase();
-    if (await repo.findOneBy({ tenantId: user.tenantId, terminalCode })) throw new ConflictException('Terminal code already exists for this tenant.');
+    if (await repo.findOneBy({ tenantId: user.tenantId, locationId: dto.locationId, terminalCode })) throw new ConflictException('Terminal code already exists at this location.');
     try {
       const terminal = await repo.save(repo.create({
         tenantId: user.tenantId,
         locationId: dto.locationId,
         terminalCode,
         displayName: dto.displayName.trim(),
-        isActive: true,
+        isActive: dto.isActive,
       }));
       return this.getTerminalView(Number(terminal.posTerminalId), user);
     } catch (error) {
-      if (this.isDuplicate(error)) throw new ConflictException('Terminal code already exists for this tenant.');
+      if (this.isDuplicate(error)) throw new ConflictException('Terminal code already exists at this location.');
       throw error;
     }
   }
 
   async updateTerminal(id: number, dto: UpdatePosTerminalDto, user: TenantPrincipal) {
     const terminal = await this.terminal(this.dataSource.manager, id, user);
+    const terminalCode = dto.terminalCode.trim().toUpperCase();
+    const duplicate = await this.dataSource.getRepository(PosTerminal).findOneBy({ tenantId: user.tenantId, locationId: terminal.locationId, terminalCode });
+    if (duplicate && Number(duplicate.posTerminalId) !== Number(id)) throw new ConflictException('Terminal code already exists at this location.');
+    terminal.terminalCode = terminalCode;
     terminal.displayName = dto.displayName.trim();
-    await this.dataSource.getRepository(PosTerminal).save(terminal);
+    try { await this.dataSource.getRepository(PosTerminal).save(terminal); }
+    catch (error) { if (this.isDuplicate(error)) throw new ConflictException('Terminal code already exists at this location.'); throw error; }
     return this.getTerminalView(id, user);
   }
 
@@ -122,10 +134,15 @@ export class PosRegistersService {
       await this.assertNoOpenTerminalSession(manager, id, user.tenantId);
       const activePairings = await this.activePairingCount(manager, id);
       if (activePairings) throw new ConflictException('Revoke the terminal pairing before moving the terminal to another location. Reactivation will be required.');
+      const historicalRegister = await manager.getRepository(PosCashRegister).findOneBy({ tenantId: user.tenantId, posTerminalId: id });
+      if (historicalRegister) throw new ConflictException('This terminal has register history at its current location and cannot be moved. Create a new terminal at the destination to preserve historical attribution.');
+      const duplicate = await manager.getRepository(PosTerminal).findOneBy({ tenantId: user.tenantId, locationId: dto.locationId, terminalCode: terminal.terminalCode });
+      if (duplicate && Number(duplicate.posTerminalId) !== Number(id)) throw new ConflictException('Terminal code already exists at the destination location.');
       await manager.getRepository(PosTerminalActivation).update({ posTerminalId: id, tenantId: user.tenantId, consumedAt: IsNull(), revokedAt: IsNull() }, { revokedAt: new Date(), revokedByUserId: user.userId });
       terminal.locationId = dto.locationId;
       terminal.location = destination;
-      await manager.getRepository(PosTerminal).save(terminal);
+      try { await manager.getRepository(PosTerminal).save(terminal); }
+      catch (error) { if (this.isDuplicate(error)) throw new ConflictException('Terminal code already exists at the destination location.'); throw error; }
       return this.terminalView(terminal, 0);
     });
   }
@@ -218,14 +235,18 @@ export class PosRegistersService {
     return { paired: true, pairing: this.pairingView(pairing), terminal: this.terminalView(pairing.terminal, 1) };
   }
 
-  async pairings(terminalId: number, user: TenantPrincipal) {
+  async pairings(terminalId: number, query: PosListQueryDto, user: TenantPrincipal) {
     await this.terminal(this.dataSource.manager, terminalId, user);
-    const rows = await this.dataSource.getRepository(PosTerminalPairing).find({
-      where: { tenantId: user.tenantId, posTerminalId: terminalId },
-      relations: { pairedByUser: true, revokedByUser: true },
-      order: { posTerminalPairingId: 'DESC' },
-    });
-    return rows.map((pairing) => this.pairingView(pairing));
+    const { page, limit, search } = this.page(query);
+    const builder = this.dataSource.getRepository(PosTerminalPairing).createQueryBuilder('pairing')
+      .leftJoinAndSelect('pairing.pairedByUser', 'pairedByUser')
+      .leftJoinAndSelect('pairing.revokedByUser', 'revokedByUser')
+      .where('pairing.tenant_id = :tenantId AND pairing.pos_terminal_id = :terminalId', { tenantId: user.tenantId, terminalId });
+    if (query.status === 'ACTIVE') builder.andWhere('pairing.revoked_at IS NULL');
+    if (query.status === 'REVOKED') builder.andWhere('pairing.revoked_at IS NOT NULL');
+    if (search) builder.andWhere('(pairedByUser.username LIKE :search OR revokedByUser.username LIKE :search OR pairing.revocation_reason LIKE :search)', { search: `%${search}%` });
+    const [rows, total] = await builder.orderBy('pairing.posTerminalPairingId', 'DESC').skip((page - 1) * limit).take(limit).getManyAndCount();
+    return { items: rows.map((pairing) => this.pairingView(pairing)), page, limit, total };
   }
 
   async revokePairing(terminalId: number, pairingId: number, reason: string | undefined, user: TenantPrincipal) {
@@ -263,12 +284,11 @@ export class PosRegistersService {
     return terminal;
   }
 
-  private async location(manager: EntityManager, id: number, user: TenantPrincipal, activeRequired: boolean) {
+  private async location(manager: EntityManager, id: number, user: TenantPrincipal, activeRequired: boolean, lock = false) {
     this.assertLocationAccess(id, user);
-    const location = await manager.getRepository(Location).findOneBy({
-      locationId: id,
-      tenantId: user.tenantId,
-      ...(activeRequired ? { isActive: true } : {}),
+    const location = await manager.getRepository(Location).findOne({
+      where: { locationId: id, tenantId: user.tenantId, ...(activeRequired ? { isActive: true } : {}) },
+      ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
     });
     if (!location) throw new NotFoundException(activeRequired ? 'Active location not found.' : 'Location not found.');
     return location;
@@ -332,9 +352,40 @@ export class PosRegistersService {
     return (candidate.driverError?.code ?? candidate.code) === 'ER_DUP_ENTRY';
   }
 
-  private async assertNoOpenLocationSession(manager: EntityManager, locationId: number, tenantId: number) {
-    const open = await manager.getRepository(PosRegisterSession).findOneBy({ tenantId, locationId, status: In([PosRegisterSessionStatus.OPEN, PosRegisterSessionStatus.PENDING_VERIFICATION, PosRegisterSessionStatus.RECOUNT_REQUIRED]) });
-    if (open) throw new ConflictException('Register mode cannot change while this location has an open register session.');
+  private page(query: PosListQueryDto) {
+    const page = Number.isInteger(query.page) && Number(query.page) > 0 ? Number(query.page) : 1;
+    const requestedLimit = query.pageSize ?? query.limit;
+    const limit = [20, 50, 100].includes(Number(requestedLimit)) ? Number(requestedLimit) : 20;
+    return { page, limit, search: query.search?.trim() ?? '' };
+  }
+
+  private async assertModeChangeAllowed(manager: EntityManager, locationId: number, tenantId: number) {
+    const session = await manager.getRepository(PosRegisterSession).findOne({
+      where: { tenantId, locationId, status: In([PosRegisterSessionStatus.OPEN, PosRegisterSessionStatus.PENDING_VERIFICATION, PosRegisterSessionStatus.RECOUNT_REQUIRED]) },
+      order: { posRegisterSessionId: 'DESC' },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (session?.status === PosRegisterSessionStatus.OPEN) throw new ConflictException('Register mode cannot change while this location has an open register session.');
+    if (session?.status === PosRegisterSessionStatus.PENDING_VERIFICATION) throw new ConflictException('Register mode cannot change while a register session is awaiting verification.');
+    if (session?.status === PosRegisterSessionStatus.RECOUNT_REQUIRED) throw new ConflictException('Register mode cannot change while a register session is awaiting recount.');
+    const cashier = await manager.getRepository(PosCashierSession).findOne({
+      where: { tenantId, locationId, status: In([PosCashierSessionStatus.ACTIVE, PosCashierSessionStatus.PENDING_VERIFICATION, PosCashierSessionStatus.RECOUNT_REQUIRED]) },
+      order: { posCashierSessionId: 'DESC' },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (cashier) throw new ConflictException(`Register mode cannot change while a cashier session is ${cashier.status.toLowerCase().replaceAll('_', ' ')}.`);
+    const cashReconciliation = await manager.getRepository(PosCashReconciliation).findOne({
+      where: { tenantId, locationId, status: PosCashReconciliationStatus.PENDING_VERIFICATION },
+      order: { posCashReconciliationId: 'DESC' },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (cashReconciliation) throw new ConflictException('Register mode cannot change while a cashier reconciliation is awaiting verification.');
+    const masterReconciliation = await manager.getRepository(PosMasterReconciliation).findOne({
+      where: { tenantId, locationId, status: PosCashReconciliationStatus.PENDING_VERIFICATION },
+      order: { posMasterReconciliationId: 'DESC' },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (masterReconciliation) throw new ConflictException('Register mode cannot change while a master reconciliation is awaiting verification.');
   }
 
   private async assertNoOpenTerminalSession(manager: EntityManager, terminalId: number, tenantId: number) {

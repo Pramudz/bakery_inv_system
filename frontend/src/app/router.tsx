@@ -48,6 +48,8 @@ import { InventoryConversionsPage } from "../features/inventory-conversions/page
 import { InventoryConversionScreen } from "../features/inventory-conversions/pages/InventoryConversionScreen";
 import { PosRegistersPage } from "../features/pos-registers/pages/PosRegistersPage";
 import { PosRegisterVerificationPage } from "../features/pos-registers/pages/PosRegisterVerificationPage";
+import { PosMasterClosingPage } from "../features/pos-registers/pages/PosMasterClosingPage";
+import { PosRegisterManagementPage } from "../features/pos-registers/pages/PosRegisterManagementPage";
 
 const tenantChildren = [
   { path: "my-tenant", element: <TenantProfilePage /> },
@@ -84,6 +86,8 @@ const tenantChildren = [
   { path: "card-channels", element: <CardChannelsPage /> },
   { path: "pos-registers", element: <PosRegistersPage /> },
   { path: "pos-register-verification", element: <PosRegisterVerificationPage /> },
+  { path: "pos-master-closing", element: <PosMasterClosingPage /> },
+  { path: "pos-register-management", element: <PosRegisterManagementPage /> },
   { path: "goods-receipts/reverse", element: <GoodsReceiptReversalScreen /> },
   { path: "goods-receipts/direct/new", element: <GoodsReceiptScreen mode="create-direct" /> },
   { path: "goods-receipts/po/new", element: <GoodsReceiptScreen mode="create-po-based" /> },

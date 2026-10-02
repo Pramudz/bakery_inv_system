@@ -9,6 +9,7 @@ import { PaymentMethodType } from '../payment-methods/payment-methods.entity';
 import { SubmitCashCountDto, SubmitMasterCashBatchDto, VerifyCashCountDto } from './dto/cash-reconciliation.dto';
 import { PosCashMovement, PosCashMovementDirection } from './pos-cash-movement.entity';
 import { PosCashReconciliationPayment, PosReconciliationCoverageStatus } from './pos-cash-reconciliation-payment.entity';
+import { PosListQueryDto } from './dto/pos-list-query.dto';
 import { PosCashReconciliation, PosCashReconciliationStatus, PosCashReconciliationType } from './pos-cash-reconciliation.entity';
 import { PosCashierSession, PosCashierSessionStatus } from './pos-cashier-session.entity';
 import { PosRegisterMode } from './pos-location-config.entity';
@@ -111,12 +112,27 @@ export class PosCashReconciliationService {
     });
   }
 
-  async queue(user: TenantPrincipal) {
-    const rows = await this.dataSource.getRepository(PosCashReconciliation).find({
-      where: { tenantId: user.tenantId, status: PosCashReconciliationStatus.PENDING_VERIFICATION, ...(user.accessScope === 'LOCATION' ? { locationId: In(user.assignedLocationIds) } : {}) },
-      relations: { location: true, cashierSession: { cashier: true, terminal: true }, registerSession: { register: true } }, order: { submittedAt: 'ASC' },
-    });
-    return rows.map((row) => this.view(row));
+  async queue(query: PosListQueryDto, user: TenantPrincipal) {
+    const page = Number(query.page) > 0 ? Number(query.page) : 1;
+    const requestedLimit = query.pageSize ?? query.limit;
+    const limit = [20, 50, 100].includes(Number(requestedLimit)) ? Number(requestedLimit) : 20;
+    const search = query.search?.trim();
+    const builder = this.dataSource.getRepository(PosCashReconciliation).createQueryBuilder('reconciliation')
+      .leftJoinAndSelect('reconciliation.location', 'location')
+      .leftJoinAndSelect('reconciliation.cashierSession', 'cashierSession')
+      .leftJoinAndSelect('cashierSession.cashier', 'cashier')
+      .leftJoinAndSelect('cashierSession.terminal', 'terminal')
+      .leftJoinAndSelect('reconciliation.registerSession', 'registerSession')
+      .leftJoinAndSelect('registerSession.register', 'register')
+      .where('reconciliation.tenant_id = :tenantId AND reconciliation.status = :status', { tenantId: user.tenantId, status: PosCashReconciliationStatus.PENDING_VERIFICATION });
+    if (user.accessScope === 'LOCATION') builder.andWhere('reconciliation.location_id IN (:...locationIds)', { locationIds: user.assignedLocationIds.length ? user.assignedLocationIds : [-1] });
+    if (query.locationId) builder.andWhere('reconciliation.location_id = :locationId', { locationId: query.locationId });
+    if (query.mode) builder.andWhere('register.register_mode = :mode', { mode: query.mode });
+    if (query.dateFrom) builder.andWhere('reconciliation.submitted_at >= :dateFrom', { dateFrom: `${query.dateFrom} 00:00:00` });
+    if (query.dateTo) builder.andWhere('reconciliation.submitted_at < DATE_ADD(:dateTo, INTERVAL 1 DAY)', { dateTo: query.dateTo });
+    if (search) builder.andWhere('(location.name LIKE :search OR location.code LIKE :search OR terminal.terminal_code LIKE :search OR terminal.display_name LIKE :search OR cashier.username LIKE :search OR cashier.first_name LIKE :search OR cashier.last_name LIKE :search OR register.display_name LIKE :search)', { search: `%${search}%` });
+    const [rows, total] = await builder.orderBy('reconciliation.submittedAt', 'ASC').addOrderBy('reconciliation.posCashReconciliationId', 'ASC').skip((page - 1) * limit).take(limit).getManyAndCount();
+    return { items: rows.map((row) => this.view(row)), page, limit, total };
   }
 
   async get(id: number, user: TenantPrincipal) { return this.view(await this.load(id, user)); }

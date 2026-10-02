@@ -16,11 +16,16 @@ import { PosCashReconciliation } from './pos-cash-reconciliation.entity';
 import { PosCashReconciliationController } from './pos-cash-reconciliation.controller';
 import { PosCashReconciliationService } from './pos-cash-reconciliation.service';
 import { PosCashReconciliationPayment } from './pos-cash-reconciliation-payment.entity';
+import { PosMasterReconciliation } from './pos-master-reconciliation.entity';
+import { PosMasterClosingController } from './pos-master-closing.controller';
+import { PosMasterClosingService } from './pos-master-closing.service';
+import { PosRegisterManagementController } from './pos-register-management.controller';
+import { PosRegisterManagementService } from './pos-register-management.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PosLocationConfig, PosTerminal, PosTerminalActivation, PosTerminalPairing, PosCashRegister, PosRegisterSession, PosCashierSession, PosCashMovement, PosCashReconciliation, PosCashReconciliationPayment])],
-  controllers: [PosRegistersController, PosTerminalPairingController, PosSessionsController, PosCashReconciliationController],
-  providers: [PosRegistersService, PosSessionsService, PosCashReconciliationService],
-  exports: [PosRegistersService, PosSessionsService, PosCashReconciliationService],
+  imports: [TypeOrmModule.forFeature([PosLocationConfig, PosTerminal, PosTerminalActivation, PosTerminalPairing, PosCashRegister, PosRegisterSession, PosCashierSession, PosCashMovement, PosCashReconciliation, PosCashReconciliationPayment, PosMasterReconciliation])],
+  controllers: [PosRegistersController, PosTerminalPairingController, PosSessionsController, PosCashReconciliationController, PosMasterClosingController, PosRegisterManagementController],
+  providers: [PosRegistersService, PosSessionsService, PosCashReconciliationService, PosMasterClosingService, PosRegisterManagementService],
+  exports: [PosRegistersService, PosSessionsService, PosCashReconciliationService, PosMasterClosingService, PosRegisterManagementService],
 })
 export class PosRegistersModule {}

@@ -7,11 +7,12 @@ import {
   RegisterMode,
   posRegistersApi,
 } from "../api/posRegistersApi";
+import { PosPagination, PosSearch, useDebouncedValue } from "../components/PosListControls";
 import "./pos-registers.css";
 
 type TerminalFormMode = "create" | "edit" | "move";
 
-export function PosRegistersPage() {
+export function PosRegistersPage({ embedded = false, selectedLocationId }: { embedded?: boolean; selectedLocationId?: number }) {
   const client = useQueryClient();
   const { permissions, role } = useAuth();
   const canAdmin =
@@ -29,7 +30,22 @@ export function PosRegistersPage() {
     locationId: "",
     terminalCode: "",
     displayName: "",
+    isActive: true,
   });
+  const [locationSearch, setLocationSearch] = useState("");
+  const [locationPage, setLocationPage] = useState(1);
+  const [locationLimit, setLocationLimit] = useState<20 | 50 | 100>(20);
+  const [terminalSearch, setTerminalSearch] = useState("");
+  const [terminalStatus, setTerminalStatus] = useState("ALL");
+  const [terminalPage, setTerminalPage] = useState(1);
+  const [terminalLimit, setTerminalLimit] = useState<20 | 50 | 100>(20);
+  const [pairingSearch, setPairingSearch] = useState("");
+  const [pairingStatus, setPairingStatus] = useState("ALL");
+  const [pairingPage, setPairingPage] = useState(1);
+  const [pairingLimit, setPairingLimit] = useState<20 | 50 | 100>(20);
+  const debouncedLocationSearch = useDebouncedValue(locationSearch);
+  const debouncedTerminalSearch = useDebouncedValue(terminalSearch);
+  const debouncedPairingSearch = useDebouncedValue(pairingSearch);
   const [issuedCode, setIssuedCode] = useState<{
     terminal: PosTerminal;
     code: string;
@@ -45,18 +61,19 @@ export function PosRegistersPage() {
     retry: false,
   });
   const locations = useQuery({
-    queryKey: ["pos-registers", "locations"],
-    queryFn: posRegistersApi.locationConfigs,
+    queryKey: ["pos-registers", "locations", selectedLocationId, locationPage, locationLimit, debouncedLocationSearch],
+    queryFn: () => posRegistersApi.locationConfigs({ locationId: selectedLocationId, page: locationPage, limit: locationLimit, search: debouncedLocationSearch }),
     enabled: canAdmin,
   });
+  const availableLocations = useQuery({ queryKey: ["pos-register-management", "locations"], queryFn: posRegistersApi.managementLocations, enabled: canAdmin });
   const terminals = useQuery({
-    queryKey: ["pos-registers", "terminals"],
-    queryFn: posRegistersApi.terminals,
+    queryKey: ["pos-registers", "terminals", selectedLocationId, terminalPage, terminalLimit, debouncedTerminalSearch, terminalStatus],
+    queryFn: () => posRegistersApi.terminals({ locationId: selectedLocationId, page: terminalPage, limit: terminalLimit, search: debouncedTerminalSearch, status: terminalStatus }),
     enabled: canAdmin,
   });
   const pairings = useQuery({
-    queryKey: ["pos-registers", "pairings", pairingTerminal?.posTerminalId],
-    queryFn: () => posRegistersApi.pairings(pairingTerminal!.posTerminalId),
+    queryKey: ["pos-registers", "pairings", pairingTerminal?.posTerminalId, pairingPage, pairingLimit, debouncedPairingSearch, pairingStatus],
+    queryFn: () => posRegistersApi.pairings(pairingTerminal!.posTerminalId, { page: pairingPage, limit: pairingLimit, search: debouncedPairingSearch, status: pairingStatus }),
     enabled: canAdmin && Boolean(pairingTerminal),
   });
 
@@ -64,16 +81,24 @@ export function PosRegistersPage() {
     if (!locations.data) return;
     setModeDrafts(
       Object.fromEntries(
-        locations.data.map((row) => [
+        locations.data.items.map((row) => [
           row.location.locationId,
           row.config?.registerMode ?? "",
         ]),
       ),
     );
   }, [locations.data]);
+  useEffect(() => setLocationPage(1), [debouncedLocationSearch, selectedLocationId]);
+  useEffect(() => setTerminalPage(1), [debouncedTerminalSearch, terminalStatus, selectedLocationId]);
+  useEffect(() => setPairingPage(1), [debouncedPairingSearch, pairingStatus, pairingTerminal?.posTerminalId]);
+  const displayedLocations = locations.data?.items ?? [];
+  const displayedTerminals = terminals.data?.items ?? [];
 
   const refreshAdmin = () => {
     void client.invalidateQueries({ queryKey: ["pos-registers"] });
+    void client.invalidateQueries({ queryKey: ["pos-register-management"] });
+    void client.invalidateQueries({ queryKey: ["pos-register-session"] });
+    void client.invalidateQueries({ queryKey: ["billing-locations"] });
   };
   const pair = useMutation({
     mutationFn: () =>
@@ -93,6 +118,10 @@ export function PosRegistersPage() {
       mode: RegisterMode;
     }) => posRegistersApi.configureLocation(locationId, mode),
     onSuccess: refreshAdmin,
+    onError: (_error, variables) => {
+      const persisted = locations.data?.items.find((row) => Number(row.location.locationId) === Number(variables.locationId));
+      setModeDrafts((drafts) => ({ ...drafts, [variables.locationId]: persisted?.config?.registerMode ?? "" }));
+    },
   });
   const saveTerminal = useMutation({
     mutationFn: async () => {
@@ -101,10 +130,12 @@ export function PosRegistersPage() {
           locationId: Number(terminalForm.locationId),
           terminalCode: terminalForm.terminalCode.trim().toUpperCase(),
           displayName: terminalForm.displayName.trim(),
+          isActive: terminalForm.isActive,
         });
       if (formMode === "edit" && editingTerminal)
         return posRegistersApi.updateTerminal(
           editingTerminal.posTerminalId,
+          terminalForm.terminalCode.trim().toUpperCase(),
           terminalForm.displayName.trim(),
         );
       if (formMode === "move" && editingTerminal)
@@ -160,17 +191,18 @@ export function PosRegistersPage() {
   const closeTerminalForm = () => {
     setFormMode(null);
     setEditingTerminal(null);
-    setTerminalForm({ locationId: "", terminalCode: "", displayName: "" });
+    setTerminalForm({ locationId: "", terminalCode: "", displayName: "", isActive: true });
     saveTerminal.reset();
   };
   const openCreate = () => {
     setEditingTerminal(null);
     setTerminalForm({
-      locationId: locations.data?.[0]
-        ? String(locations.data[0].location.locationId)
+      locationId: selectedLocationId ? String(selectedLocationId) : availableLocations.data?.[0]
+        ? String(availableLocations.data[0].locationId)
         : "",
       terminalCode: "",
       displayName: "",
+      isActive: true,
     });
     setFormMode("create");
   };
@@ -180,6 +212,7 @@ export function PosRegistersPage() {
       locationId: String(terminal.locationId),
       terminalCode: terminal.terminalCode,
       displayName: terminal.displayName,
+      isActive: terminal.isActive,
     });
     setFormMode("edit");
   };
@@ -189,6 +222,7 @@ export function PosRegistersPage() {
       locationId: String(terminal.locationId),
       terminalCode: terminal.terminalCode,
       displayName: terminal.displayName,
+      isActive: terminal.isActive,
     });
     setFormMode("move");
   };
@@ -204,7 +238,7 @@ export function PosRegistersPage() {
 
   return (
     <div className="pos-register-page">
-      <div className="page-head">
+      {!embedded && <div className="page-head">
         <div>
           <div className="eyebrow">SALES / POS SETUP</div>
           <h1>POS Registers</h1>
@@ -218,7 +252,7 @@ export function PosRegistersPage() {
             + New Terminal
           </button>
         )}
-      </div>
+      </div>}
 
       <section className="card pos-pairing-card">
         <div>
@@ -301,6 +335,7 @@ export function PosRegistersPage() {
                   explicitly saves a mode.
                 </p>
               </div>
+              {!selectedLocationId && <PosSearch value={locationSearch} onChange={setLocationSearch} placeholder="Search locations" />}
             </div>
             {locations.isError && (
               <div className="error-box">{locations.error.message}</div>
@@ -320,7 +355,7 @@ export function PosRegistersPage() {
                     <tr>
                       <td colSpan={4}>Loading locations...</td>
                     </tr>
-                  ) : !(locations.data ?? []).length ? (
+                  ) : !displayedLocations.length ? (
                     <tr>
                       <td colSpan={4}>
                         <div className="empty">
@@ -329,7 +364,7 @@ export function PosRegistersPage() {
                       </td>
                     </tr>
                   ) : (
-                    (locations.data ?? []).map(({ location, config }) => (
+                    displayedLocations.map(({ location, config }) => (
                       <tr key={location.locationId}>
                         <td>
                           <strong>{location.name}</strong>
@@ -402,6 +437,7 @@ export function PosRegistersPage() {
                 </tbody>
               </table>
             </div>
+            {locations.data && <PosPagination page={locationPage} limit={locationLimit} total={locations.data.total} onPage={setLocationPage} onLimit={setLocationLimit} />}
             {configure.isError && (
               <div className="error-box">{configure.error.message}</div>
             )}
@@ -416,10 +452,9 @@ export function PosRegistersPage() {
                   cashier, drawer, card machine, or register session.
                 </p>
               </div>
-              <button className="btn btn-secondary" onClick={refreshAdmin}>
-                Refresh
-              </button>
+              <div className="pos-card-actions"><button className="btn btn-primary" onClick={openCreate}>+ Create terminal</button><button className="btn btn-secondary" onClick={refreshAdmin}>Refresh</button></div>
             </div>
+            <div className="pos-list-tools"><PosSearch value={terminalSearch} onChange={setTerminalSearch} placeholder="Search code, name, or location" /><select className="control" value={terminalStatus} onChange={(event) => setTerminalStatus(event.target.value)}><option value="ALL">All statuses</option><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive</option></select></div>
             {(terminals.isError || status.isError || issue.isError) && (
               <div className="error-box">
                 {terminals.error?.message ??
@@ -444,7 +479,7 @@ export function PosRegistersPage() {
                     <tr>
                       <td colSpan={6}>Loading terminals...</td>
                     </tr>
-                  ) : !(terminals.data ?? []).length ? (
+                  ) : !displayedTerminals.length ? (
                     <tr>
                       <td colSpan={6}>
                         <div className="empty">
@@ -453,7 +488,7 @@ export function PosRegistersPage() {
                       </td>
                     </tr>
                   ) : (
-                    (terminals.data ?? []).map((terminal) => (
+                    displayedTerminals.map((terminal) => (
                       <tr key={terminal.posTerminalId}>
                         <td>
                           <span className="code-chip">
@@ -547,6 +582,7 @@ export function PosRegistersPage() {
                 </tbody>
               </table>
             </div>
+            {terminals.data && <PosPagination page={terminalPage} limit={terminalLimit} total={terminals.data.total} onPage={setTerminalPage} onLimit={setTerminalLimit} />}
           </section>
         </>
       )}
@@ -581,20 +617,19 @@ export function PosRegistersPage() {
                     }
                   >
                     <option value="">Choose location</option>
-                    {(locations.data ?? [])
-                      .filter((row) => row.location.isActive)
-                      .map((row) => (
+                    {(availableLocations.data ?? [])
+                      .map((location) => (
                         <option
-                          key={row.location.locationId}
-                          value={row.location.locationId}
+                          key={location.locationId}
+                          value={location.locationId}
                         >
-                          {row.location.name}
+                          {location.name}
                         </option>
                       ))}
                   </select>
                 </label>
               )}
-              {formMode === "create" && (
+              {formMode !== "move" && (
                 <label className="field">
                   <span>Stable terminal code</span>
                   <input
@@ -631,12 +666,14 @@ export function PosRegistersPage() {
                   />
                 </label>
               )}
+              {formMode === "create" && <label className="field checkbox-field"><input type="checkbox" checked={terminalForm.isActive} onChange={(event) => setTerminalForm({ ...terminalForm, isActive: event.target.checked })} /><span>Active and available for pairing</span></label>}
             </div>
             {formMode === "move" && (
               <p className="pending-note">
-                Moving is explicit and allowed only after all pairings are
-                revoked. A new activation code will be required at the
-                destination.
+                Moving requires all pairings to be revoked and no register
+                history for this terminal. If it has been used for a register,
+                create a new terminal at the destination to preserve the old
+                location's records. A moved terminal needs a new activation code.
               </p>
             )}
             {saveTerminal.isError && (
@@ -706,10 +743,11 @@ export function PosRegistersPage() {
         open={Boolean(pairingTerminal)}
         onClose={() => setPairingTerminal(null)}
         title="Terminal pairings"
-        subtitle={pairingTerminal?.terminalCode}
+        subtitle={pairingTerminal ? `${pairingTerminal.location?.name ?? "Location"} · ${pairingTerminal.terminalCode}` : undefined}
         wide
       >
         <div className="modal-body">
+          <div className="pos-list-tools"><PosSearch value={pairingSearch} onChange={setPairingSearch} placeholder="Search pairing history" /><select className="control" value={pairingStatus} onChange={(event) => setPairingStatus(event.target.value)}><option value="ALL">All statuses</option><option value="ACTIVE">Active</option><option value="REVOKED">Revoked</option></select></div>
           <table className="table">
             <thead>
               <tr>
@@ -725,12 +763,12 @@ export function PosRegistersPage() {
                 <tr>
                   <td colSpan={5}>Loading pairings...</td>
                 </tr>
-              ) : !(pairings.data ?? []).length ? (
+              ) : !pairings.data?.items.length ? (
                 <tr>
                   <td colSpan={5}>No pairing history.</td>
                 </tr>
               ) : (
-                (pairings.data ?? []).map((pairing) => (
+                pairings.data.items.map((pairing) => (
                   <tr key={pairing.posTerminalPairingId}>
                     <td>{new Date(pairing.pairedAt).toLocaleString()}</td>
                     <td>
@@ -780,6 +818,7 @@ export function PosRegistersPage() {
               )}
             </tbody>
           </table>
+          {pairings.data && <PosPagination page={pairingPage} limit={pairingLimit} total={pairings.data.total} onPage={setPairingPage} onLimit={setPairingLimit} />}
           {(pairings.isError || revoke.isError) && (
             <div className="error-box">
               {pairings.error?.message ?? revoke.error?.message}

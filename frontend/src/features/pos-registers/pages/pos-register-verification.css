@@ -1,4 +1,6 @@
 .verification-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; }
+.verification-layout > .card:first-child { min-width: 0; overflow-x: auto; }
+.verification-layout > .card:first-child .table { min-width: 720px; }
 .verification-layout tbody tr { cursor: pointer; }
 .verification-detail { display: grid; gap: 14px; position: sticky; top: 18px; }
 .verification-detail h2 { margin: 3px 0; }
@@ -13,3 +15,4 @@
 .verified-variance { padding: 10px 12px; border-radius: 8px; background: #f1f5f9; display: flex; justify-content: space-between; }
 .verification-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 1050px) { .verification-layout { grid-template-columns: 1fr; } .verification-detail { position: static; } }
+@media (max-width: 560px) { .verification-actions { flex-direction: column; } .verification-actions .btn { width: 100%; min-height: 44px; } }

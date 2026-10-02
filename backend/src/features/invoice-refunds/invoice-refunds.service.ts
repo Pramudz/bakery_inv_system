@@ -11,6 +11,7 @@ import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
 import { Product } from '../products/products.entity';
 import { CreateInvoiceRefundDto } from './dto/create-invoice-refund.dto';
 import { ReverseInvoicePaymentDto } from './dto/reverse-invoice-payment.dto';
+import { MasterRefundPayoutDto, MasterReversalPayoutDto } from './dto/master-payout.dto';
 import { InvoicePaymentReversal } from './invoice-payment-reversal.entity';
 import { InvoiceRefundDetail } from './invoice-refund-detail.entity';
 import { InvoiceRefundPayment } from './invoice-refund-payment.entity';
@@ -19,7 +20,7 @@ import { InvoiceAdjustment } from './invoice-adjustment.entity';
 import { CreateInvoiceAdjustmentDto } from './dto/create-invoice-adjustment.dto';
 import { createHash, randomUUID } from 'node:crypto';
 import { ActivePosSession, PosSessionsService } from '../pos-registers/pos-sessions.service';
-import { PosCashMovement, PosCashMovementDirection, PosCashMovementType } from '../pos-registers/pos-cash-movement.entity';
+import { PosCashFundingSource, PosCashMovement, PosCashMovementDirection, PosCashMovementType } from '../pos-registers/pos-cash-movement.entity';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
@@ -149,12 +150,16 @@ export class InvoiceRefundsService {
             locationId: invoice.locationId,
             posRegisterSessionId: activeSession!.registerSession.posRegisterSessionId,
             posCashierSessionId: activeSession!.cashierSession.posCashierSessionId,
+            fundingSource: PosCashFundingSource.CASHIER_SESSION,
             movementType: PosCashMovementType.REFUND_PAYOUT,
             direction: PosCashMovementDirection.OUT,
             amount: money(payment.amount).toFixed(2),
             sourceType: 'INVOICE_REFUND_PAYMENT',
             sourceId: refundPayment.invoiceRefundPaymentId,
             reason: dto.reason.trim(),
+            physicalPayerIdentity: null,
+            payoutKey: null,
+            payoutFingerprint: null,
             occurredAt: refundPayment.refundedAt,
             createdByUserId: user.userId,
           }));
@@ -199,12 +204,16 @@ export class InvoiceRefundsService {
           locationId: invoice.locationId,
           posRegisterSessionId: activeSession!.registerSession.posRegisterSessionId,
           posCashierSessionId: activeSession!.cashierSession.posCashierSessionId,
+          fundingSource: PosCashFundingSource.CASHIER_SESSION,
           movementType: PosCashMovementType.PAYMENT_REVERSAL_PAYOUT,
           direction: PosCashMovementDirection.OUT,
           amount: payout.toFixed(2),
           sourceType: 'INVOICE_PAYMENT_REVERSAL',
           sourceId: reversal.paymentReversalId,
           reason: dto.reason.trim(),
+          physicalPayerIdentity: null,
+          payoutKey: null,
+          payoutFingerprint: null,
           occurredAt: reversal.reversedAt,
           createdByUserId: user.userId,
         }));
@@ -230,6 +239,78 @@ export class InvoiceRefundsService {
       }
       await this.recalculateInvoicePayments(manager, invoice);
       return manager.getRepository(Invoice).findOne({ where: { invoiceId }, relations: { payments: { paymentMethod: true, paymentChannel: true } } });
+    });
+  }
+
+  async recordMasterRefundPayout(refundId: number, dto: MasterRefundPayoutDto, user: TenantPrincipal) {
+    this.assertPayoutDto(dto.amount, dto.reason, dto.physicalPayerIdentity);
+    const fingerprint = this.fingerprint({ type: 'MASTER_REFUND_PAYOUT', refundId, locationId: dto.locationId, posRegisterSessionId: dto.posRegisterSessionId, paymentMethodId: dto.paymentMethodId, amount: money(dto.amount), reason: dto.reason.trim(), physicalPayerIdentity: dto.physicalPayerIdentity.trim() });
+    return this.dataSource.transaction(async (manager) => {
+      const prior = await manager.getRepository(PosCashMovement).findOneBy({ tenantId: user.tenantId, payoutKey: dto.payoutKey });
+      if (prior) {
+        if (prior.payoutFingerprint !== fingerprint) throw new ConflictException('This payout key was already used for different data.');
+        this.assertLocationAccess(prior.locationId, user);
+        return prior;
+      }
+      const refund = await manager.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: refundId, tenantId: user.tenantId, status: 'COMPLETED' }, relations: { payments: true }, lock: { mode: 'pessimistic_write' } });
+      if (!refund) throw new NotFoundException('Completed invoice refund not found.');
+      this.assertLocationAccess(refund.locationId, user);
+      if (Number(refund.locationId) !== Number(dto.locationId)) throw new BadRequestException('The selected master register belongs to a different location.');
+      const invoice = await manager.getRepository(Invoice).findOne({ where: { invoiceId: refund.invoiceId, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } });
+      if (!invoice) throw new NotFoundException('Invoice not found.');
+      const active = await this.posSessions.requireOpenMasterRegisterSession(manager, dto.posRegisterSessionId, dto.locationId, user, true);
+      const method = await manager.getRepository(PaymentMethod).findOneBy({ paymentMethodId: dto.paymentMethodId, tenantId: user.tenantId, isActive: true });
+      if (!method || method.paymentMethodType !== PaymentMethodType.CASH) throw new BadRequestException('An active CASH payment method is required for a master-funded refund payout.');
+      const alreadyPaid = money(refund.payments.reduce((sum, payment) => sum + Number(payment.amount), 0));
+      const remaining = money(Math.max(0, Number(refund.refundTotal) - alreadyPaid));
+      if (dto.amount > remaining) throw new BadRequestException(`Master payout exceeds the refund's remaining payable amount of ${remaining.toFixed(2)}.`);
+      const refundedAt = new Date();
+      const refundPayment = await manager.getRepository(InvoiceRefundPayment).save(manager.getRepository(InvoiceRefundPayment).create({
+        invoiceRefundId: refund.invoiceRefundId, paymentMethodId: method.paymentMethodId, paymentMethodTypeSnapshot: PaymentMethodType.CASH,
+        paymentChannelId: null, paymentChannelCodeSnapshot: null, paymentChannelNameSnapshot: null, amount: money(dto.amount).toFixed(2), referenceNumber: null,
+        refundedAt, createdByUserId: user.userId, posTerminalId: null, posRegisterSessionId: active.registerSession.posRegisterSessionId, posCashierSessionId: null,
+      }));
+      const movement = await manager.getRepository(PosCashMovement).save(manager.getRepository(PosCashMovement).create({
+        tenantId: user.tenantId, locationId: dto.locationId, posRegisterSessionId: active.registerSession.posRegisterSessionId, posCashierSessionId: null,
+        fundingSource: PosCashFundingSource.MASTER_REGISTER, movementType: PosCashMovementType.REFUND_PAYOUT, direction: PosCashMovementDirection.OUT,
+        amount: money(dto.amount).toFixed(2), sourceType: 'INVOICE_REFUND_PAYMENT', sourceId: refundPayment.invoiceRefundPaymentId,
+        reason: dto.reason.trim(), physicalPayerIdentity: dto.physicalPayerIdentity.trim(), payoutKey: dto.payoutKey, payoutFingerprint: fingerprint,
+        occurredAt: refundedAt, createdByUserId: user.userId,
+      }));
+      await this.recalculateInvoicePayments(manager, invoice);
+      return movement;
+    });
+  }
+
+  async recordMasterReversalPayout(reversalId: number, dto: MasterReversalPayoutDto, user: TenantPrincipal) {
+    this.assertPayoutDto(dto.amount, dto.reason, dto.physicalPayerIdentity);
+    const fingerprint = this.fingerprint({ type: 'MASTER_REVERSAL_PAYOUT', reversalId, locationId: dto.locationId, posRegisterSessionId: dto.posRegisterSessionId, amount: money(dto.amount), reason: dto.reason.trim(), physicalPayerIdentity: dto.physicalPayerIdentity.trim() });
+    return this.dataSource.transaction(async (manager) => {
+      const prior = await manager.getRepository(PosCashMovement).findOneBy({ tenantId: user.tenantId, payoutKey: dto.payoutKey });
+      if (prior) {
+        if (prior.payoutFingerprint !== fingerprint) throw new ConflictException('This payout key was already used for different data.');
+        this.assertLocationAccess(prior.locationId, user);
+        return prior;
+      }
+      const reversal = await manager.getRepository(InvoicePaymentReversal).findOne({ where: { paymentReversalId: reversalId }, relations: { invoicePayment: { invoice: true, paymentMethod: true } }, lock: { mode: 'pessimistic_write' } });
+      if (!reversal || Number(reversal.invoicePayment.invoice.tenantId) !== Number(user.tenantId)) throw new NotFoundException('Payment reversal not found.');
+      const invoice = reversal.invoicePayment.invoice;
+      this.assertLocationAccess(invoice.locationId, user);
+      if (Number(invoice.locationId) !== Number(dto.locationId)) throw new BadRequestException('The selected master register belongs to a different location.');
+      const paymentType = reversal.invoicePayment.paymentMethodTypeSnapshot ?? reversal.invoicePayment.paymentMethod.paymentMethodType;
+      if (paymentType !== PaymentMethodType.CASH) throw new BadRequestException('Only a reversed CASH payment can be paid from the master drawer.');
+      const authorizedAmount = money(Number(reversal.invoicePayment.tenderedAmount) - Number(reversal.invoicePayment.changeAmount));
+      if (money(dto.amount) !== authorizedAmount) throw new BadRequestException(`The physical payout must equal the reversed net cash receipt of ${authorizedAmount.toFixed(2)}.`);
+      const existing = await manager.getRepository(PosCashMovement).findOneBy({ tenantId: user.tenantId, sourceType: 'INVOICE_PAYMENT_REVERSAL', sourceId: reversal.paymentReversalId });
+      if (existing) throw new ConflictException('This payment reversal already has a physical cash payout.');
+      const active = await this.posSessions.requireOpenMasterRegisterSession(manager, dto.posRegisterSessionId, dto.locationId, user, true);
+      return manager.getRepository(PosCashMovement).save(manager.getRepository(PosCashMovement).create({
+        tenantId: user.tenantId, locationId: dto.locationId, posRegisterSessionId: active.registerSession.posRegisterSessionId, posCashierSessionId: null,
+        fundingSource: PosCashFundingSource.MASTER_REGISTER, movementType: PosCashMovementType.PAYMENT_REVERSAL_PAYOUT, direction: PosCashMovementDirection.OUT,
+        amount: authorizedAmount.toFixed(2), sourceType: 'INVOICE_PAYMENT_REVERSAL', sourceId: reversal.paymentReversalId,
+        reason: dto.reason.trim(), physicalPayerIdentity: dto.physicalPayerIdentity.trim(), payoutKey: dto.payoutKey, payoutFingerprint: fingerprint,
+        occurredAt: new Date(), createdByUserId: user.userId,
+      }));
     });
   }
 
@@ -291,5 +372,10 @@ export class InvoiceRefundsService {
   }
   private refundNumber(id: number) { return `REF-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(id).padStart(6, '0')}`; }
   private fingerprint(value: unknown) { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
+  private assertPayoutDto(amount: number, reason: string, payer: string) {
+    if (!Number.isFinite(amount) || amount <= 0 || money(amount) !== amount) throw new BadRequestException('Payout amount must be positive with at most two decimal places.');
+    if (!reason?.trim()) throw new BadRequestException('Payout reason is required.');
+    if (!payer?.trim()) throw new BadRequestException('Physical payer identity is required.');
+  }
   private getWithManager(manager: EntityManager, id: number, tenantId: number) { return manager.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: id, tenantId }, relations: { invoice: true, location: true, details: { product: true }, payments: { paymentMethod: true, paymentChannel: true } } }); }
 }

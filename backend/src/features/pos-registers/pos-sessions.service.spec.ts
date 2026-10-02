@@ -10,6 +10,9 @@ import { PosCashierSession, PosCashierSessionStatus } from './pos-cashier-sessio
 import { PosLocationConfig, PosRegisterMode } from './pos-location-config.entity';
 import { PosRegisterSession, PosRegisterSessionStatus } from './pos-register-session.entity';
 import { PosSessionsService } from './pos-sessions.service';
+import { PosRegistersService } from './pos-registers.service';
+import { PosCashReconciliation } from './pos-cash-reconciliation.entity';
+import { PosMasterReconciliation } from './pos-master-reconciliation.entity';
 import { PosTerminalPairing } from './pos-terminal-pairing.entity';
 import { PosTerminal } from './pos-terminal.entity';
 
@@ -32,17 +35,23 @@ function fixture(mode: PosRegisterMode, serialize = false) {
     registerSessions: [] as any[],
     cashierSessions: [] as any[],
   };
-  const matches = (row: any, where: any) => Object.entries(where).every(([key, value]: [string, any]) => value && value._type === 'in' ? value._value.includes(row[key]) : row[key] === value);
+  const matches = (row: any, where: any) => Object.entries(where).every(([key, value]: [string, any]) => {
+    if (value?._type === 'in') return value._value.includes(row[key]);
+    if (value?._type === 'isNull') return row[key] === null || row[key] === undefined;
+    return row[key] === value;
+  });
   const one = (rows: any[], where: any | any[]) => {
     const predicates = Array.isArray(where) ? where : [where];
     return rows.find((row) => predicates.some((predicate) => matches(row, predicate))) ?? null;
   };
   const repository = (entity: unknown): any => {
     if (entity === Tenant) return { findOneBy: async (where: any) => Number(where.tenantId) === 1 ? { tenantId: 1, timeZone: 'Asia/Colombo' } : null };
-    if (entity === Location) return { findOneBy: async (where: any) => one(state.locations, where) };
+    if (entity === Location) return { findOneBy: async (where: any) => one(state.locations, where), findOne: async ({ where }: any) => one(state.locations, where) };
     if (entity === PosLocationConfig) return {
       findOneBy: async (where: any) => matches(state.config, where) ? state.config : null,
       findOne: async ({ where }: any) => matches(state.config, where) ? state.config : null,
+      create: (row: any) => row,
+      save: async (row: any) => Object.assign(state.config, row),
     };
     if (entity === PosTerminalPairing) return {
       findOne: async ({ where }: any) => matches(state.pairing, where) ? state.pairing : null,
@@ -84,6 +93,7 @@ function fixture(mode: PosRegisterMode, serialize = false) {
         return saved;
       },
     };
+    if (entity === PosCashReconciliation || entity === PosMasterReconciliation) return { findOne: async () => null };
     throw new Error(`Unexpected repository ${(entity as any)?.name}`);
   };
   const manager = { getRepository: repository } as any;
@@ -95,8 +105,22 @@ function fixture(mode: PosRegisterMode, serialize = false) {
     return result;
   };
   const dataSource = { manager, getRepository: repository, transaction } as any;
-  return { state, service: new PosSessionsService(dataSource) };
+  return { state, service: new PosSessionsService(dataSource), registersService: new PosRegistersService(dataSource) };
 }
+
+test('mode switching and register opening serialize so neither transition can bypass the other', async () => {
+  const openingFirst = fixture(PosRegisterMode.MASTER_REGISTER, true);
+  const opened = openingFirst.service.openMaster({ locationId: 11, openingBalance: 10 }, user({ userId: 99 }));
+  const switched = openingFirst.registersService.configureLocation(11, { registerMode: PosRegisterMode.TERMINAL_REGISTER }, user({ userId: 99 }));
+  await opened;
+  await assert.rejects(switched, /open register/i);
+
+  const switchingFirst = fixture(PosRegisterMode.MASTER_REGISTER, true);
+  const switchedFirst = switchingFirst.registersService.configureLocation(11, { registerMode: PosRegisterMode.TERMINAL_REGISTER }, user({ userId: 99 }));
+  const openedSecond = switchingFirst.service.openMaster({ locationId: 11, openingBalance: 10 }, user({ userId: 99 }));
+  await switchedFirst;
+  await assert.rejects(openedSecond, /does not use a master register/i);
+});
 
 test('terminal mode opens one register/cashier session and resumes it without another opening balance', async () => {
   const f = fixture(PosRegisterMode.TERMINAL_REGISTER);
@@ -142,6 +166,36 @@ test('approved master sign-off releases the terminal for the next cashier withou
   assert.equal(f.state.registerSessions[0].status, PosRegisterSessionStatus.OPEN);
 });
 
+test('a closed master register session is never resumed and the next opening balance is explicit', async () => {
+  const f = fixture(PosRegisterMode.MASTER_REGISTER);
+  await f.service.openMaster({ locationId: 11, openingBalance: 500 }, user({ userId: 99, roleCode: 'TENANT_ADMIN' }));
+  f.state.registerSessions[0].status = PosRegisterSessionStatus.CLOSED;
+  f.state.registerSessions[0].closedAt = new Date();
+  f.state.registerSessions[0].closedByUserId = 77;
+
+  const next = await f.service.openMaster(
+    { locationId: 11, openingBalance: 325 },
+    user({ userId: 98, roleCode: 'TENANT_ADMIN' }),
+  );
+
+  assert.equal(next.resumed, false);
+  assert.equal(f.state.registerSessions.length, 2);
+  assert.equal(f.state.registerSessions[1].openingBalance, '325.00');
+  assert.equal(f.state.registerSessions[1].status, PosRegisterSessionStatus.OPEN);
+});
+
+test('a submitted master count freezes new cashier-session starts', async () => {
+  const f = fixture(PosRegisterMode.MASTER_REGISTER);
+  await f.service.openMaster({ locationId: 11, openingBalance: 500 }, user({ userId: 99, roleCode: 'TENANT_ADMIN' }));
+  f.state.registerSessions[0].status = PosRegisterSessionStatus.PENDING_VERIFICATION;
+
+  await assert.rejects(
+    f.service.startCashier(credential, user()),
+    /frozen for closing/i,
+  );
+  assert.equal(f.state.cashierSessions.length, 0);
+});
+
 test('serialized concurrent terminal openings create one opening balance and one cashier session', async () => {
   const f = fixture(PosRegisterMode.TERMINAL_REGISTER, true);
   const results = await Promise.all([
@@ -152,6 +206,40 @@ test('serialized concurrent terminal openings create one opening balance and one
   assert.equal(f.state.cashierSessions.length, 1);
   assert.deepEqual(results.map((result) => result.resumed).sort(), [false, true]);
   assert.equal(f.state.registerSessions[0].openingBalance, '100.00');
+});
+
+test('closed master history remains unchanged when terminal mode opens, and reverse switching reuses each logical register', async () => {
+  const f = fixture(PosRegisterMode.MASTER_REGISTER, true);
+  const operator = user({ userId: 99, roleCode: 'TENANT_ADMIN' });
+  const firstMaster = await f.service.openMaster({ locationId: 11, openingBalance: 50 }, operator);
+  f.state.registerSessions[0].status = PosRegisterSessionStatus.CLOSED;
+  const originalMaster = { ...f.state.registers[0] };
+  f.state.config.registerMode = PosRegisterMode.TERMINAL_REGISTER;
+
+  const [opened, resumed] = await Promise.all([
+    f.service.openTerminal({ openingBalance: 125 }, credential, user()),
+    f.service.openTerminal({ openingBalance: 999 }, credential, user()),
+  ]);
+  assert.deepEqual([opened.resumed, resumed.resumed], [false, true]);
+  assert.equal(f.state.registers.length, 2);
+  assert.deepEqual(f.state.registers[0], originalMaster);
+  assert.equal(f.state.registers[1].registerKey, 'TERMINAL:21');
+  assert.equal(opened.registerSession.posCashRegisterId, f.state.registers[1].posCashRegisterId);
+  assert.equal(opened.cashierSession?.posRegisterSessionId, opened.registerSession.posRegisterSessionId);
+  assert.notEqual(opened.register.posCashRegisterId, firstMaster.register.posCashRegisterId);
+
+  f.state.registerSessions[1].status = PosRegisterSessionStatus.CLOSED;
+  f.state.cashierSessions[0].status = PosCashierSessionStatus.ENDED;
+  f.state.config.registerMode = PosRegisterMode.MASTER_REGISTER;
+  const secondMaster = await f.service.openMaster({ locationId: 11, openingBalance: 70 }, operator);
+  assert.equal(secondMaster.register.posCashRegisterId, originalMaster.posCashRegisterId);
+  assert.equal(f.state.registers.length, 2);
+  f.state.registerSessions[2].status = PosRegisterSessionStatus.CLOSED;
+  f.state.config.registerMode = PosRegisterMode.TERMINAL_REGISTER;
+  const secondTerminal = await f.service.openTerminal({ openingBalance: 80 }, credential, user());
+  assert.equal(secondTerminal.register.posCashRegisterId, opened.register.posCashRegisterId);
+  assert.equal(f.state.registers.length, 2);
+  assert.deepEqual(f.state.registers[0], originalMaster);
 });
 
 test('invalid/revoked pairing, wrong location, missing configuration and missing sessions block checkout context', async () => {

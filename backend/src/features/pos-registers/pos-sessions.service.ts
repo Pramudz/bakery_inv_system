@@ -45,9 +45,9 @@ export class PosSessionsService {
     let registerSession: PosRegisterSession | null = null;
     let cashierSession: PosCashierSession | null = null;
     if (config?.registerMode === PosRegisterMode.MASTER_REGISTER) {
-      register = await this.dataSource.getRepository(PosCashRegister).findOneBy({ tenantId: user.tenantId, registerKey: this.masterKey(locationId), isActive: true });
+      register = await this.dataSource.getRepository(PosCashRegister).findOneBy({ tenantId: user.tenantId, locationId, registerMode: PosRegisterMode.MASTER_REGISTER, posTerminalId: IsNull(), isActive: true });
     } else if (config?.registerMode === PosRegisterMode.TERMINAL_REGISTER && terminal && Number(terminal.locationId) === Number(locationId)) {
-      register = await this.dataSource.getRepository(PosCashRegister).findOneBy({ tenantId: user.tenantId, registerKey: this.terminalKey(terminal.posTerminalId), isActive: true });
+      register = await this.dataSource.getRepository(PosCashRegister).findOneBy({ tenantId: user.tenantId, locationId, registerMode: PosRegisterMode.TERMINAL_REGISTER, posTerminalId: terminal.posTerminalId, isActive: true });
     }
     if (register) {
       registerSession = await this.dataSource.getRepository(PosRegisterSession).findOneBy({ tenantId: user.tenantId, posCashRegisterId: register.posCashRegisterId, status: In(this.ongoingRegisterStatuses()) });
@@ -180,10 +180,13 @@ export class PosSessionsService {
       const { pairing, terminal } = await this.pairing(manager, credential, user, true);
       const config = await this.config(manager, terminal.locationId, user, true);
       if (config.registerMode !== PosRegisterMode.MASTER_REGISTER) throw new BadRequestException('This location uses a terminal register. Open the terminal register instead.');
-      const register = await manager.getRepository(PosCashRegister).findOne({ where: { tenantId: user.tenantId, registerKey: this.masterKey(terminal.locationId), isActive: true }, lock: { mode: 'pessimistic_write' } });
+      const register = await manager.getRepository(PosCashRegister).findOne({ where: { tenantId: user.tenantId, locationId: terminal.locationId, registerMode: PosRegisterMode.MASTER_REGISTER, posTerminalId: IsNull(), isActive: true }, lock: { mode: 'pessimistic_write' } });
       if (!register) throw new BadRequestException('The master register is not open.');
       const registerSession = await this.openRegisterSession(manager, register, true);
       if (!registerSession) throw new BadRequestException('The master register is not open.');
+      if (registerSession.status !== PosRegisterSessionStatus.OPEN) {
+        throw new ConflictException('The master register is frozen for closing and cannot start a cashier session.');
+      }
       const active = await this.activeConflict(manager, user, terminal.posTerminalId);
       if (active) {
         if (Number(active.cashierUserId) === Number(user.userId) && Number(active.posTerminalId) === Number(terminal.posTerminalId) && Number(active.posRegisterSessionId) === Number(registerSession.posRegisterSessionId)) {
@@ -298,6 +301,22 @@ export class PosSessionsService {
     return { terminal, pairing, config, register, registerSession, cashierSession };
   }
 
+  async requireOpenMasterRegisterSession(manager: EntityManager, registerSessionId: number, locationId: number, user: TenantPrincipal, lock = true) {
+    const config = await this.config(manager, locationId, user, lock);
+    if (config.registerMode !== PosRegisterMode.MASTER_REGISTER) throw new BadRequestException('This location does not use a master register.');
+    const registerSession = await manager.getRepository(PosRegisterSession).findOne({
+      where: { posRegisterSessionId: registerSessionId, tenantId: user.tenantId, locationId, status: PosRegisterSessionStatus.OPEN },
+      ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+    });
+    if (!registerSession) throw new ConflictException('The selected master register session is not open for transactions.');
+    const register = await manager.getRepository(PosCashRegister).findOne({
+      where: { posCashRegisterId: registerSession.posCashRegisterId, tenantId: user.tenantId, locationId, isActive: true, registerMode: PosRegisterMode.MASTER_REGISTER, posTerminalId: IsNull() },
+      ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+    });
+    if (!register) throw new ForbiddenException('The selected master register is inactive or unavailable.');
+    return { config, register, registerSession };
+  }
+
   private async pairing(manager: EntityManager, credential: string | undefined, user: TenantPrincipal, lock: boolean) {
     if (!credential?.trim()) throw new ForbiddenException('This browser is not paired to a POS terminal.');
     const pairing = await manager.getRepository(PosTerminalPairing).findOne({
@@ -316,7 +335,7 @@ export class PosSessionsService {
   }
 
   private async config(manager: EntityManager, locationId: number, user: TenantPrincipal, lock: boolean) {
-    await this.location(manager, locationId, user, true);
+    await this.location(manager, locationId, user, true, lock);
     const config = await manager.getRepository(PosLocationConfig).findOne({
       where: { tenantId: user.tenantId, locationId },
       ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
@@ -325,32 +344,49 @@ export class PosSessionsService {
     return config;
   }
 
-  private async location(manager: EntityManager, locationId: number, user: TenantPrincipal, activeRequired: boolean) {
+  private async location(manager: EntityManager, locationId: number, user: TenantPrincipal, activeRequired: boolean, lock = false) {
     this.assertLocationAccess(locationId, user);
-    const location = await manager.getRepository(Location).findOneBy({ locationId, tenantId: user.tenantId, ...(activeRequired ? { isActive: true } : {}) });
+    const location = await manager.getRepository(Location).findOne({
+      where: { locationId, tenantId: user.tenantId, ...(activeRequired ? { isActive: true } : {}) },
+      ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+    });
     if (!location) throw new NotFoundException(activeRequired ? 'Active location not found.' : 'Location not found.');
     return location;
   }
 
   private async findOrCreateRegister(manager: EntityManager, config: PosLocationConfig, terminal: PosTerminal | null, user: TenantPrincipal) {
+    if (config.registerMode === PosRegisterMode.TERMINAL_REGISTER && (!terminal || !Number.isInteger(Number(terminal.posTerminalId)) || Number(terminal.posTerminalId) <= 0)) {
+      throw new BadRequestException('A valid paired terminal is required for terminal-register opening.');
+    }
+    if (config.registerMode === PosRegisterMode.MASTER_REGISTER && terminal) throw new BadRequestException('A master register cannot be assigned to a terminal.');
     const registerKey = terminal ? this.terminalKey(terminal.posTerminalId) : this.masterKey(config.locationId);
     const repo = manager.getRepository(PosCashRegister);
-    let register = await repo.findOne({ where: { tenantId: user.tenantId, registerKey }, lock: { mode: 'pessimistic_write' } });
-    if (!register) {
-      register = await repo.save(repo.create({
+    const identity = terminal
+      ? { tenantId: user.tenantId, locationId: config.locationId, registerMode: PosRegisterMode.TERMINAL_REGISTER, posTerminalId: terminal.posTerminalId, isActive: true }
+      : { tenantId: user.tenantId, locationId: config.locationId, registerMode: PosRegisterMode.MASTER_REGISTER, posTerminalId: IsNull(), isActive: true };
+    const compatible = await repo.findOne({ where: identity, lock: { mode: 'pessimistic_write' }, order: { posCashRegisterId: 'DESC' } });
+    if (compatible) return compatible;
+    const keyOwner = await repo.findOne({ where: { tenantId: user.tenantId, registerKey }, lock: { mode: 'pessimistic_write' } });
+    if (keyOwner) throw new ConflictException(`Register key ${registerKey} belongs to a different location, mode, terminal, or an inactive register.`);
+    if (terminal) {
+      const terminalOwner = await repo.findOne({ where: { tenantId: user.tenantId, posTerminalId: terminal.posTerminalId }, lock: { mode: 'pessimistic_write' } });
+      if (terminalOwner) throw new ConflictException('This terminal is already linked to a different location, mode, or inactive cash register.');
+    }
+    try {
+      return await repo.save(repo.create({
         tenantId: user.tenantId,
         locationId: config.locationId,
-        posTerminalId: terminal?.posTerminalId ?? null,
+        posTerminalId: terminal ? terminal.posTerminalId : null,
         registerMode: config.registerMode,
         registerKey,
         displayName: terminal ? terminal.displayName : 'Master Register',
         isActive: true,
       }));
+    } catch (error) {
+      const candidate = error as { code?: string; driverError?: { code?: string } };
+      if ((candidate.driverError?.code ?? candidate.code) === 'ER_DUP_ENTRY') throw new ConflictException('A conflicting cash register was created concurrently for this location or terminal. Retry opening the register.');
+      throw error;
     }
-    if (!register.isActive || register.registerMode !== config.registerMode || Number(register.locationId) !== Number(config.locationId) || Number(register.posTerminalId ?? 0) !== Number(terminal?.posTerminalId ?? 0)) {
-      throw new ConflictException('The existing cash register does not match the current location configuration.');
-    }
-    return register;
   }
 
   private openRegisterSession(manager: EntityManager, register: PosCashRegister, lock: boolean) {

@@ -6,7 +6,7 @@ import { PosTerminalActivation } from './pos-terminal-activation.entity';
 import { PosTerminalPairing } from './pos-terminal-pairing.entity';
 
 @Entity('tbl_pos_terminal')
-@Index('uq_pos_terminal_tenant_code', ['tenantId', 'terminalCode'], { unique: true })
+@Index('uq_pos_terminal_location_code', ['tenantId', 'locationId', 'terminalCode'], { unique: true })
 @Index('ix_pos_terminal_tenant_location', ['tenantId', 'locationId'])
 export class PosTerminal extends AuditEntity {
   @PrimaryGeneratedColumn({ name: 'pos_terminal_id', type: 'bigint' }) posTerminalId!: number;

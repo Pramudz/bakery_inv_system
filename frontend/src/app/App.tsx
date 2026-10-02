@@ -24,8 +24,7 @@ const tenantGroups = [
       ["Refunds", "/refunds"],
       ["Payment Methods", "/payment-methods"],
       ["Card Channels", "/card-channels"],
-      ["POS Registers", "/pos-registers"],
-      ["Register Verification", "/pos-register-verification"],
+      ["Register Management", "/pos-register-management"],
     ],
   },
   {
@@ -96,6 +95,8 @@ const moduleForPath: Record<string, string> = {
   "/card-channels": "SALES",
   "/pos-registers": "SALES",
   "/pos-register-verification": "SALES",
+  "/pos-master-closing": "SALES",
+  "/pos-register-management": "SALES",
   "/users": "USER_MANAGEMENT",
   "/roles": "USER_MANAGEMENT",
   "/permissions": "USER_MANAGEMENT",
@@ -130,6 +131,7 @@ const viewPermissionForPath: Record<string, string> = {
   "/card-channels": "SALES_PAYMENT_METHOD_VIEW",
   "/pos-registers": "SALES_POS_REGISTER_ADMIN",
   "/pos-register-verification": "SALES_REGISTER_VERIFY",
+  "/pos-master-closing": "SALES_REGISTER_CLOSE",
   "/users": "USER_VIEW",
   "/roles": "ROLE_VIEW",
   "/permissions": "PERMISSION_VIEW",
@@ -153,6 +155,17 @@ const viewPermissionForPath: Record<string, string> = {
   "/inventory/adjustments": "INVENTORY_ADJUSTMENT_VIEW",
   "/inventory/value-adjustments": "INVENTORY_VALUE_ADJUSTMENT_VIEW",
   "/inventory/adjustment-reasons": "INVENTORY_ADJUSTMENT_VIEW",
+};
+
+const viewAnyPermissionForPath: Record<string, string[]> = {
+  "/pos-register-management": [
+    "SALES_BILLING",
+    "SALES_POS_REGISTER_ADMIN",
+    "SALES_REGISTER_OPEN",
+    "SALES_REGISTER_CLOSE",
+    "SALES_REGISTER_VERIFY",
+    "SALES_REGISTER_PAYOUT",
+  ],
 };
 
 export default function App() {
@@ -182,8 +195,11 @@ export default function App() {
               !moduleForPath[path] ||
               modules.some((module) => module.code === moduleForPath[path]);
             const permission = viewPermissionForPath[path];
+            const anyPermissions = viewAnyPermissionForPath[path];
             return (
-              moduleAllowed && (!permission || permissions.includes(permission))
+              moduleAllowed &&
+              (!permission || permissions.includes(permission)) &&
+              (!anyPermissions || anyPermissions.some((code) => permissions.includes(code)))
             );
           })
         : group.items,

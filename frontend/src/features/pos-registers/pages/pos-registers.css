@@ -52,6 +52,23 @@
   flex-wrap: wrap;
   gap: 5px;
 }
+.pos-card-actions,
+.pos-list-tools,
+.pos-list-pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pos-card-actions { justify-content: flex-end; }
+.pos-list-tools { margin: 12px 0; }
+.pos-list-search { flex: 1 1 260px; }
+.pos-list-tools > .control { width: auto; min-width: 170px; }
+.pos-list-pagination { justify-content: flex-end; margin-top: 14px; color: #52647a; }
+.pos-list-pagination label { display: flex; align-items: center; gap: 6px; }
+.pos-list-pagination .control { width: 76px; }
+.checkbox-field { display: flex; align-items: center; gap: 9px; min-height: 42px; }
+.checkbox-field input { width: 18px; height: 18px; }
 .activation-result {
   text-align: center;
 }
@@ -69,4 +86,8 @@
   .activation-form {
     grid-template-columns: 1fr;
   }
+  .pos-list-tools { align-items: stretch; flex-direction: column; }
+  .pos-list-tools > .control, .pos-list-search { width: 100%; min-width: 0; }
+  .pos-list-pagination { justify-content: stretch; }
+  .pos-list-pagination .btn { flex: 1 1 auto; min-height: 44px; }
 }
