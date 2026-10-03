@@ -92,7 +92,7 @@ export class PosRegisterManagementService {
           posRegisterSessionId: row.posRegisterSessionId,
           cashierUserId: row.cashierUserId,
           cashierName: this.userName(row.cashier),
-          terminal: this.terminalView(row.terminal),
+          terminal: row.terminal ? this.terminalView(row.terminal) : null,
           registerName: row.registerSession?.register?.displayName,
           registerMode: row.registerSession?.register?.registerMode,
           startedAt: row.startedAt,
@@ -101,7 +101,7 @@ export class PosRegisterManagementService {
           reconciliation: reconciliation ? { id: reconciliation.posCashReconciliationId, type: reconciliation.reconciliationType, status: reconciliation.status, attemptNumber: reconciliation.attemptNumber } : null,
           nextAction: cashierNextAction(row.status, row.registerSession.register.registerMode, reconciliation ?? null),
           isCurrentUser: Number(row.cashierUserId) === Number(user.userId),
-          isCurrentDevice: Number(context.terminal?.posTerminalId) === Number(row.posTerminalId),
+          isCurrentDevice: row.posTerminalId == null ? context.terminal == null && Number(context.cashierSession?.posCashierSessionId) === Number(row.posCashierSessionId) : Number(context.terminal?.posTerminalId) === Number(row.posTerminalId),
         };
       }),
       terminals: terminalPreview.map((terminal) => ({

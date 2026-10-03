@@ -20,6 +20,7 @@ export class PosCashRegister extends AuditEntity {
   @ManyToOne(() => PosTerminal, { nullable: true, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'pos_terminal_id' }) terminal!: PosTerminal | null;
   @Column({ name: 'register_mode', type: 'enum', enum: PosRegisterMode }) registerMode!: PosRegisterMode;
   @Column({ name: 'register_key', type: 'varchar', length: 80 }) registerKey!: string;
+  @Column({ name: 'receipt_code', type: 'varchar', length: 50, nullable: true }) receiptCode!: string | null;
   @Column({ name: 'display_name', type: 'varchar', length: 150 }) displayName!: string;
   @Column({ name: 'is_active', default: true }) isActive!: boolean;
   @OneToMany(() => PosRegisterSession, (session) => session.register) sessions!: PosRegisterSession[];

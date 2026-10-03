@@ -119,6 +119,7 @@ export type CashSummary = {
   reversedPayments: { count: number; amount: number };
   creditSales: { count: number; originalTotal: number; originalCreditExtended: number; outstanding: number };
   refunds: { count: number; total: number; paid: number };
+  receiptReferences?: { sales: { businessDate: string; locationCode: string; registerCode: string; billNo: number }[]; refunds: { businessDate: string; locationCode: string; refundNo: number }[] };
   expectedNetContribution: number;
   unconfirmedMasterCash: number | null;
   expectedCash: number;
@@ -311,8 +312,8 @@ export const posRegistersApi = {
       locationId,
       openingBalance,
     }),
-  startCashierSession: () =>
-    apiClient.post("/pos-register-sessions/cashier/start", {}),
+  startCashierSession: (locationId: number) =>
+    apiClient.post("/pos-register-sessions/cashier/start", { locationId }),
   currentCashSummary: () =>
     apiClient.get<CashSummary>("/pos-register-closing/current-summary"),
   submitCashCount: (countedCash: number, submissionKey: string) =>

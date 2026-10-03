@@ -55,7 +55,9 @@ export type CreateInvoiceInput = {
 
 export const invoicesApi = {
   list: () => apiClient.get<any[]>('/invoices'),
+  history: (params: { page: number; limit: number; search: string; recordType: string; status: string }) => apiClient.get<{ items: { key: string; type: string; date: string; invoice: any; payment: any | null }[]; total: number; page: number; limit: number; stats: { todaySales: number; todayCount: number; paidCount: number; creditCount: number; outstanding: number; refundedCount: number } }>(`/invoices/history?${new URLSearchParams(Object.fromEntries(Object.entries(params).map(([key, value]) => [key, String(value)])))}`),
   get: (id: number) => apiClient.get<any>(`/invoices/${id}`),
+  reprint: (id: number) => apiClient.post<{ copy: boolean }>(`/invoices/${id}/reprint`, {}),
   refundable: (id: number) => apiClient.get<any>(`/invoices/${id}/refundable`),
   billingLocations: () => apiClient.get<{ locationId: number; code: string; name: string; isActive: boolean }[]>('/invoices/locations'),
   catalog: (locationId: number, saleType: 'RETAIL' | 'WHOLESALE') => apiClient.get<InvoiceCatalogProduct[]>(`/invoices/catalog?locationId=${locationId}&saleType=${saleType}`),

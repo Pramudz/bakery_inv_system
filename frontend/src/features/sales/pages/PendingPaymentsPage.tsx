@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+﻿import { FormEvent, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../auth/AuthContext';
@@ -9,11 +9,10 @@ import './pending-payments.css';
 import './sales-history.css';
 import { PaymentReceiptContent, receiptNumber } from './PaymentReceipt';
 import { paymentChannelsApi } from '../api/paymentChannelsApi';
+import { saleBillReference } from './saleBillReference';
 
 const money = (value: string | number) => Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const customerName = (invoice: PendingInvoice) => invoice.customer?.customerName ?? 'Historical anonymous sale';
-const matches = (invoice: PendingInvoice, query: string) =>
-  `${invoice.invoiceNumber} ${customerName(invoice)} ${invoice.customer?.phone ?? ''} ${invoice.customer?.mobile ?? ''}`.toLowerCase().includes(query.trim().toLowerCase());
 
 export function PendingPaymentsPage() {
   const { tenant, tenantUser, role, accessScope, assignedLocations } = useAuth();
@@ -34,8 +33,8 @@ export function PendingPaymentsPage() {
   const requestKey = useRef('');
   const submitting = useRef(false);
   const dialog = useRef<HTMLDialogElement>(null);
-  const pending = useQuery({ queryKey: ['pending-payments', ...queryScope], queryFn: pendingPaymentsApi.list });
-  const history = useQuery({ queryKey: ['payment-receipts', ...queryScope], queryFn: pendingPaymentsApi.history });
+  const pending = useQuery({ queryKey: ['pending-payments', page, limit, query, status, ...queryScope], queryFn: () => pendingPaymentsApi.page(page, limit, query, status) });
+  const history = useQuery({ queryKey: ['payment-receipts', page, limit, query, ...queryScope], queryFn: () => pendingPaymentsApi.historyPage(page, limit, query) });
   const methods = useQuery({ queryKey: ['payment-methods', ...queryScope], queryFn: paymentMethodsApi.list });
   const channels = useQuery({ queryKey: ['payment-channels', 'active'], queryFn: () => paymentChannelsApi.list(true) });
   const activeMethods = (methods.data ?? []).filter((method) => method.isActive && method.paymentMethodType);
@@ -105,17 +104,15 @@ export function PendingPaymentsPage() {
     setSelected(null);
     setReceipt(null);
   };
-  const invoices = pending.data ?? [];
-  const rows = invoices.filter((invoice) => matches(invoice, query) && (status === 'ALL' || invoice.paymentStatus === status));
-  const receipts = (history.data ?? []).filter((payment) => matches(payment.invoice, query) || receiptNumber(payment.invoicePaymentId).toLowerCase().includes(query.trim().toLowerCase()));
+  const rows = pending.data?.items ?? [];
+  const receipts = history.data?.items ?? [];
   const loadError = tab === 'pending' ? pending.error : history.error;
   const loading = tab === 'pending' ? pending.isPending : history.isPending;
-  const total = tab === 'pending' ? rows.length : receipts.length;
+  const total = tab === 'pending' ? pending.data?.total ?? 0 : history.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / limit));
   const currentPage = Math.min(page, totalPages);
-  const start = (currentPage - 1) * limit;
-  const pagedInvoices = rows.slice(start, start + limit);
-  const pagedReceipts = receipts.slice(start, start + limit);
+  const pagedInvoices = rows;
+  const pagedReceipts = receipts;
   const visiblePages = [...new Set([1, currentPage - 1, currentPage, currentPage + 1, totalPages])]
     .filter((number) => number >= 1 && number <= totalPages)
     .sort((a, b) => a - b);
@@ -124,10 +121,10 @@ export function PendingPaymentsPage() {
   return <div className="pending-payments-page">
     <div className="page-head"><div><div className="eyebrow">SALES</div><h1>Pending Payments</h1><p>Receive outstanding invoice payments and print a payment receipt.</p></div><button className="btn btn-secondary" onClick={refresh}>Refresh</button></div>
     <div className="sales-stats">
-      <SalesStat label="Outstanding balance" value={pending.isPending ? '—' : `LKR ${money(invoices.reduce((sum, invoice) => sum + Number(invoice.balanceAmount), 0))}`} note="Invoices awaiting payment" tone="amber" />
-      <SalesStat label="Partially paid" value={String(invoices.filter((invoice) => invoice.paymentStatus === 'PARTIALLY_PAID').length)} note="Collect the remaining balance" tone="blue" />
-      <SalesStat label="Unpaid" value={String(invoices.filter((invoice) => invoice.paymentStatus === 'UNPAID').length)} note="No payment received yet" tone="red" />
-      <SalesStat label="Payment receipts" value={String((history.data ?? []).filter((payment) => !payment.isReversed).length)} note="Later payments recorded" tone="green" />
+      <SalesStat label="Outstanding balance" value={pending.isPending ? '—' : `LKR ${money(pending.data?.stats.outstanding ?? 0)}`} note="Invoices awaiting payment" tone="amber" />
+      <SalesStat label="Partially paid" value={String(pending.data?.stats.partiallyPaid ?? 0)} note="Collect the remaining balance" tone="blue" />
+      <SalesStat label="Unpaid" value={String(pending.data?.stats.unpaid ?? 0)} note="No payment received yet" tone="red" />
+      <SalesStat label="Payment receipts" value={String(history.data?.stats.received ?? 0)} note="Later payments recorded" tone="green" />
     </div>
     <div className="card">
       <div className="pending-tabs" role="group" aria-label="Payment view">
@@ -141,14 +138,14 @@ export function PendingPaymentsPage() {
       {loadError ? <div className="error-box" role="alert">{loadError.message} <button className="btn btn-secondary" onClick={refresh}>Retry</button></div> : tab === 'pending' ?
         <div className="sales-table-wrap"><table className="table"><thead><tr><th>Invoice / date</th><th>Customer</th><th>Location</th><th>Status</th><th className="right">Total</th><th className="right">Paid</th><th className="right">Balance due</th><th /></tr></thead>
           <tbody>{pending.isPending ? <tr><td colSpan={8}>Loading outstanding invoices…</td></tr> : !rows.length ? <tr><td colSpan={8} className="pending-empty">{query || status !== 'ALL' ? 'No invoices match your filters.' : 'No outstanding invoices. All completed bills are paid.'}</td></tr> : pagedInvoices.map((invoice) => <tr key={invoice.invoiceId}>
-            <td><strong className="sales-id">{invoice.invoiceNumber}</strong><small className="refund-code">{new Date(invoice.invoiceDate).toLocaleDateString()}</small></td>
+            <td><strong className="sales-id">{saleBillReference(invoice)}</strong><small className="refund-code">{new Date(invoice.invoiceDate).toLocaleDateString()}</small></td>
             <td><strong>{customerName(invoice)}</strong><small className="refund-code">{invoice.customer?.mobile || invoice.customer?.phone || 'No phone recorded'}</small></td><td>{invoice.location?.name}</td>
             <td><SalesBadge status={invoice.paymentStatus === 'UNPAID' ? 'Unpaid' : 'Partially Paid'} /></td><td className="right">{money(invoice.grandTotal)}</td><td className="right">{money(invoice.paidAmount)}</td><td className="right pending-balance">LKR {money(invoice.balanceAmount)}</td>
             <td className="right"><button className="btn btn-primary" disabled={!(invoice.collectionEligible ?? Boolean(invoice.customer))} title={!invoice.customer ? 'Historical anonymous balances are readable but cannot receive a customer collection.' : undefined} onClick={() => begin(invoice)}>{invoice.customer ? 'Receive Payment' : 'Read only'}</button></td>
           </tr>)}</tbody></table></div> :
         <div className="sales-table-wrap"><table className="table"><thead><tr><th>Receipt / date</th><th>Invoice</th><th>Customer</th><th>Method</th><th className="right">Received</th><th>Status</th><th /></tr></thead>
           <tbody>{history.isPending ? <tr><td colSpan={7}>Loading payment history…</td></tr> : !receipts.length ? <tr><td colSpan={7} className="pending-empty">No payment receipts {query ? 'match your search' : 'recorded yet'}.</td></tr> : pagedReceipts.map((payment) => <tr key={payment.invoicePaymentId}>
-            <td><strong className="sales-id">{receiptNumber(payment.invoicePaymentId)}</strong><small className="refund-code">{new Date(payment.paidAt).toLocaleString()}</small></td><td>{payment.invoice.invoiceNumber}</td><td>{customerName(payment.invoice)}</td><td>{payment.paymentMethod.paymentMethodName}{payment.paymentChannel && <small className="refund-code">{payment.paymentChannel.name}</small>}</td><td className="right">LKR {money(payment.amount)}</td><td><SalesBadge status={payment.isReversed ? 'Reversed' : 'Received'} /></td><td className="right"><button className="btn btn-edit-soft" onClick={() => setReceipt(payment)}>View / Print</button></td>
+            <td><strong className="sales-id">{receiptNumber(payment.invoicePaymentId)}</strong><small className="refund-code">{new Date(payment.paidAt).toLocaleString()}</small></td><td>{saleBillReference(payment.invoice)}</td><td>{customerName(payment.invoice)}</td><td>{payment.paymentMethod.paymentMethodName}{payment.paymentChannel && <small className="refund-code">{payment.paymentChannel.name}</small>}</td><td className="right">LKR {money(payment.amount)}</td><td><SalesBadge status={payment.isReversed ? 'Reversed' : 'Received'} /></td><td className="right"><button className="btn btn-edit-soft" onClick={() => setReceipt(payment)}>View / Print</button></td>
           </tr>)}</tbody></table></div>}
       {!loadError && <>
       <div className="toolbar sales-history-pagination">
@@ -169,7 +166,7 @@ export function PendingPaymentsPage() {
       <p className="pending-note">Amounts are in LKR. Partially refunded invoices use their recalculated balance. Historical anonymous unpaid invoices remain visible but read-only.</p>
     </div>
     {createPortal(<dialog ref={dialog} className="pending-dialog" aria-labelledby="pending-dialog-title" onCancel={(event) => { event.preventDefault(); close(); }}>
-      <div className="modal-head"><div><h2 id="pending-dialog-title">{receipt ? 'Payment Receipt' : 'Receive Payment'}</h2><p>{receipt ? receiptNumber(receipt.invoicePaymentId) : selected?.invoiceNumber}</p></div><button className="icon-btn" aria-label="Close" disabled={receive.isPending} onClick={close}>×</button></div>
+      <div className="modal-head"><div><h2 id="pending-dialog-title">{receipt ? 'Payment Receipt' : 'Receive Payment'}</h2><p>{receipt ? receiptNumber(receipt.invoicePaymentId) : saleBillReference(selected)}</p></div><button className="icon-btn" aria-label="Close" disabled={receive.isPending} onClick={close}>×</button></div>
       {selected && <form onSubmit={submit}>
         <div className="modal-body">
           <p><strong>{customerName(selected)}</strong> · {selected.location?.name}</p>

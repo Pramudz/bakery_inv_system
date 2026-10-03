@@ -30,8 +30,8 @@ export class PosCashierSession extends AuditEntity {
   @ManyToOne(() => Location, { nullable: false, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'location_id' }) location!: Location;
   @Column({ name: 'cashier_user_id', type: 'bigint' }) cashierUserId!: number;
   @ManyToOne(() => User, { nullable: false, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'cashier_user_id' }) cashier!: User;
-  @Column({ name: 'pos_terminal_id', type: 'bigint' }) posTerminalId!: number;
-  @ManyToOne(() => PosTerminal, { nullable: false, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'pos_terminal_id' }) terminal!: PosTerminal;
+  @Column({ name: 'pos_terminal_id', type: 'bigint', nullable: true }) posTerminalId!: number | null;
+  @ManyToOne(() => PosTerminal, { nullable: true, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'pos_terminal_id' }) terminal!: PosTerminal | null;
   @Column({ name: 'started_at', type: 'datetime' }) startedAt!: Date;
   @Column({ name: 'ended_at', type: 'datetime', nullable: true }) endedAt!: Date | null;
   @Column({ name: 'ended_by_user_id', type: 'bigint', nullable: true }) endedByUserId!: number | null;

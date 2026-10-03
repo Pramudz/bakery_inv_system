@@ -18,9 +18,11 @@ import { PaymentMethod, PaymentMethodType } from '../payment-methods/payment-met
 import { Permission } from '../permissions/permissions.entity';
 import { RolePermission } from '../role-permissions/role-permissions.entity';
 import { TenantModule } from '../tenant-modules/tenant-modules.entity';
+import { Tenant } from '../tenants/tenant.entity';
+import { User } from '../users/user.entity';
 
 const user = { tenantId: 1, userId: 2, roleId: 4, roleCode: 'TENANT_ADMIN', accessScope: 'LOCATION', assignedLocationIds: [3] } as unknown as TenantPrincipal;
-const activePosSession: any = { terminal: { posTerminalId: 21 }, registerSession: { posRegisterSessionId: 22 }, cashierSession: { posCashierSessionId: 23 } };
+const activePosSession: any = { terminal: { posTerminalId: 21, terminalCode: 'POS1' }, config: { registerMode: 'TERMINAL_REGISTER' }, register: { receiptCode: null }, registerSession: { posRegisterSessionId: 22 }, cashierSession: { posCashierSessionId: 23 } };
 const currentLine = {
   productId: 10, productUnitId: 20, priceListId: 30, priceListItemId: 40,
   priceListItemDiscountId: 50, discountType: 'PERCENTAGE', discountValue: '10.0000',
@@ -30,6 +32,7 @@ const currentLine = {
 
 function fixture(grantCredit = true) {
   let savedInvoice: any;
+  let lastNumber = 0;
   const savedDetails: any[] = [];
   const invoiceRepo: any = {
     create: (value: any) => value,
@@ -50,6 +53,9 @@ function fixture(grantCredit = true) {
     },
   };
   const manager: any = { getRepository(entity: unknown) {
+    if (entity === Tenant) return { findOneBy: async () => ({ tenantId: 1, name: 'Test Bakery', timeZone: 'Asia/Colombo' }), findOneByOrFail: async () => ({ tenantId: 1, name: 'Test Bakery', timeZone: 'Asia/Colombo' }) };
+    if (entity === Location) return { findOneByOrFail: async () => ({ locationId: 3, tenantId: 1, code: 'BANDA', name: 'Bandaragama', addressLine1: 'Main Road' }) };
+    if (entity === User) return { findOneByOrFail: async () => ({ userId: 2, tenantId: 1, username: 'C17', firstName: 'Cashier' }) };
     if (entity === Invoice) return invoiceRepo;
     if (entity === InvoiceDetail) return detailRepo;
     if (entity === InvoicePayment) return { create: (value: any) => value, save: async (value: any) => value };
@@ -59,6 +65,10 @@ function fixture(grantCredit = true) {
     if (entity === TenantModule) return { findOneBy: async () => ({ tenantId: 1, moduleId: 6, isEnabled: true }) };
     if (entity === RolePermission) return { findOneBy: async () => grantCredit ? ({ roleId: 4, permissionId: 5 }) : null };
     throw new Error(`Unexpected repository ${String(entity)}`);
+  }, query: async (statement: string, params: any[]) => {
+    if (statement.includes('SELECT last_number')) return [{ last_number: lastNumber }];
+    if (statement.includes('UPDATE tbl_pos_receipt_counter')) lastNumber = Number(params[0]);
+    return [];
   } };
   const dataSource: any = {
     getRepository(entity: unknown) {

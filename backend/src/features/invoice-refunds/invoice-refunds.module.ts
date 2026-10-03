@@ -9,6 +9,7 @@ import { InvoiceRefundsService } from './invoice-refunds.service';
 import { InvoiceAdjustment } from './invoice-adjustment.entity';
 import { PaymentMethodsModule } from '../payment-methods/payment-methods.module';
 import { PosRegistersModule } from '../pos-registers/pos-registers.module';
+import { PosPrintModule } from '../pos-print/pos-print.module';
 
-@Module({ imports: [TypeOrmModule.forFeature([InvoiceRefund, InvoiceRefundDetail, InvoiceRefundPayment, InvoicePaymentReversal, InvoiceAdjustment]), PaymentMethodsModule, PosRegistersModule], controllers: [InvoiceRefundsController], providers: [InvoiceRefundsService] })
+@Module({ imports: [TypeOrmModule.forFeature([InvoiceRefund, InvoiceRefundDetail, InvoiceRefundPayment, InvoicePaymentReversal, InvoiceAdjustment]), PaymentMethodsModule, PosRegistersModule, PosPrintModule], controllers: [InvoiceRefundsController], providers: [InvoiceRefundsService] })
 export class InvoiceRefundsModule {}

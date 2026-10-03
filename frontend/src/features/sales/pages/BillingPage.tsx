@@ -5,6 +5,7 @@ import { customersApi } from "../../customers/api/customersApi";
 import { InvoiceQuote, invoicesApi } from "../api/invoicesApi";
 import { InvoiceReceiptContent } from "./InvoiceReceiptContent";
 import { downloadInvoiceReceipt } from "./invoiceReceiptPdf";
+import { saleBillReference } from "./saleBillReference";
 import { PaymentMethod, paymentMethodsApi } from "../api/paymentMethodsApi";
 import { ApiError } from "../../../services/apiClient";
 import { paymentChannelsApi } from "../api/paymentChannelsApi";
@@ -711,7 +712,7 @@ export function BillingPage() {
         </div>
         <div className="pos-bill-number">
           <small>Current bill</small>
-          <strong>{completedInvoice?.invoiceNumber ?? "New invoice"}</strong>
+          <strong>{completedInvoice ? saleBillReference(completedInvoice) : "New bill"}</strong>
         </div>
       </div>
       <div className="pos-layout">
@@ -1552,7 +1553,7 @@ export function BillingPage() {
             <span>✓</span>
             <h2>Sale completed</h2>
             <p>
-              {completedInvoice?.invoiceNumber} · {saleType} ·{" "}
+              {saleBillReference(completedInvoice)} · {saleType} ·{" "}
               {paymentEntries.map((entry) => entry.name).join(" + ") ||
                 "Unpaid"}{" "}
               · LKR {total.toLocaleString()}

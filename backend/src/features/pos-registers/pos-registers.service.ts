@@ -80,6 +80,7 @@ export class PosRegistersService {
     await this.location(this.dataSource.manager, dto.locationId, user, true);
     const repo = this.dataSource.getRepository(PosTerminal);
     const terminalCode = dto.terminalCode.trim().toUpperCase();
+    if (terminalCode === 'MASTER') throw new BadRequestException('MASTER is reserved for the location master register.');
     if (await repo.findOneBy({ tenantId: user.tenantId, locationId: dto.locationId, terminalCode })) throw new ConflictException('Terminal code already exists at this location.');
     try {
       const terminal = await repo.save(repo.create({
@@ -99,6 +100,7 @@ export class PosRegistersService {
   async updateTerminal(id: number, dto: UpdatePosTerminalDto, user: TenantPrincipal) {
     const terminal = await this.terminal(this.dataSource.manager, id, user);
     const terminalCode = dto.terminalCode.trim().toUpperCase();
+    if (terminalCode === 'MASTER') throw new BadRequestException('MASTER is reserved for the location master register.');
     const duplicate = await this.dataSource.getRepository(PosTerminal).findOneBy({ tenantId: user.tenantId, locationId: terminal.locationId, terminalCode });
     if (duplicate && Number(duplicate.posTerminalId) !== Number(id)) throw new ConflictException('Terminal code already exists at this location.');
     terminal.terminalCode = terminalCode;

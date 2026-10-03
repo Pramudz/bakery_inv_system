@@ -9,6 +9,7 @@ import { PriceListItemDiscountModule } from '../price-list-item-discounts/price-
 import { PosPricingService } from './pos-pricing.service';
 import { PaymentMethodsModule } from '../payment-methods/payment-methods.module';
 import { PosRegistersModule } from '../pos-registers/pos-registers.module';
+import { PosPrintModule } from '../pos-print/pos-print.module';
 
-@Module({ imports: [TypeOrmModule.forFeature([Invoice, InvoiceDetail, InvoicePayment]), PriceListItemDiscountModule, PaymentMethodsModule, PosRegistersModule], controllers: [InvoicesController], providers: [InvoicesService, PosPricingService], exports: [InvoicesService] })
+@Module({ imports: [TypeOrmModule.forFeature([Invoice, InvoiceDetail, InvoicePayment]), PriceListItemDiscountModule, PaymentMethodsModule, PosRegistersModule, PosPrintModule], controllers: [InvoicesController], providers: [InvoicesService, PosPricingService], exports: [InvoicesService] })
 export class InvoicesModule {}

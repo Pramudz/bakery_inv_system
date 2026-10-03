@@ -1,8 +1,15 @@
 import { Invoice } from './invoice.entity';
 
-export function snapshotInvoiceReceipt(invoice: Invoice) {
+export function snapshotInvoiceReceipt(invoice: Invoice, header?: Record<string, unknown>) {
   return {
-    version: 2,
+    version: 3,
+    documentType: 'SALE',
+    header: header ?? null,
+    businessDate: invoice.businessDate,
+    billNo: invoice.billNo,
+    printedLocationCode: invoice.printedLocationCode,
+    printedRegisterCode: invoice.printedRegisterCode,
+    issuedAt: invoice.issuedAt,
     invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate, saleType: invoice.saleType,
     subtotal: invoice.subtotal, discountTotal: invoice.discountTotal, grandTotal: invoice.grandTotal,
     tenderedAmount: invoice.tenderedAmount, paidAmount: invoice.paidAmount, balanceAmount: invoice.balanceAmount,
