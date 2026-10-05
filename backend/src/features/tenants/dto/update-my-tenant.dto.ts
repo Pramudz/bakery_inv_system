@@ -12,6 +12,7 @@ export class UpdateMyTenantDto {
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(150) name?: string;
   @EmptyToNull() @IsOptional() @IsString() @MaxLength(200) legalName?: string;
   @EmptyToNull() @IsOptional() @IsString() @MaxLength(100) registrationNumber?: string;
+  @EmptyToNull() @IsOptional() @IsString() @MaxLength(150) businessCategory?: string;
   @EmptyToNull() @IsOptional() @IsString() @MaxLength(100) taxRegistrationNumber?: string;
   @EmptyToNull() @IsOptional() @IsEmail() @MaxLength(150) email?: string;
   @EmptyToNull() @IsOptional() @IsString() @MaxLength(50) phone?: string;

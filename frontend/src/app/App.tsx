@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { readSidebarPreference, saveSidebarPreference } from "./sidebarPreference";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import "./app.css";
 import { useAuth } from "../features/auth/AuthContext";
@@ -76,6 +78,14 @@ const tenantGroups = [
     items: [["Locations", "/locations"]],
   },
   {
+    title: "Reports & Analytics",
+    items: [["Reports & Analytics", "/reports-analytics"]],
+  },
+  {
+    title: "Company Details",
+    items: [["Company Details", "/company-details"]],
+  },
+  {
     title: "System",
     items: [
       ["Modules", "/modules"],
@@ -114,6 +124,7 @@ const moduleForPath: Record<string, string> = {
   "/suppliers": "SUPPLIER",
   "/price-lists": "PRICING",
   "/locations": "LOCATION",
+  "/company-details": "LOCATION",
   "/purchase-orders": "PURCHASING",
   "/goods-receipts": "PURCHASING",
   "/goods-receipts/reverse": "PURCHASING",
@@ -149,6 +160,7 @@ const viewPermissionForPath: Record<string, string> = {
   "/suppliers": "SUPPLIER_VIEW",
   "/price-lists": "PRICE_LIST_VIEW",
   "/locations": "LOCATION_VIEW",
+  "/company-details": "LOCATION_VIEW",
   "/purchase-orders": "PURCHASE_ORDER_VIEW",
   "/goods-receipts": "GRN_VIEW",
   "/goods-receipts/reverse": "GRN_REVERSE",
@@ -158,6 +170,14 @@ const viewPermissionForPath: Record<string, string> = {
 };
 
 const viewAnyPermissionForPath: Record<string, string[]> = {
+  "/reports-analytics": [
+    "SALES_INVOICE_VIEW",
+    "INVENTORY_ADJUSTMENT_VIEW",
+    "PURCHASE_ORDER_VIEW",
+    "GRN_VIEW",
+    "SALES_REFUND_VIEW",
+    "SALES_REGISTER_CLOSE",
+  ],
   "/pos-register-management": [
     "SALES_BILLING",
     "SALES_POS_REGISTER_ADMIN",
@@ -169,6 +189,12 @@ const viewAnyPermissionForPath: Record<string, string[]> = {
 };
 
 export default function App() {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarPreference());
+  const toggleSidebar = () => {
+    const collapsed = !sidebarCollapsed;
+    setSidebarCollapsed(collapsed);
+    saveSidebarPreference(undefined, collapsed);
+  };
   const location = useLocation();
   const navigate = useNavigate();
   const {
@@ -211,7 +237,12 @@ export default function App() {
       ? "Inventory Adjustments"
       : location.pathname.startsWith("/goods-receipts/")
       ? "Goods Receipts"
-      : location.pathname.startsWith("/purchase-orders/") ? "Purchase Orders"
+      : location.pathname.startsWith("/purchase-orders/")
+      ? "Purchase Orders"
+      : location.pathname.startsWith("/reports-analytics")
+      ? "Reports & Analytics"
+      : location.pathname.startsWith("/company-details")
+      ? "Company Details"
       : (
           groups as ReadonlyArray<{
             title: string;
@@ -248,8 +279,9 @@ export default function App() {
   };
 
   return (
-    <div className={`shell${location.pathname === '/goods-receipts/reverse' ? ' shell-grn-reversal' : ''}`}>
-      <aside className="sidebar">
+    <div className={`shell${sidebarCollapsed ? ' shell-sidebar-collapsed' : ''}${location.pathname === '/goods-receipts/reverse' ? ' shell-grn-reversal' : ''}`}>
+      <aside id="app-sidebar" className="sidebar" aria-label="Main navigation" aria-hidden={sidebarCollapsed} inert={sidebarCollapsed}>
+        <div className="sidebar-inner">
         <div className="brand">
           <div className="brand-mark">E</div>
           <div>
@@ -309,13 +341,29 @@ export default function App() {
             ? "Tenant session active"
             : "Platform session active"}
         </div>
+        </div>
       </aside>
       <main className="main">
         <header className="topbar">
+          <div className="topbar-navigation">
+            <button
+              className="sidebar-toggle"
+              type="button"
+              onClick={toggleSidebar}
+              aria-controls="app-sidebar"
+              aria-expanded={!sidebarCollapsed}
+              aria-label={sidebarCollapsed ? "Show sidebar" : "Collapse sidebar"}
+              title={sidebarCollapsed ? "Show sidebar" : "Collapse sidebar"}
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d={sidebarCollapsed ? "M7 4l6 6-6 6" : "M13 4l-6 6 6 6"} />
+              </svg>
+            </button>
           <div className="crumb">
             <span>ERP Core</span>
             <b>/</b>
             <strong>{title}</strong>
+          </div>
           </div>
           <div className="top-actions">
             <button className="icon-btn" type="button">
