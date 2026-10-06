@@ -2,6 +2,8 @@ import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { Customer } from '../customers/customers.entity';
 import { Location } from '../locations/locations.entity';
 import { Product } from '../products/products.entity';
@@ -14,12 +16,17 @@ import { InvoicePayment } from './invoice-payment.entity';
 import { Invoice } from './invoice.entity';
 import { InvoicesController } from './invoices.controller';
 import { InvoicesService } from './invoices.service';
+import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { PaymentMethod, PaymentMethodType } from '../payment-methods/payment-methods.entity';
 import { Permission } from '../permissions/permissions.entity';
 import { RolePermission } from '../role-permissions/role-permissions.entity';
 import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 import { Tenant } from '../tenants/tenant.entity';
 import { User } from '../users/user.entity';
+import { Quotation } from '../quotations/quotation.entity';
+import { QuotationLine } from '../quotations/quotation-line.entity';
+import { ProductLocation } from '../product-locations/product-locations.entity';
+import { ProductUnit } from '../product-units/product-units.entity';
 
 const user = { tenantId: 1, userId: 2, roleId: 4, roleCode: 'TENANT_ADMIN', accessScope: 'LOCATION', assignedLocationIds: [3] } as unknown as TenantPrincipal;
 const activePosSession: any = { terminal: { posTerminalId: 21, terminalCode: 'POS1' }, config: { registerMode: 'TERMINAL_REGISTER' }, register: { receiptCode: null }, registerSession: { posRegisterSessionId: 22 }, cashierSession: { posCashierSessionId: 23 } };
@@ -30,8 +37,9 @@ const currentLine = {
   grossTotal: 200, discountAmount: 20, netTotal: 180, currencyCode: 'LKR',
 };
 
-function fixture(grantCredit = true) {
+function fixture(grantCredit = true, fromQuotation = false, currentUnitPrice = 100) {
   let savedInvoice: any;
+  let savedQuotation: any = fromQuotation ? { quotationId: 70, tenantId: 1, locationId: 3, customerId: 9, quotationNumber: 'QUO-1-2026-000001', locationNameSnapshot: 'Bandaragama', quotationType: 'RETAIL', status: 'ACCEPTED', subtotal: '200.00', discountTotal: '20.00', grandTotal: '180.00' } : null;
   let lastNumber = 0;
   const savedDetails: any[] = [];
   const invoiceRepo: any = {
@@ -59,6 +67,10 @@ function fixture(grantCredit = true) {
     if (entity === Invoice) return invoiceRepo;
     if (entity === InvoiceDetail) return detailRepo;
     if (entity === InvoicePayment) return { create: (value: any) => value, save: async (value: any) => value };
+    if (entity === Quotation) return { findOne: async ({ where }: any) => savedQuotation && Number(where.quotationId) === 70 && Number(where.tenantId) === 1 ? savedQuotation : null, save: async (row: any) => { savedQuotation = row; return row; } };
+    if (entity === QuotationLine) return { find: async () => [{ quotationId: 70, lineNumber: 1, productId: 10, unitId: 5, productCodeSnapshot: 'P10', quantity: '2.0000', unitPrice: '100.00', discountPercent: '10.0000', discountAmount: '20.00', grossTotal: '200.00', netTotal: '180.00' }] };
+    if (entity === ProductLocation) return { findOneBy: async () => ({ productId: 10, locationId: 3, isActive: true, isSellable: true }) };
+    if (entity === ProductUnit) return { findOneBy: async () => ({ productId: 10, unitId: 5, isActive: true, isBaseUnit: true, isSalesUnit: true }) };
     if (entity === Product) return { findOneBy: async () => ({ productId: 10, tenantId: 1, isActive: true, isSellable: true, isStockItem: false }) };
     if (entity === PaymentMethod) return { findOneBy: async (where: any) => where.paymentMethodId === 1 ? { paymentMethodId: 1, tenantId: 1, paymentMethodName: 'Cash', paymentMethodType: PaymentMethodType.CASH, isActive: true } : null };
     if (entity === Permission) return { findOneBy: async () => ({ permissionId: 5, moduleId: 6, code: 'SALES_CREDIT_AUTHORIZE', isActive: true }) };
@@ -72,16 +84,79 @@ function fixture(grantCredit = true) {
   } };
   const dataSource: any = {
     getRepository(entity: unknown) {
-      if (entity === Location) return { findOneBy: async () => ({ locationId: 3, tenantId: 1, isActive: true }) };
-      if (entity === Customer) return { findOneBy: async (where: any) => Number(where.customerId) === 9 && Number(where.tenantId) === 1 ? { customerId: 9, tenantId: 1, isActive: true, customerName: 'Credit Customer' } : null };
+      if (entity === Location) return { findOneBy: async (where: any) => ({ locationId: where.locationId, tenantId: 1, isActive: true }) };
+      if (entity === Customer) return { findOneBy: async (where: any) => (Number(where.customerId) === 9 || (fromQuotation && Number(where.customerId) === 8)) && Number(where.tenantId) === 1 ? { customerId: where.customerId, tenantId: 1, isActive: true, customerName: 'Credit Customer' } : null };
       if (entity === Invoice) return invoiceRepo;
       throw new Error(`Unexpected outer repository ${String(entity)}`);
     },
     transaction: (work: any) => work(manager),
   };
-  const pricing: any = { quoteWithManager: async () => ({ quotedAt: new Date().toISOString(), locationId: 3, saleType: 'RETAIL', priceList: { priceListId: 30 }, lines: [currentLine], subtotal: 200, discountTotal: 20, grandTotal: 180 }) };
-  return { service: new InvoicesService(dataSource, pricing, { requireCashierSession: async () => activePosSession } as any), savedDetails };
+  let pricingCalls = 0;
+  const pricing: any = { quoteWithManager: async () => {
+    pricingCalls += 1;
+    const line = { ...currentLine, unitPrice: currentUnitPrice, grossTotal: currentUnitPrice * 2, netTotal: currentUnitPrice * 2 - 20 };
+    return { quotedAt: new Date().toISOString(), locationId: 3, saleType: 'RETAIL', priceList: { priceListId: 30 }, lines: [line], subtotal: line.grossTotal, discountTotal: 20, grandTotal: line.netTotal };
+  } };
+  return { service: new InvoicesService(dataSource, pricing, { requireCashierSession: async () => activePosSession } as any), savedDetails, get quotation() { return savedQuotation; }, get pricingCalls() { return pricingCalls; } };
 }
+
+test('checkout DTO accepts absent quotation price-list IDs but rejects zero', () => {
+  const base = { checkoutKey: 'abcd1111-1111-4111-8111-111111111111', locationId: 3, saleType: 'RETAIL', details: [{ productId: 10, quantity: 2 }] };
+  assert.equal(validateSync(plainToInstance(CreateInvoiceDto, { ...base, sourceQuotationId: 70 })).length, 0);
+  assert.equal(validateSync(plainToInstance(CreateInvoiceDto, base)).length, 0);
+  assert.ok(validateSync(plainToInstance(CreateInvoiceDto, { ...base, details: [{ ...base.details[0], quotedPriceListItemId: 0 }] })).length > 0);
+});
+
+test('accepted quotation converts through normal checkout and same key returns the same invoice', async () => {
+  const f = fixture(true, true);
+  const request: any = { checkoutKey: 'abcd1111-1111-4111-8111-111111111111', sourceQuotationId: 70, locationId: 3, customerId: 9, saleType: 'RETAIL', details: [{ productId: 10, quantity: 2, quotedUnitPrice: 100, quotedDiscountAmount: 20 }], payments: [{ paymentMethodId: 1, amount: 180 }] };
+  const invoice = await f.service.create(request, user);
+  assert.equal(invoice.sourceQuotationId, 70);
+  assert.equal((invoice.receiptSnapshot as any).details[0].pricingSnapshot.priceListItemId, null);
+  assert.equal(invoice.billNo, 1);
+  assert.equal(f.quotation.status, 'CONVERTED');
+  assert.equal(f.quotation.convertedInvoiceId, invoice.invoiceId);
+  const replay = await f.service.create(request, user);
+  assert.equal(replay.invoiceId, invoice.invoiceId);
+  assert.equal(f.savedDetails.length, 1);
+  await assert.rejects(f.service.create({ ...request, checkoutKey: 'abcd2222-2222-4222-8222-222222222222' }, user), /already been converted/i);
+});
+
+test('accepted quotation keeps its saved price when the current price list changes', async () => {
+  const f = fixture(true, true, 230);
+  const invoice = await f.service.create({
+    checkoutKey: 'abcd1111-1111-4111-8111-111111111112', sourceQuotationId: 70,
+    locationId: 3, customerId: 9, saleType: 'RETAIL',
+    details: [{ productId: 10, quantity: 2, unitPrice: 100, discountAmount: 20, quotedUnitPrice: 100, quotedDiscountAmount: 20 }],
+    payments: [{ paymentMethodId: 1, amount: 180 }],
+  }, user);
+  assert.equal(invoice.grandTotal, '180.00');
+  assert.equal(f.savedDetails[0].unitPrice, '100.00');
+  assert.equal(f.pricingCalls, 0);
+});
+
+test('quotation conversion rejects location, customer, and line changes before invoice creation', async () => {
+  const base: any = { checkoutKey: 'abcd3333-3333-4333-8333-333333333333', sourceQuotationId: 70, locationId: 3, customerId: 9, saleType: 'RETAIL', details: [{ productId: 10, quantity: 2, quotedUnitPrice: 100, quotedDiscountAmount: 20 }], payments: [{ paymentMethodId: 1, amount: 180 }] };
+  await assert.rejects(fixture(true, true).service.create({ ...base, locationId: 4 }, { ...user, accessScope: 'TENANT', assignedLocationIds: [] }), /must be converted from that location/i);
+  await assert.rejects(fixture(true, true).service.create({ ...base, customerId: 8 }, user), /customer cannot be changed/i);
+  await assert.rejects(fixture(true, true).service.create({ ...base, details: [{ ...base.details[0], quantity: 3 }] }, user), /items and quantities cannot be changed/i);
+  await assert.rejects(fixture(true, true).service.create({ ...base, details: [{ ...base.details[0], productId: 11 }] }, user), /items and quantities cannot be changed/i);
+  await assert.rejects(fixture(true, true).service.create({ ...base, details: [{ ...base.details[0], quotedUnitPrice: 99 }] }, user), /prices cannot be changed/i);
+  await assert.rejects(fixture(true, true).service.create({ ...base, details: [{ ...base.details[0], unitPrice: 99 }] }, user), /prices cannot be changed/i);
+  await assert.rejects(fixture(true, true).service.create({ ...base, details: [{ ...base.details[0], quotedDiscountAmount: 19 }] }, user), /discounts cannot be changed/i);
+  await assert.rejects(fixture(true, true).service.create({ ...base, details: [{ ...base.details[0], discountAmount: 19 }] }, user), /discounts cannot be changed/i);
+});
+
+test('normal POS requires a positive quoted price-list ID and accepts a current one', async () => {
+  const base: any = { checkoutKey: 'abcd3333-3333-4333-8333-333333333334', locationId: 3, saleType: 'RETAIL', details: [{ productId: 10, quantity: 2, quotedUnitPrice: 100, quotedDiscountAmount: 20, quotedPriceListItemDiscountId: 50 }], payments: [{ paymentMethodId: 1, amount: 180 }] };
+  await assert.rejects(fixture().service.create(base, user), /valid quoted price list item is required/i);
+  await assert.rejects(fixture().service.create({ ...base, details: [{ ...base.details[0], quotedPriceListItemId: 0 }] }, user), /valid quoted price list item is required/i);
+  const f = fixture();
+  const invoice = await f.service.create({ ...base, details: [{ ...base.details[0], quotedPriceListItemId: 40 }] }, user);
+  assert.equal(invoice.grandTotal, '180.00');
+  assert.equal(f.pricingCalls, 1);
+  await assert.rejects(f.service.create(base, user), /valid quoted price list item is required/i);
+});
 
 test('authorized partial credit finalization ignores tampered browser price and discount amounts', async () => {
   const { service, savedDetails } = fixture();

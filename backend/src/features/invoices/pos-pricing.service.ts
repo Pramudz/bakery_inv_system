@@ -23,9 +23,9 @@ export interface PosPriceLineRequest {
 
 export interface PosPriceLine {
   productId: number;
-  productUnitId: number;
-  priceListId: number;
-  priceListItemId: number;
+  productUnitId: number | null;
+  priceListId: number | null;
+  priceListItemId: number | null;
   priceListItemDiscountId: number | null;
   discountType: string | null;
   discountValue: string | null;

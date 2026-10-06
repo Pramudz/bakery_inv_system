@@ -7,6 +7,9 @@ export const formatPurchaseOrderNumber = (
   nextNumber: number,
 ) => `PO-${tenantId}-${year}-${String(nextNumber).padStart(6, '0')}`;
 
+export const formatQuotationNumber = (tenantId: number, year: string, nextNumber: number) =>
+  `QUO-${tenantId}-${year}-${String(nextNumber).padStart(6, '0')}`;
+
 export const formatGoodsReceiptNumber = (
   tenantId: number,
   year: string,

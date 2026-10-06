@@ -57,6 +57,8 @@ export class AuthorizationCatalogService implements OnModuleInit {
       'SALES_REFUND_VIEW', 'SALES_REFUND_CREATE',
       'SALES_ADJUSTMENT_VIEW', 'SALES_ADJUSTMENT_CREATE',
       'SALES_PAYMENT_REVERSE', 'SALES_PAYMENT_METHOD_VIEW', 'SALES_PAYMENT_METHOD_MANAGE',
+      'SALES_QUOTATION_VIEW', 'SALES_QUOTATION_CREATE', 'SALES_QUOTATION_EDIT', 'SALES_QUOTATION_SEND',
+      'SALES_QUOTATION_ACCEPT', 'SALES_QUOTATION_CONVERT', 'SALES_QUOTATION_CANCEL',
     ];
     for (const code of salesPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: sales.moduleId, code, name: code.replace(/_/g, ' ').toLowerCase(), isActive: true }));
     const tenantProfilePermission = 'TENANT_PROFILE_UPDATE';

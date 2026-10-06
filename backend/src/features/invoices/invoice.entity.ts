@@ -35,6 +35,7 @@ export class Invoice extends AuditEntity {
   @Column({ name: 'printed_register_code', type: 'varchar', length: 50, nullable: true }) printedRegisterCode!: string | null;
   @Column({ name: 'issued_at', type: 'datetime', precision: 3, nullable: true }) issuedAt!: Date | null;
   @Column({ name: 'checkout_key', type: 'varchar', length: 36 }) checkoutKey!: string;
+  @Column({ name: 'source_quotation_id', type: 'bigint', nullable: true, unique: true }) sourceQuotationId!: number | null;
   @Column({ name: 'checkout_fingerprint', type: 'char', length: 64 }) checkoutFingerprint!: string;
   @Column({ name: 'invoice_date', type: 'datetime' }) invoiceDate!: Date;
   @Column({ name: 'sale_type', type: 'varchar', length: 20 }) saleType!: string;

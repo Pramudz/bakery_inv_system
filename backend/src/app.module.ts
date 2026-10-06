@@ -50,6 +50,7 @@ import { PaymentChannelsModule } from './features/payment-channels/payment-chann
 import { PosRegistersModule } from './features/pos-registers/pos-registers.module';
 import { PosPrintModule } from './features/pos-print/pos-print.module';
 import { ReportsModule } from './features/reports/reports.module';
+import { QuotationsModule } from './features/quotations/quotations.module';
 
 
 @Module({
@@ -94,6 +95,7 @@ import { ReportsModule } from './features/reports/reports.module';
     PosPrintModule,
     ReportsModule,
     InvoicesModule,
+    QuotationsModule,
     InvoiceRefundsModule,
     SupplierModule,
     LocationModule,

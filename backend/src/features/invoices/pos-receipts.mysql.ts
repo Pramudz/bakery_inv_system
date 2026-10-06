@@ -33,6 +33,11 @@ import { InvoiceRefundsService } from '../invoice-refunds/invoice-refunds.servic
 import { InvoiceRefund } from '../invoice-refunds/invoice-refund.entity';
 import { PosPrintService } from '../pos-print/pos-print.service';
 import { PosPrintJob } from '../pos-print/pos-print-job.entity';
+import { Customer } from '../customers/customers.entity';
+import { NumberSequencesService } from '../number-sequences/number-sequences.service';
+import { QuotationsService } from '../quotations/quotations.service';
+import { Quotation } from '../quotations/quotation.entity';
+import { businessDateAt } from '../../common/business-date';
 
 test('disposable MySQL: upgrade history, concurrent first bills and refunds, rollback, print retry', { timeout: 180000 }, async () => {
   assert.ok(['localhost', '127.0.0.1', '::1'].includes(process.env.DB_HOST ?? ''), 'Local MySQL is required.');
@@ -86,7 +91,7 @@ test('disposable MySQL: upgrade history, concurrent first bills and refunds, rol
     const productUnit = await db.getRepository(ProductUnit).save(db.getRepository(ProductUnit).create({ productId: product.productId, unitId: unit.unitId, conversionFactor: '1', isBaseUnit: true, isPurchaseUnit: false, isSalesUnit: true, isActive: true }));
     for (const location of locations) await db.getRepository(ProductLocation).save(db.getRepository(ProductLocation).create({ productId: product.productId, locationId: location.locationId, isActive: true, isSellable: true, isPurchasable: false }));
     const priceList = await db.getRepository(PriceList).save(db.getRepository(PriceList).create({ tenantId: tenant.tenantId, code: 'RETAIL', name: 'Retail', priceListType: 'RETAIL', currencyCode: 'LKR', isDefault: true, isActive: true }));
-    await db.getRepository(PriceListItem).save(db.getRepository(PriceListItem).create({ tenantId: tenant.tenantId, priceListId: priceList.priceListId, productId: product.productId, unitId: unit.unitId, productUnitId: productUnit.productUnitId, sellingPrice: '10', currencyCode: 'LKR', minimumQuantity: '1', effectiveFrom: new Date('2026-01-01T00:00:00Z'), effectiveTo: null, isActive: true }));
+    const priceItem = await db.getRepository(PriceListItem).save(db.getRepository(PriceListItem).create({ tenantId: tenant.tenantId, priceListId: priceList.priceListId, productId: product.productId, unitId: unit.unitId, productUnitId: productUnit.productUnitId, sellingPrice: '10', currencyCode: 'LKR', minimumQuantity: '1', effectiveFrom: new Date('2026-01-01T00:00:00Z'), effectiveTo: null, isActive: true }));
     const method = await db.getRepository(PaymentMethod).save(db.getRepository(PaymentMethod).create({ tenantId: tenant.tenantId, paymentMethodName: 'Cash', paymentMethodType: PaymentMethodType.CASH, isActive: true }));
     const print = new PosPrintService(db);
     const configured = await print.configure({ locationId: Number(locations[0].locationId), posTerminalId: null, displayName: 'Test TCP printer', transport: 'TCP', target: '192.168.1.50', port: 9100, paperWidth: 80, encoding: 'CP437', cutEnabled: true, isActive: true }, principal);
@@ -117,6 +122,35 @@ test('disposable MySQL: upgrade history, concurrent first bills and refunds, rol
     terminalCode = 'POS1';
     const restored = await invoices.create(request(Number(locations[0].locationId)), principal);
     assert.equal(restored.billNo, 4);
+    const customer = await db.getRepository(Customer).save(db.getRepository(Customer).create({ tenantId: tenant.tenantId, customerCode: 'CUST-QUOTE', customerName: 'Quoted customer', phone: '0771234567', isActive: true }));
+    const quotationService = new QuotationsService(db, new PosPricingService(db, discounts), new NumberSequencesService(), invoices);
+    const today = businessDateAt(new Date(), tenant.timeZone);
+    const draft = await quotationService.create({ locationId: Number(locations[0].locationId), customerId: Number(customer.customerId), quotationDate: today, validUntil: today, quotationType: 'RETAIL', lines: [{ productId: Number(product.productId), quantity: 2 }] }, principal);
+    assert.match(draft.quotationNumber, new RegExp(`^QUO-${tenant.tenantId}-${today.slice(0,4)}-000001$`));
+    assert.equal(draft.status, 'DRAFT');
+    assert.equal((await db.getRepository(Invoice).countBy({ tenantId: tenant.tenantId })), 8);
+    await quotationService.transition(draft.quotationId, 'send', principal);
+    await quotationService.transition(draft.quotationId, 'accept', principal);
+    await db.getRepository(PriceListItem).update(priceItem.priceListItemId, { sellingPrice: '12' });
+    const quoteRequest = (checkoutKey: string = randomUUID()) => ({
+      checkoutKey, sourceQuotationId: Number(draft.quotationId),
+      locationId: Number(locations[0].locationId), customerId: Number(customer.customerId), saleType: 'RETAIL',
+      details: [{ productId: Number(product.productId), quantity: 2, quotedUnitPrice: 10, quotedDiscountAmount: 0 }],
+      payments: [{ paymentMethodId: Number(method.paymentMethodId), amount: 20 }],
+    } as any);
+    const [conversionA, conversionB] = await Promise.allSettled([invoices.create(quoteRequest(), principal), invoices.create(quoteRequest(), principal)]);
+    assert.equal([conversionA, conversionB].filter(row => row.status === 'fulfilled').length, 1);
+    const convertedInvoice = (conversionA.status === 'fulfilled' ? conversionA.value : (conversionB as PromiseFulfilledResult<Invoice>).value);
+    assert.equal(convertedInvoice.sourceQuotationId, draft.quotationId);
+    assert.equal(convertedInvoice.grandTotal, '20.00');
+    assert.equal((convertedInvoice.receiptSnapshot as any).details[0].pricingSnapshot.priceListItemId, null);
+    assert.equal(convertedInvoice.billNo, 5);
+    const convertedQuote = await db.getRepository(Quotation).findOneByOrFail({ quotationId: draft.quotationId });
+    assert.equal(convertedQuote.status, 'CONVERTED');
+    assert.equal(Number(convertedQuote.convertedInvoiceId), Number(convertedInvoice.invoiceId));
+    await assert.rejects(invoices.create(quoteRequest(), principal), /already been converted/i);
+    const retry = await invoices.create(quoteRequest(convertedInvoice.checkoutKey), principal);
+    assert.equal(retry.invoiceId, convertedInvoice.invoiceId);
     await assert.rejects(db.transaction(async (manager) => { await nextPosReceiptNumber(manager, 'SALE', principal.tenantId, '2026-10-04', 'ROLL', 'POS1'); throw new Error('rollback'); }), /rollback/);
     const rolledBack = await db.transaction((manager) => nextPosReceiptNumber(manager, 'SALE', principal.tenantId, '2026-10-04', 'ROLL', 'POS1'));
     assert.equal(rolledBack, 1);
@@ -156,7 +190,7 @@ test('disposable MySQL: upgrade history, concurrent first bills and refunds, rol
     assert.equal(reclaimed!.attempt, interrupted!.attempt + 1);
     await assert.rejects(() => print.complete(configured.profile.posPrintProfileId, interrupted!.jobId, configured.agentToken!, interrupted!.attempt, true), /Stale print acknowledgment/);
     await print.complete(configured.profile.posPrintProfileId, reclaimed!.jobId, configured.agentToken!, reclaimed!.attempt, true);
-    assert.equal(await db.getRepository(Invoice).countBy({ tenantId: tenant.tenantId }), 8);
+    assert.equal(await db.getRepository(Invoice).countBy({ tenantId: tenant.tenantId }), 9);
     assert.equal(await db.getRepository(InvoiceRefund).countBy({ tenantId: tenant.tenantId }), 3);
     const history = await invoices.history(principal, 1, 2, 'BANDA', 'INVOICE', 'ALL');
     assert.equal(history.items.length, 2);

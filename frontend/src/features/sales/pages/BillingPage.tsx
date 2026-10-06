@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { customersApi } from "../../customers/api/customersApi";
 import { InvoiceQuote, invoicesApi } from "../api/invoicesApi";
 import { InvoiceReceiptContent } from "./InvoiceReceiptContent";
@@ -19,7 +19,12 @@ import {
 import { useAuth } from "../../auth/AuthContext";
 import { posRegistersApi } from "../../pos-registers/api/posRegistersApi";
 import { billingDraftKey, readBillingDraft, removeBillingDraft, writeBillingDraft } from "../billingDraftStorage";
+import { quotationsApi } from "../api/quotationsApi";
+import { filterPosProducts } from "../posProductSearch";
+import { canCompleteSale, conversionMatchesCheckout } from "./billingCheckoutEligibility";
+import { billingCheckoutDetail } from "./billingCheckoutDetails";
 import "./billing-register-session.css";
+import "./quotations.css";
 
 type SaleType = "Retail" | "Wholesale";
 type Product = {
@@ -49,6 +54,10 @@ type PaymentFieldErrors = Partial<
 
 export function BillingPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const sourceQuotationId = Number(searchParams.get('quotationId') || 0);
+  const conversionQuery = useQuery({ queryKey: ['quotation-conversion', sourceQuotationId], queryFn: () => quotationsApi.posPreview(sourceQuotationId), enabled: sourceQuotationId > 0, retry: false, staleTime: Infinity, refetchOnWindowFocus: false, refetchOnReconnect: false });
+  const conversion = conversionQuery.data;
   const { permissions, role, tenant, tenantUser } = useAuth();
   const saleTypeSection = useRef<HTMLDivElement>(null);
   const productSection = useRef<HTMLDivElement>(null);
@@ -110,15 +119,15 @@ export function BillingPage() {
     const first = (locationsQuery.data ?? []).find(
       (x: any) => x.isActive !== false,
     );
-    if (!locationId && first) setLocationId(Number(first.locationId));
-  }, [locationsQuery.data, locationId]);
+    if (!sourceQuotationId && !locationId && first) setLocationId(Number(first.locationId));
+  }, [locationsQuery.data, locationId, sourceQuotationId]);
   const draftKey = tenant?.tenantId && tenantUser?.userId && locationId
     ? billingDraftKey(tenant.tenantId, tenantUser.userId, locationId)
     : null;
   const hydratedDraftKey = useRef<string | null>(null);
   const skipDraftWrite = useRef(false);
   useEffect(() => {
-    if (!draftKey || hydratedDraftKey.current === draftKey) return;
+    if (sourceQuotationId || !draftKey || hydratedDraftKey.current === draftKey) return;
     skipDraftWrite.current = true;
     hydratedDraftKey.current = draftKey;
     const draft = readBillingDraft(localStorage, draftKey);
@@ -131,13 +140,28 @@ export function BillingPage() {
     setPaymentEntries(draft?.paymentEntries ?? []);
     setCheckoutKey(draft?.checkoutKey ?? crypto.randomUUID());
     clearPaymentDraft();
-  }, [draftKey]);
+  }, [draftKey, sourceQuotationId]);
   useEffect(() => {
-    if (!draftKey || hydratedDraftKey.current !== draftKey) return;
+    if (sourceQuotationId || !draftKey || hydratedDraftKey.current !== draftKey) return;
     if (skipDraftWrite.current) { skipDraftWrite.current = false; return; }
     if (complete) { removeBillingDraft(localStorage, draftKey); return; }
     writeBillingDraft(localStorage, draftKey, { checkoutKey, saleType, cart, selectedCustomer, sellOnCredit, paymentEntries });
-  }, [draftKey, checkoutKey, saleType, cart, selectedCustomer, sellOnCredit, paymentEntries, complete]);
+  }, [draftKey, checkoutKey, saleType, cart, selectedCustomer, sellOnCredit, paymentEntries, complete, sourceQuotationId]);
+  useEffect(() => {
+    if (!conversion) return;
+    setLocationId(Number(conversion.locationId));
+    setSaleType(conversion.quotationType === 'WHOLESALE' ? 'Wholesale' : 'Retail');
+    setSelectedCustomer({ customerId: Number(conversion.customerId), code: conversion.customerCodeSnapshot, name: conversion.customerNameSnapshot, phone: conversion.customerPhoneSnapshot || '' });
+    setCustomerQuery(conversion.customerCodeSnapshot);
+    setNewCustomer(false);
+    setSellOnCredit(false);
+    setComplete(false);
+    setCompletedInvoice(null);
+    setPriceChangeQuote(null);
+    setCart(conversion.lines.map(line => ({ productId: Number(line.productId), code: line.productCodeSnapshot, name: line.productNameSnapshot, category: '', retailPrice: Number(line.unitPrice), wholesalePrice: Number(line.unitPrice), stock: Number.MAX_SAFE_INTEGER, qty: Number(line.quantity), discountPct: Number(line.discountPercent), discountRs: Number(line.discountAmount) })));
+    setCheckoutKey(crypto.randomUUID());
+    setPaymentEntries([]);
+  }, [conversion]);
   const saleTypeCode = saleType.toUpperCase() as "RETAIL" | "WHOLESALE";
   const catalogQuery = useQuery({
     queryKey: ["invoice-catalog", locationId, saleTypeCode],
@@ -182,13 +206,24 @@ export function BillingPage() {
         })),
       }),
     enabled:
-      locationId > 0 && cart.length > 0 && cart.every((line) => line.qty > 0),
+      !sourceQuotationId && locationId > 0 && cart.length > 0 && cart.every((line) => line.qty > 0),
     retry: false,
   });
   useEffect(() => {
     setPriceChangeQuote(null);
   }, [locationId, saleTypeCode, cart]);
-  const activeQuote = priceChangeQuote ?? quoteQuery.data;
+  const conversionPrice: InvoiceQuote | undefined = conversion ? { quotedAt: '', locationId: Number(conversion.locationId), saleType: conversion.quotationType, subtotal: Number(conversion.subtotal), discountTotal: Number(conversion.discountTotal), grandTotal: Number(conversion.grandTotal), lines: conversion.lines.map(line => ({ productId: Number(line.productId), productUnitId: null, priceListId: null, priceListItemId: null, priceListItemDiscountId: null, discountType: null, discountValue: null, quantity: Number(line.quantity), unitPrice: Number(line.unitPrice), discountPerUnit: Number(line.discountAmount) / Number(line.quantity), discountPercentage: Number(line.discountPercent), grossTotal: Number(line.grossTotal), discountAmount: Number(line.discountAmount), netTotal: Number(line.netTotal), currencyCode: 'LKR' })) } : undefined;
+  const activeQuote = sourceQuotationId > 0
+    ? conversionPrice
+    : priceChangeQuote ?? quoteQuery.data;
+  const conversionReady = conversionMatchesCheckout(
+    conversion,
+    sourceQuotationId,
+    locationId,
+    selectedCustomer?.customerId,
+    saleTypeCode,
+    cart,
+  );
   const quotedLine = (x: Product) =>
     activeQuote?.lines.find(
       (line) => Number(line.productId) === Number(x.productId),
@@ -249,6 +284,7 @@ export function BillingPage() {
     }: { acceptPriceChanges?: boolean; quote?: InvoiceQuote } = {}) =>
       invoicesApi.create({
         checkoutKey,
+        sourceQuotationId: sourceQuotationId || undefined,
         locationId,
         customerId: selectedCustomer?.customerId,
         saleType: saleTypeCode,
@@ -256,18 +292,9 @@ export function BillingPage() {
           const line = quote?.lines.find(
             (candidate) => Number(candidate.productId) === Number(x.productId),
           );
-          return {
-            productId: x.productId,
-            quantity: x.qty,
-            unitPrice: unitPrice(x),
-            discountPercentage: line?.discountPercentage ?? 0,
-            discountAmount: line?.discountAmount ?? 0,
-            quotedPriceListItemId: line?.priceListItemId,
-            quotedPriceListItemDiscountId:
-              line?.priceListItemDiscountId ?? undefined,
-            quotedUnitPrice: line?.unitPrice,
-            quotedDiscountAmount: line?.discountAmount,
-          };
+          return billingCheckoutDetail(
+            x.productId, x.qty, unitPrice(x), line, sourceQuotationId,
+          );
         }),
         payments: paymentEntries.map((x) => ({
           paymentMethodId: x.paymentMethodId,
@@ -293,6 +320,19 @@ export function BillingPage() {
     onSettled: () => {
       submitGuard.current = false;
     },
+  });
+  const checkoutReady = canCompleteSale({
+    sourceQuotationId,
+    conversionReady,
+    cartReady: cart.length > 0,
+    locationReady: locationId > 0,
+    checkoutPending: invoiceMutation.isPending,
+    quotePending: quoteQuery.isPending,
+    quoteError: quoteQuery.isError,
+    hasActiveQuote: Boolean(activeQuote),
+    creditReady,
+    sessionReady,
+    paymentEntryPending: Boolean(editingPaymentId || paid.trim() || paymentSequenceError),
   });
   const clearPaymentDraft = () => {
     setPaid("");
@@ -375,7 +415,7 @@ export function BillingPage() {
   const submitSale = (
     options: { acceptPriceChanges?: boolean; quote?: InvoiceQuote } = {},
   ) => {
-    if (submitGuard.current || invoiceMutation.isPending) return;
+    if (submitGuard.current || invoiceMutation.isPending || (sourceQuotationId > 0 && !conversion)) return;
     if (editingPaymentId || paid.trim()) {
       setPaymentValidation({
         form: "Add or cancel the payment being edited before completing the sale.",
@@ -408,6 +448,7 @@ export function BillingPage() {
     invoiceMutation.mutate(options);
   };
   const changeType = (type: SaleType) => {
+    if (sourceQuotationId) return;
     if (type === saleType) return;
     setSaleType(type);
     clearPaymentDraft();
@@ -437,6 +478,7 @@ export function BillingPage() {
     }
   };
   const add = (p: Product) => {
+    if (sourceQuotationId) return;
     const existingQuantity =
       cart.find((line) => line.code === p.code)?.qty ?? 0;
     if (existingQuantity + 1 > p.stock) return;
@@ -657,6 +699,7 @@ export function BillingPage() {
     else if (completedInvoice) downloadInvoiceReceipt(completedInvoice);
   };
   const resetSale = () => {
+    if (sourceQuotationId) { navigate(`/quotations/${sourceQuotationId}`); return; }
     setComplete(false);
     setSaleType("Retail");
     setCart([]);
@@ -700,7 +743,8 @@ export function BillingPage() {
   };
 
   return (
-    <div className="pos-page">
+    <div className={`pos-page${sourceQuotationId ? ' quotation-conversion' : ''}`}>
+      {sourceQuotationId > 0 && <div className="card quotation-conversion-banner"><div><strong>{conversion ? `Converting ${conversion.quotationNumber}` : 'Loading quotation…'}</strong><p>{conversion ? `${conversion.customerNameSnapshot} · ${conversion.locationNameSnapshot}. Quoted items, quantities and prices are locked. Complete payment through this POS checkout.` : conversionQuery.error?.message || 'Preparing accepted quotation.'}</p></div><button className="btn btn-secondary" onClick={() => navigate(conversion ? `/quotations/${conversion.quotationId}` : '/quotations')}>Cancel conversion</button></div>}
       <div className="page-head">
         <div>
           <div className="eyebrow">SALES / POINT OF SALE</div>
@@ -724,6 +768,7 @@ export function BillingPage() {
             </div>
             <select
               className="control"
+              disabled={sourceQuotationId > 0}
               value={locationId || ""}
               onChange={(event) => {
                 setLocationId(Number(event.target.value));
@@ -768,6 +813,7 @@ export function BillingPage() {
             <div className="sale-type-options">
               <button
                 className={saleType === "Retail" ? "active" : ""}
+                disabled={sourceQuotationId > 0}
                 onKeyDown={(event) => selectTypeWithPlus(event, "Retail")}
                 onClick={() => changeType("Retail")}
               >
@@ -777,6 +823,7 @@ export function BillingPage() {
               </button>
               <button
                 className={saleType === "Wholesale" ? "active" : ""}
+                disabled={sourceQuotationId > 0}
                 onKeyDown={(event) => selectTypeWithPlus(event, "Wholesale")}
                 onClick={() => changeType("Wholesale")}
               >
@@ -790,7 +837,7 @@ export function BillingPage() {
               <strong>{saleType} Sale</strong>
             </div>
           </div>
-          <div
+          {!sourceQuotationId && <div
             ref={productSection}
             onKeyDown={keepEnterInSection}
             className="card pos-product-picker"
@@ -845,15 +892,7 @@ export function BillingPage() {
             </div>
             {query.trim() || category !== "All categories" ? (
               <div className="pos-product-results">
-                {products
-                  .filter(
-                    (x) =>
-                      (category === "All categories" ||
-                        x.category === category) &&
-                      `${x.code} ${x.name}`
-                        .toLowerCase()
-                        .includes(query.toLowerCase()),
-                  )
+                {filterPosProducts(products, query, category)
                   .map((p, index) => {
                     const quantity =
                       cart.find((x) => x.code === p.code)?.qty ?? 0;
@@ -909,7 +948,7 @@ export function BillingPage() {
                 </small>
               </div>
             )}
-          </div>
+          </div>}
           <div
             ref={cartSection}
             onKeyDown={navigateCart}
@@ -928,6 +967,7 @@ export function BillingPage() {
               </div>
               <button
                 className="btn btn-secondary"
+                disabled={sourceQuotationId > 0}
                 onClick={() => {
                   setCart([]);
                   clearPaymentDraft();
@@ -967,6 +1007,7 @@ export function BillingPage() {
                       <td>
                         <input
                           data-cart-cell
+                          disabled={sourceQuotationId > 0}
                           data-cart-row={i}
                           data-cart-column="0"
                           className="control pos-small-input"
@@ -1023,6 +1064,7 @@ export function BillingPage() {
                       <td>
                         <button
                           data-cart-cell
+                          disabled={sourceQuotationId > 0}
                           data-cart-row={i}
                           data-cart-column="3"
                           className="sales-more cart-remove"
@@ -1060,6 +1102,7 @@ export function BillingPage() {
               <div className="customer-actions">
                 <button
                   className="btn btn-secondary"
+                  disabled={sourceQuotationId > 0}
                   onClick={() => {
                     setNewCustomer(true);
                     setSelectedCustomer(null);
@@ -1071,6 +1114,7 @@ export function BillingPage() {
                 </button>
                 <button
                   className="btn btn-secondary"
+                  disabled={sourceQuotationId > 0}
                   onClick={() => {
                     setNewCustomer(false);
                     setSelectedCustomer(null);
@@ -1089,6 +1133,7 @@ export function BillingPage() {
               <span>⌕</span>
               <input
                 value={customerQuery}
+                disabled={sourceQuotationId > 0}
                 onChange={(e) => {
                   setCustomerQuery(e.target.value);
                   setSelectedCustomer(null);
@@ -1476,25 +1521,13 @@ export function BillingPage() {
             <div className="payment-finish">
               <button
                 className="pos-complete"
-                disabled={
-                  !cart.length ||
-                  !locationId ||
-                  invoiceMutation.isPending ||
-                  quoteQuery.isPending ||
-                  quoteQuery.isError ||
-                  !activeQuote ||
-                  !creditReady ||
-                  !sessionReady ||
-                  Boolean(
-                    editingPaymentId || paid.trim() || paymentSequenceError,
-                  )
-                }
+                disabled={!checkoutReady}
                 onClick={() => submitSale()}
               >
                 ✓ Complete sale
               </button>
             </div>
-            {quoteQuery.isError && (
+            {!sourceQuotationId && quoteQuery.isError && (
               <div className="error-box">
                 Unable to confirm current prices: {quoteQuery.error.message}
               </div>

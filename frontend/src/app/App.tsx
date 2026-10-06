@@ -22,6 +22,7 @@ const tenantGroups = [
     items: [
       ["Sales", "/sales"],
       ["Billing", "/billing"],
+      ["Quotations", "/quotations"],
       ["Pending Payments", "/pending-payments"],
       ["Refunds", "/refunds"],
       ["Payment Methods", "/payment-methods"],
@@ -99,6 +100,7 @@ const tenantGroups = [
 const moduleForPath: Record<string, string> = {
   "/sales": "SALES",
   "/billing": "SALES",
+  "/quotations": "SALES",
   "/pending-payments": "SALES",
   "/refunds": "SALES",
   "/payment-methods": "SALES",
@@ -136,6 +138,7 @@ const moduleForPath: Record<string, string> = {
 const viewPermissionForPath: Record<string, string> = {
   "/sales": "SALES_INVOICE_VIEW",
   "/billing": "SALES_BILLING",
+  "/quotations": "SALES_QUOTATION_VIEW",
   "/pending-payments": "SALES_PAYMENT_COLLECT",
   "/refunds": "SALES_REFUND_VIEW",
   "/payment-methods": "SALES_PAYMENT_METHOD_VIEW",
