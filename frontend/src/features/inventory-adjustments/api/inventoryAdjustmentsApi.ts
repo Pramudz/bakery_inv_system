@@ -1,4 +1,5 @@
 import { apiClient } from "../../../services/apiClient";
+import type { DocumentHeader } from "../../documents/documentTypes";
 
 export type AdjustmentMovementType = "ADJI" | "ADJO";
 export type AdjustmentStatus = "DRAFT" | "POSTED" | "CANCELLED";
@@ -80,6 +81,8 @@ export interface AdjustmentUser {
 }
 
 export interface InventoryAdjustment {
+  createdAt?: string;
+  documentHeader?: DocumentHeader;
   inventoryAdjustmentId: number;
   adjustmentNumber: string | null;
   adjustmentDate: string;

@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Modal } from "../../../components/ui/Modal";
 import { useAuth } from "../../auth/AuthContext";
+import { DocumentPdfActions } from "../../documents/DocumentPdfActions";
+import { inventoryConversionDocument } from "../../documents/transactionDocuments";
 import {
   inventoryConversionsApi,
   type AllocationMethod,
@@ -237,6 +239,7 @@ function InventoryConversionFormPage({ mode, id }: { mode: ScreenMode; id: strin
   return (
     <div className="direct-grn-page adjustment-page inventory-adjustments-page inventory-conversion-page">
       <header className="page-head direct-grn-head"><div><div className="direct-grn-title-row"><h1>{title}</h1><span className="grn-status-badge">{statusLabel(status)}</span></div><div className="direct-grn-breadcrumb">Inventory / <button type="button" onClick={() => navigate(returnTo)}>Value Adjustments / Conversions</button> / {mode === "create" ? "Create" : mode === "edit" ? "Edit" : "View"}</div></div></header>
+      {mode === "view" && conversion.data && <DocumentPdfActions document={() => inventoryConversionDocument(conversion.data!, auth.tenant?.timeZone ?? "Asia/Colombo")} />}
       {restored && editable && <p className="grn-restored-message" role="status">Your unsaved Inventory Conversion draft has been restored.</p>}
       {mode === "edit" && !editable && <p className="grn-restored-message">This conversion is {statusLabel(status)} and is read-only.</p>}
       {locations.error && <p className="error" role="alert">Conversion configuration could not be loaded: {locations.error.message}</p>}

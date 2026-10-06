@@ -1,4 +1,5 @@
 import { apiClient } from "../../../services/apiClient";
+import type { DocumentHeader } from "../../documents/documentTypes";
 
 export type AllocationMethod =
   | "MANUAL_PERCENT"
@@ -76,6 +77,8 @@ export interface InventoryConversionLine {
 }
 
 export interface InventoryConversion {
+  createdAt?: string;
+  documentHeader?: DocumentHeader;
   inventoryConversionId: number;
   conversionNumber: string | null;
   locationId: number;

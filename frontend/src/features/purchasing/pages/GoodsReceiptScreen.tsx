@@ -10,6 +10,8 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Modal } from "../../../components/ui/Modal";
 import { SearchableSelect } from "../../../components/ui/SearchableSelect";
 import { useAuth } from "../../auth/AuthContext";
+import { DocumentPdfActions } from "../../documents/DocumentPdfActions";
+import { goodsReceiptDocument } from "../../documents/transactionDocuments";
 import { locationsApi } from "../../locations/api/locationsApi";
 import { productsApi } from "../../products/api/productsApi";
 import { suppliersApi } from "../../suppliers/api/suppliersApi";
@@ -668,6 +670,8 @@ export function GoodsReceiptScreen({ mode }: { mode: GoodsReceiptMode }) {
           </div>
         )}
       </header>
+
+      {mode === "view" && receipt.data && <DocumentPdfActions document={() => goodsReceiptDocument(receipt.data!, tenant?.timeZone ?? "Asia/Colombo")} />}
 
       <div className="direct-grn-layout">
         <div className="direct-grn-main">

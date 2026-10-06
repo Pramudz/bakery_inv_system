@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { tenantBusinessClock } from '../../common/business-date';
+import { loadDocumentHeader } from '../../common/document-header';
 import { baseQuantity, checked, units } from '../../common/inventory-decimal';
 import { InventoryAgeLayer } from '../inventory-age-layers/inventory-age-layer.entity';
 import { InventoryAgeLayerService } from '../inventory-age-layers/inventory-age-layer.service';
@@ -141,8 +142,11 @@ export class InventoryAdjustmentsService {
     const adjustment = await this.dataSource.getRepository(InventoryAdjustment).findOne({ where: { inventoryAdjustmentId: id, tenantId: user.tenantId }, relations: { reason: true, location: true, createdByUser: true, postedByUser: true, cancelledByUser: true } });
     if (!adjustment) throw new NotFoundException('Inventory adjustment not found.');
     await this.assertLocationAccess(this.dataSource.manager, user, Number(adjustment.locationId));
-    const lines = await this.dataSource.getRepository(InventoryAdjustmentLine).find({ where: { inventoryAdjustmentId: id }, relations: { product: { baseUnit: true }, productUnit: { unit: true } }, order: { inventoryAdjustmentLineId: 'ASC' } });
-    return { ...adjustment, lines };
+    const [lines, documentHeader] = await Promise.all([
+      this.dataSource.getRepository(InventoryAdjustmentLine).find({ where: { inventoryAdjustmentId: id }, relations: { product: { baseUnit: true }, productUnit: { unit: true } }, order: { inventoryAdjustmentLineId: 'ASC' } }),
+      loadDocumentHeader(this.dataSource, user.tenantId, Number(adjustment.locationId)),
+    ]);
+    return { ...adjustment, lines, documentHeader };
   }
 
   async create(dto: CreateInventoryAdjustmentDto, user: TenantPrincipal) {

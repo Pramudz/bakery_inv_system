@@ -4,6 +4,8 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Modal } from "../../../components/ui/Modal";
 import { SearchableSelect } from "../../../components/ui/SearchableSelect";
 import { useAuth } from "../../auth/AuthContext";
+import { DocumentPdfActions } from "../../documents/DocumentPdfActions";
+import { purchaseOrderDocument } from "../../documents/transactionDocuments";
 import { locationsApi } from "../../locations/api/locationsApi";
 import { productsApi, type Product } from "../../products/api/productsApi";
 import { suppliersApi } from "../../suppliers/api/suppliersApi";
@@ -185,6 +187,7 @@ function PurchaseOrderFormPage({ mode, id }: { mode: PurchaseOrderMode; id: stri
 
   return <div className="direct-grn-page po-page">
     <header className="page-head direct-grn-head"><div><div className="direct-grn-title-row"><h1>{title}</h1><span className="grn-status-badge">{statusLabel(status)}</span></div><div className="direct-grn-breadcrumb">Purchasing / <button type="button" onClick={() => navigate(returnTo)}>Purchase Orders</button> / {mode === "create" ? title : `${mode === "view" ? "View" : "Edit"} Purchase Order`}</div></div></header>
+    {mode === "view" && order.data && <DocumentPdfActions document={() => purchaseOrderDocument(order.data!, auth.tenant?.timeZone ?? "Asia/Colombo")} />}
     {restored && editable && <p className="grn-restored-message" role="status">Your unsaved Purchase Order draft has been restored.</p>}
     {storageWarning && <p role="status">{storageWarning}</p>}
     {mode === "edit" && !editable && <p className="grn-restored-message">This Purchase Order is {statusLabel(status)}. Only Draft Purchase Orders can be edited.</p>}

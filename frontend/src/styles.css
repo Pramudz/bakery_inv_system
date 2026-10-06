@@ -2434,6 +2434,9 @@ button {
 .direct-grn-head {
   margin-bottom: 22px;
 }
+.document-pdf-actions { margin: -8px 0 20px; }
+.document-pdf-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.document-pdf-actions .error { margin: 8px 0 0; }
 .direct-grn-title-row {
   display: flex;
   align-items: center;

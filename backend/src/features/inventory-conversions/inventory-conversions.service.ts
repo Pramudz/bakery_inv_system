@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { tenantBusinessClock } from '../../common/business-date';
+import { loadDocumentHeader } from '../../common/document-header';
 import { baseQuantity, checked, divide4, multiply, units } from '../../common/inventory-decimal';
 import { InventoryAgeLayer } from '../inventory-age-layers/inventory-age-layer.entity';
 import { InventoryAgeLayerService } from '../inventory-age-layers/inventory-age-layer.service';
@@ -125,11 +126,14 @@ export class InventoryConversionsService {
     });
     if (!conversion) throw new NotFoundException('Inventory conversion not found.');
     await this.assertLocationAccess(this.dataSource.manager, user, Number(conversion.locationId));
-    const lines = await this.dataSource.getRepository(InventoryConversionLine).find({
-      where: { inventoryConversionId: id }, relations: { product: { baseUnit: true }, productUnit: { unit: true } },
-      order: { movementType: 'ASC', inventoryConversionLineId: 'ASC' },
-    });
-    return { ...conversion, lines };
+    const [lines, documentHeader] = await Promise.all([
+      this.dataSource.getRepository(InventoryConversionLine).find({
+        where: { inventoryConversionId: id }, relations: { product: { baseUnit: true }, productUnit: { unit: true } },
+        order: { movementType: 'ASC', inventoryConversionLineId: 'ASC' },
+      }),
+      loadDocumentHeader(this.dataSource, user.tenantId, Number(conversion.locationId)),
+    ]);
+    return { ...conversion, lines, documentHeader };
   }
 
   async create(dto: CreateInventoryConversionDto, user: TenantPrincipal) {
