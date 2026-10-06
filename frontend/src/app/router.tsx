@@ -8,6 +8,8 @@ import { LoginPage } from "../features/auth/LoginPage";
 import { TenantLoginPage } from "../features/auth/TenantLoginPage";
 
 import { DashboardPage } from "../pages/DashboardPage";
+import { ReportsAnalyticsPage } from "../pages/ReportsAnalyticsPage";
+import { CompanyDetailsPage } from "../pages/CompanyDetailsPage";
 import { TenantsPage } from "../features/tenants/pages/TenantsPage";
 import { TenantProfilePage } from "../features/tenants/pages/TenantProfilePage";
 import { UsersPage } from "../features/users/pages/UsersPage";
@@ -57,6 +59,8 @@ const tenantChildren = [
   { path: "categories", element: <CategoriesPage /> },
   { path: "suppliers", element: <SuppliersPage /> },
   { path: "locations", element: <LocationsPage /> },
+  { path: "reports-analytics", element: <ReportsAnalyticsPage /> },
+  { path: "company-details", element: <CompanyDetailsPage /> },
   { path: "products", element: <ProductsPage /> },
   { path: "brands", element: <BrandsPage /> },
   { path: "identifier-types", element: <IdentifierTypesPage /> },

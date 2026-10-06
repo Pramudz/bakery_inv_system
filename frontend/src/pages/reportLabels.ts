@@ -1,0 +1,23 @@
+export const LABELS: Record<string, string> = {
+  reportDate: "Date", location: "Location", invoice: "Invoice", cashier: "Cashier",
+  customer: "Customer", category: "Category", sku: "SKU", product: "Product",
+  qty: "Qty", grossSales: "Gross Sales", discount: "Discount", netSales: "Net Sales",
+  cogs: "COGS", gp: "GP", gpPercent: "GP %", refundValue: "Refund Value",
+  netQty: "Net Qty", billCount: "Bill Count", primarySupplier: "Primary Supplier",
+  paymentMethod: "Payment Method", channel: "Channel", paymentValue: "Payment",
+  unitCost: "Unit Cost", stockValue: "Stock Value", lastMovementAt: "Last Movement", brand: "Brand",
+  movementType: "Movement Type", sourceDocumentType: "Source Type",
+  sourceDocumentId: "Source Document", sourceDocumentLineId: "Source Line",
+  qtyIn: "Qty In", qtyOut: "Qty Out", qtyBefore: "Qty Before", qtyAfter: "Qty After",
+  receiptDate: "Receipt Date", ageDays: "Age (Days)", agingBucket: "Aging Bucket", batch: "Batch",
+  expiryDate: "Expiry Date", purchaseOrder: "Purchase Order", status: "Status",
+  receivedQty: "Received Qty", lineValue: "Line Value", grn: "GRN",
+  refund: "Refund", originalInvoice: "Original Invoice", reason: "Reason",
+  register: "Register", terminal: "Terminal", eventType: "Record Type",
+  ageLayerId: "Aging Layer ID", sessionId: "Session ID", amount: "Amount", openingBalance: "Opening Balance",
+  expectedCash: "Expected Cash", countedCash: "Counted Cash", variance: "Variance",
+  reconciliationStatus: "Reconciliation Status", openedAt: "Opened At",
+  closedAt: "Closed At", openedBy: "Opened By", closedBy: "Closed By",
+  cashierSessionCount: "Cashier Sessions", cashMovementValue: "Cash Movements",
+};
+

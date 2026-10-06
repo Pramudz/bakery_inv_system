@@ -8,7 +8,7 @@ export interface TenantLocation {
 }
 export interface Tenant {
   tenantId: number; code: string; name: string; isActive: boolean;
-  legalName?: string | null; registrationNumber?: string | null; taxRegistrationNumber?: string | null;
+  legalName?: string | null; registrationNumber?: string | null; businessCategory?: string | null; taxRegistrationNumber?: string | null;
   email?: string | null; phone?: string | null; website?: string | null;
   addressLine1?: string | null; addressLine2?: string | null; city?: string | null;
   stateProvince?: string | null; postalCode?: string | null; countryCode?: string | null;
