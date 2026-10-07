@@ -27,11 +27,14 @@ import { posReceiptHeader } from '../invoices/pos-receipt-header';
 import { PosRegisterMode } from '../pos-registers/pos-location-config.entity';
 import { snapshotRefundReceipt } from './invoice-refund-receipt';
 import { PosPrintService } from '../pos-print/pos-print.service';
+import { InventoryBalanceService } from '../inventory-balance/inventory-balance.service';
+import { checked, multiply, units } from '../../common/inventory-decimal';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class InvoiceRefundsService {
+  private readonly inventoryBalances = new InventoryBalanceService();
   constructor(private readonly dataSource: DataSource, private readonly posSessions: PosSessionsService, private readonly paymentProcessing: PaymentProcessingService = new PaymentProcessingService(), @Optional() private readonly posPrint?: PosPrintService) {}
 
   list(user: TenantPrincipal) {
@@ -122,9 +125,12 @@ export class InvoiceRefundsService {
   }
 
   async create(dto: CreateInvoiceRefundDto, user: TenantPrincipal, credential?: string) {
-    return this.dataSource.transaction(async (manager) => {
-      const refundKey = dto.refundKey ?? randomUUID();
-      const refundFingerprint = this.fingerprint({ invoiceId: dto.invoiceId, reason: dto.reason.trim(), details: dto.details, payments: dto.payments ?? [] });
+    if (!dto.refundKey) throw new BadRequestException('A refund key is required for retry-safe posting.');
+    const refundFingerprint = this.fingerprint({ invoiceId: dto.invoiceId, reason: dto.reason.trim(), details: dto.details, payments: dto.payments ?? [] });
+    // Each read after the invoice row lock must see the latest committed refund.
+    try {
+      return await this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const refundKey = dto.refundKey;
       const prior = await manager.getRepository(InvoiceRefund).findOneBy({ tenantId: user.tenantId, refundKey });
       if (prior) {
         this.assertLocationAccess(prior.locationId, user);
@@ -144,10 +150,23 @@ export class InvoiceRefundsService {
       if (new Set(requestedIds).size !== requestedIds.length) throw new BadRequestException('A refund line cannot be selected more than once.');
       const originalLines = invoice.details.filter((x) => requestedIds.includes(Number(x.invoiceDetailId)));
       if (originalLines.length !== requestedIds.length) throw new BadRequestException('One or more invoice lines are invalid.');
+      const saleLedgers = await manager.getRepository(InventoryLedger).find({ where: {
+        tenantId: user.tenantId, sourceDocumentType: 'INVOICE', sourceDocumentId: invoice.invoiceId,
+        sourceDocumentLineId: In(requestedIds), movementType: 'SALE',
+      } });
+      const saleCostByLine = new Map(saleLedgers.map(row => [Number(row.sourceDocumentLineId), row.unitCost]));
       const previous = await this.refundedQuantities(invoice.details.map((line) => line.invoiceDetailId), manager);
       const previousAmounts = await this.refundedAmounts(invoice.details.map((line) => line.invoiceDetailId), manager);
       const prepared = dto.details.map((request) => {
         const line = originalLines.find((x) => Number(x.invoiceDetailId) === request.invoiceDetailId)!;
+        const stockItem = line.product.isStockItem;
+        const returnToStock = stockItem && request.returnToStock !== false;
+        const originalUnitCost = stockItem ? line.unitCostSnapshot ?? saleCostByLine.get(Number(line.invoiceDetailId)) ?? null : '0.0000';
+        if (returnToStock && originalUnitCost === null) {
+          throw new ConflictException(`Original sale cost is unavailable for ${line.product.productName}; stock cannot be returned at an invented cost.`);
+        }
+        const cogsReversal = returnToStock
+          ? checked(multiply(units(String(request.quantity)), units(originalUnitCost!))) : '0.0000';
         const refundable = Number(line.quantity) - (previous.get(Number(line.invoiceDetailId)) ?? 0);
         if (request.quantity > refundable) throw new BadRequestException(`Refund quantity exceeds the available quantity for ${line.product.productName}.`);
         const ratio = request.quantity / Number(line.quantity);
@@ -160,7 +179,7 @@ export class InvoiceRefundsService {
           gross = Math.max(gross, total);
           discount = money(gross - total);
         }
-        return { request, line, gross, discount, total };
+        return { request, line, gross, discount, total, originalUnitCost, cogsReversal, returnToStock };
       });
       const subtotal = money(prepared.reduce((sum, x) => sum + x.gross, 0));
       const discountTotal = money(prepared.reduce((sum, x) => sum + x.discount, 0));
@@ -189,9 +208,20 @@ export class InvoiceRefundsService {
       const refund = await repo.save(repo.create({ tenantId: user.tenantId, locationId: invoice.locationId, refundKey, refundFingerprint, posTerminalId: activeSession?.terminal?.posTerminalId ?? null, posRegisterSessionId: activeSession?.registerSession.posRegisterSessionId ?? null, posCashierSessionId: activeSession?.cashierSession.posCashierSessionId ?? null, invoiceId: invoice.invoiceId, refundNumber: `PENDING-${Date.now()}-${user.userId}`, refundDate: new Date(), reason: dto.reason.trim(), subtotal: subtotal.toFixed(2), discountTotal: discountTotal.toFixed(2), refundTotal: refundTotal.toFixed(2), status: 'COMPLETED', createdByUserId: user.userId, approvedByUserId: null }));
       refund.refundNumber = this.refundNumber(refund.invoiceRefundId);
       await repo.save(refund);
-      for (const item of prepared) {
-        const detail = await manager.getRepository(InvoiceRefundDetail).save(manager.getRepository(InvoiceRefundDetail).create({ invoiceRefundId: refund.invoiceRefundId, invoiceDetailId: item.line.invoiceDetailId, productId: item.line.productId, quantity: String(item.request.quantity), unitPrice: item.line.unitPrice, discountPercentage: item.line.discountPercentage, discountAmount: item.discount.toFixed(2), refundAmount: item.total.toFixed(2), returnToStock: item.request.returnToStock !== false }));
-        if (detail.returnToStock && item.line.product.isStockItem) await this.restoreStock(manager, invoice, detail, user);
+      const stockReturns: InvoiceRefundDetail[] = [];
+      for (const [index, item] of prepared.entries()) {
+        const detail = await manager.getRepository(InvoiceRefundDetail).save(manager.getRepository(InvoiceRefundDetail).create({
+          invoiceRefundId: refund.invoiceRefundId, lineNumber: index + 1, invoiceDetailId: item.line.invoiceDetailId,
+          productId: item.line.productId, quantity: String(item.request.quantity), unitPrice: item.line.unitPrice,
+          discountPercentage: item.line.discountPercentage, discountAmount: item.discount.toFixed(2),
+          refundAmount: item.total.toFixed(2), returnToStock: item.returnToStock,
+          originalUnitCostSnapshot: item.originalUnitCost, cogsReversalAmount: item.cogsReversal,
+          refundTaxableAmount: item.total.toFixed(2), taxRefundAmount: '0.00', taxRateSnapshot: '0.0000',
+        }));
+        if (detail.returnToStock) stockReturns.push(detail);
+      }
+      for (const detail of stockReturns.sort((a, b) => Number(a.productId) - Number(b.productId))) {
+        await this.restoreStock(manager, invoice, detail, user);
       }
       for (const { payment, method, channel, referenceNumber } of preparedPayments) {
         const refundPayment = await manager.getRepository(InvoiceRefundPayment).save(manager.getRepository(InvoiceRefundPayment).create({
@@ -243,7 +273,15 @@ export class InvoiceRefundsService {
       await this.posPrint?.enqueue(manager, 'REFUND', refund.invoiceRefundId, user.tenantId, invoice.locationId, activeSession?.terminal?.posTerminalId ?? null, refund.receiptSnapshot);
       completed.receiptSnapshot = refund.receiptSnapshot;
       return completed;
-    });
+      });
+    } catch (error) {
+      if (!this.isRefundKeyConflict(error)) throw error;
+      const committed = await this.dataSource.getRepository(InvoiceRefund).findOneBy({ tenantId: user.tenantId, refundKey: dto.refundKey });
+      if (!committed) throw error;
+      this.assertLocationAccess(committed.locationId, user);
+      if (committed.refundFingerprint !== refundFingerprint) throw new ConflictException('This refund key was already used for different refund data.');
+      return this.getWithManager(this.dataSource.manager, committed.invoiceRefundId, user.tenantId);
+    }
   }
 
   async reversePayment(invoiceId: number, paymentId: number, dto: ReverseInvoicePaymentDto, user: TenantPrincipal, credential?: string) {
@@ -423,9 +461,22 @@ export class InvoiceRefundsService {
     const repo = manager.getRepository(InventoryBalance);
     let balance = await repo.findOne({ where: { tenantId: user.tenantId, locationId: invoice.locationId, productId: detail.productId }, lock: { mode: 'pessimistic_write' } });
     if (!balance) balance = repo.create({ tenantId: user.tenantId, locationId: invoice.locationId, productId: detail.productId, quantityOnHand: '0', averageCost: '0', lastMovementAt: null });
-    const before = Number(balance.quantityOnHand); const after = before + Number(detail.quantity); const cost = Number(balance.averageCost);
-    balance.quantityOnHand = String(after); balance.lastMovementAt = new Date(); await repo.save(balance);
-    await manager.getRepository(InventoryLedger).save(manager.getRepository(InventoryLedger).create({ tenantId: user.tenantId, locationId: invoice.locationId, productId: detail.productId, movementDate: new Date(), movementType: 'SALE_RETURN', sourceDocumentType: 'INVOICE_REFUND', sourceDocumentId: detail.invoiceRefundId, sourceDocumentLineId: detail.invoiceRefundDetailId, quantityIn: detail.quantity, quantityOut: '0', unitCost: String(cost), movementValue: String(money(Number(detail.quantity) * cost)), quantityBefore: String(before), quantityAfter: String(after), averageCostBefore: String(cost), averageCostAfter: String(cost), createdByUserId: user.userId }));
+    const movementValue = detail.cogsReversalAmount;
+    if (movementValue === null || detail.originalUnitCostSnapshot === null) throw new ConflictException('Original sale cost is required for a stock return.');
+    const snapshot = this.inventoryBalances.inboundValueSnapshot(balance, detail.quantity, movementValue);
+    balance.quantityOnHand = snapshot.quantityAfter;
+    balance.averageCost = snapshot.averageCostAfter;
+    balance.lastMovementAt = new Date();
+    await repo.save(balance);
+    await manager.getRepository(InventoryLedger).save(manager.getRepository(InventoryLedger).create({
+      tenantId: user.tenantId, locationId: invoice.locationId, productId: detail.productId,
+      movementDate: new Date(), movementType: 'SALE_RETURN', sourceDocumentType: 'INVOICE_REFUND',
+      sourceDocumentId: detail.invoiceRefundId, sourceDocumentLineId: detail.invoiceRefundDetailId,
+      quantityIn: detail.quantity, quantityOut: '0', unitCost: detail.originalUnitCostSnapshot, movementValue,
+      quantityBefore: snapshot.quantityBefore, quantityAfter: snapshot.quantityAfter,
+      averageCostBefore: snapshot.averageCostBefore, averageCostAfter: snapshot.averageCostAfter,
+      createdByUserId: user.userId,
+    }));
   }
   private async recalculateInvoicePayments(manager: EntityManager, invoice: Invoice) {
     const state = await this.invoicePaymentState(manager, invoice);
@@ -458,6 +509,11 @@ export class InvoiceRefundsService {
   }
   private refundNumber(id: number) { return `REF-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(id).padStart(6, '0')}`; }
   private fingerprint(value: unknown) { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
+  private isRefundKeyConflict(error: unknown) {
+    const candidate = error as { code?: string; message?: string; driverError?: { code?: string; sqlMessage?: string } };
+    return (candidate.driverError?.code ?? candidate.code) === 'ER_DUP_ENTRY'
+      && `${candidate.driverError?.sqlMessage ?? ''} ${candidate.message ?? ''}`.includes('uq_invoice_refund_tenant_key');
+  }
   private assertPayoutDto(amount: number, reason: string, payer: string) {
     if (!Number.isFinite(amount) || amount <= 0 || money(amount) !== amount) throw new BadRequestException('Payout amount must be positive with at most two decimal places.');
     if (!reason?.trim()) throw new BadRequestException('Payout reason is required.');

@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../auth/AuthContext";
 import { categoriesApi } from "../api/categoriesApi";
+import { parentCategoryOptions } from "../categoryHierarchy";
 
 const categoryId = (row: any) => Number(row.categoryId ?? row.id);
 
@@ -203,10 +204,11 @@ export function CategoriesPage() {
                     <label>Parent category</label>
                     <select className="select" value={form.parentCategoryId ?? ""} onChange={(event) => setForm({ ...form, parentCategoryId: event.target.value })}>
                       <option value="">Select...</option>
-                      {(categoryOptions.data ?? []).filter((category: any) => categoryId(category) !== (editing ? categoryId(editing) : 0)).map((category: any) => (
-                        <option key={categoryId(category)} value={categoryId(category)}>{category.categoryName} ({category.categoryCode})</option>
+                      {parentCategoryOptions(categoryOptions.data ?? [], editing ? categoryId(editing) : undefined).map(category => (
+                        <option key={category.value} value={category.value}>{category.label}{category.code ? ` (${category.code})` : ""}</option>
                       ))}
                     </select>
+                    <small>Up to three category levels. Only valid parent paths are shown.</small>
                   </div>
                   <div className="field"><label>Code</label><input type="text" required value={form.categoryCode ?? ""} onChange={(event) => setForm({ ...form, categoryCode: event.target.value })} /></div>
                   <div className="field"><label>Name</label><input type="text" required value={form.categoryName ?? ""} onChange={(event) => setForm({ ...form, categoryName: event.target.value })} /></div>

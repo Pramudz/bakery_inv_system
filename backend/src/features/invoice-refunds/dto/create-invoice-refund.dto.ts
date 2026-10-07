@@ -13,7 +13,7 @@ export class CreateRefundPaymentDto {
   @IsOptional() @Type(() => Number) @IsInt() @IsPositive() paymentChannelId?: number;
 }
 export class CreateInvoiceRefundDto {
-  @IsUUID('4') refundKey?: string;
+  @IsUUID('4') refundKey!: string;
   @Type(() => Number) @IsInt() @IsPositive() invoiceId!: number;
   @IsString() @IsNotEmpty() @MaxLength(255) reason!: string;
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => CreateRefundDetailDto) details!: CreateRefundDetailDto[];

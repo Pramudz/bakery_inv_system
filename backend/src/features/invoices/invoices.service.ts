@@ -30,6 +30,8 @@ import { Quotation } from '../quotations/quotation.entity';
 import { QuotationLine } from '../quotations/quotation-line.entity';
 import { ProductLocation } from '../product-locations/product-locations.entity';
 import { ProductUnit } from '../product-units/product-units.entity';
+import { UnitOfMeasure } from '../units/units.entity';
+import { checked, multiply, units } from '../../common/inventory-decimal';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
@@ -366,6 +368,7 @@ export class InvoicesService {
         saleType: dto.saleType,
         subtotal: subtotal.toFixed(2),
         discountTotal: discountTotal.toFixed(2),
+        taxTotal: '0.00',
         grandTotal: grandTotal.toFixed(2),
         paidAmount: paidAmount.toFixed(2),
         tenderedAmount: tenderedAmount.toFixed(2),
@@ -381,14 +384,30 @@ export class InvoicesService {
       invoice.invoiceNumber = this.invoiceNumber(invoice.invoiceId);
       await invoiceRepo.save(invoice);
 
-      for (const line of preparedDetails) {
+      const stockDetails: InvoiceDetail[] = [];
+      for (const [index, line] of preparedDetails.entries()) {
         const product = await manager.getRepository(Product).findOneBy({ productId: line.productId, tenantId: user.tenantId, isActive: true, isSellable: true });
         if (!product) throw new NotFoundException(`Sellable product ${line.productId} was not found.`);
+        const unitId = line.quotedUnitId ?? product.baseUnitId;
+        const unit = await manager.getRepository(UnitOfMeasure).findOneBy({ unitId, tenantId: user.tenantId });
+        if (!unit) throw new NotFoundException(`Selling unit for product ${line.productId} was not found.`);
         const detail = await manager.getRepository(InvoiceDetail).save(manager.getRepository(InvoiceDetail).create({
-          invoiceId: invoice.invoiceId, productId: line.productId, quantity: String(line.quantity), unitPrice: line.unitPrice.toFixed(2),
+          invoiceId: invoice.invoiceId, lineNumber: index + 1, productId: line.productId,
+          skuSnapshot: line.quotedSkuSnapshot ?? product.sku,
+          productNameSnapshot: line.quotedProductNameSnapshot ?? product.productName,
+          unitId, unitCodeSnapshot: line.quotedUnitCodeSnapshot ?? unit.code, unitNameSnapshot: line.quotedUnitNameSnapshot ?? unit.name,
+          quantity: String(line.quantity), unitPrice: line.unitPrice.toFixed(2),
           discountPercentage: line.discountPercentage.toFixed(4), discountAmount: line.discountAmount.toFixed(2), grossTotal: line.grossTotal.toFixed(2), netTotal: line.netTotal.toFixed(2),
+          unitCostSnapshot: product.isStockItem ? null : '0.0000', cogsAmount: product.isStockItem ? null : '0.0000',
+          priceSource: sourceQuotation ? 'QUOTATION' : 'PRICE_LIST',
+          sourcePriceListItemId: sourceQuotation ? null : line.priceListItemId,
+          sourceQuotationLineId: sourceQuotation ? line.sourceQuotationLineId ?? null : null,
+          taxableAmount: line.netTotal.toFixed(2), taxAmount: '0.00', taxRateSnapshot: '0.0000', taxInclusive: false, taxCodeSnapshot: null,
         }));
-        if (product.isStockItem) await this.issueStock(manager, invoice, detail, user);
+        if (product.isStockItem) stockDetails.push(detail);
+      }
+      for (const detail of stockDetails.sort((a, b) => Number(a.productId) - Number(b.productId))) {
+        await this.issueStock(manager, invoice, detail, user);
       }
 
       for (const payment of preparedPayments) {
@@ -554,6 +573,9 @@ export class InvoicesService {
         (request.discountPercentage !== undefined && Number(request.discountPercentage) !== Number(line.discountPercent))) throw new ConflictException('Quotation discounts cannot be changed in POS.');
     }
     const prepared = lines.map(line => ({ productId: Number(line.productId), quantity: Number(line.quantity),
+      sourceQuotationLineId: Number(line.quotationLineId), quotedSkuSnapshot: line.productCodeSnapshot,
+      quotedProductNameSnapshot: line.productNameSnapshot, quotedUnitId: Number(line.unitId),
+      quotedUnitCodeSnapshot: line.unitCodeSnapshot, quotedUnitNameSnapshot: line.unitNameSnapshot,
       productUnitId: null, priceListId: null, priceListItemId: null, priceListItemDiscountId: null,
       discountType: null, discountValue: null, unitPrice: Number(line.unitPrice),
       discountPerUnit: Number(line.discountAmount) / Number(line.quantity), discountPercentage: Number(line.discountPercent),
@@ -603,13 +625,17 @@ export class InvoicesService {
     balance.quantityOnHand = String(after);
     balance.lastMovementAt = new Date();
     await repo.save(balance);
-    const cost = Number(balance.averageCost);
+    const cost = checked(units(balance.averageCost));
+    const movementValue = checked(multiply(units(detail.quantity), units(cost)));
     await manager.getRepository(InventoryLedger).save(manager.getRepository(InventoryLedger).create({
       tenantId: user.tenantId, locationId: invoice.locationId, productId: detail.productId, movementDate: new Date(), movementType: 'SALE',
       sourceDocumentType: 'INVOICE', sourceDocumentId: invoice.invoiceId, sourceDocumentLineId: detail.invoiceDetailId,
-      quantityIn: '0', quantityOut: String(quantity), unitCost: String(cost), movementValue: String(money(quantity * cost)),
-      quantityBefore: String(before), quantityAfter: String(after), averageCostBefore: String(cost), averageCostAfter: String(cost), createdByUserId: user.userId,
+      quantityIn: '0', quantityOut: String(quantity), unitCost: cost, movementValue,
+      quantityBefore: String(before), quantityAfter: String(after), averageCostBefore: cost, averageCostAfter: cost, createdByUserId: user.userId,
     }));
+    detail.unitCostSnapshot = cost;
+    detail.cogsAmount = movementValue;
+    await manager.getRepository(InvoiceDetail).save(detail);
   }
 
   private invoiceNumber(id: number) {

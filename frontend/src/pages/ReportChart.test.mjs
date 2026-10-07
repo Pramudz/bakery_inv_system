@@ -27,3 +27,10 @@ test('payment breakdown includes all methods rather than silently dropping metho
   assert.ok(html.includes('Method 9'));
   assert.ok(html.includes('90'));
 });
+
+test('refund-only day remains negative in the sales chart', () => {
+  const rows = [{ reportDate: '2026-10-06', netSales: -300 }];
+  const html = renderToStaticMarkup(createElement(ReportChart, { reportId: 'daily-sales', rows, dimension: 'reportDate', granularity: 'DAY' }));
+  assert.ok(html.includes('-300'));
+  assert.ok(html.includes('06/10/2026'));
+});

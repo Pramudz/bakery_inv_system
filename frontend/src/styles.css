@@ -3588,6 +3588,7 @@ button {
 .reports-filter-heading h3 { margin: 0 0 5px; font-size: 15px; color: #162238; }
 .reports-filter-heading p { margin: 0; font-size: 12px; color: #64748b; }
 .reports-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 14px; }
+.reports-filter-grid > * { min-width: 0; }
 .reports-more-filters { border-top: 1px solid #e2e8f0; margin-top: 18px; padding-top: 15px; }
 .reports-more-filters summary { cursor: pointer; font-size: 12px; font-weight: 700; color: #334155; }
 .reports-more-filters .reports-filter-grid { margin-top: 14px; }

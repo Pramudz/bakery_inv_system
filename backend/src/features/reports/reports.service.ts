@@ -4,85 +4,47 @@ import { TenantPrincipal } from '../auth/auth.types';
 import { RolePermission } from '../role-permissions/role-permissions.entity';
 import { Permission } from '../permissions/permissions.entity';
 import { TenantModule } from '../tenant-modules/tenant-modules.entity';
+import { businessDateAt, businessDayStart } from '../../common/business-date';
+import { Tenant } from '../tenants/tenant.entity';
+import { CATEGORY_LEVELS_SQL, CATEGORY_PARENTS_SQL, PRIMARY_SUPPLIER_SQL, SALES_SQL, salesEventRow } from './sales-report';
 
 type ReportFilters = { from?: string; to?: string; locationId?: string };
 
-const SALES_SQL = `
-  SELECT DATE(i.invoice_date) AS reportDate, l.name AS location, i.invoice_number AS invoice,
-    CONCAT_WS(' ', cashier.first_name, cashier.last_name) AS cashier,
-    COALESCE(c.customer_name, 'Walk-in') AS customer, cat.category_name AS category,
-    p.sku, p.product_name AS product, d.quantity AS qty, d.gross_total AS grossSales,
-    (d.gross_total - d.net_total) AS discount, d.net_total AS netSales,
-    COALESCE(ledger.movement_value, 0) AS cogs,
-    (d.net_total - COALESCE(ledger.movement_value, 0)) AS gp,
-    CASE WHEN d.net_total = 0 THEN 0 ELSE ROUND((d.net_total - COALESCE(ledger.movement_value, 0)) / d.net_total * 100, 2) END AS gpPercent,
-    COALESCE(refund_detail.refundValue, 0) AS refundValue,
-    (d.quantity - COALESCE(refund_detail.refundedQty, 0)) AS netQty, 1 AS billCount,
-    COALESCE(s.supplier_name, 'Unassigned') AS primarySupplier
-  FROM tbl_invoice i
-  JOIN tbl_invoice_detail d ON d.invoice_id = i.invoice_id
-  JOIN tbl_product p ON p.product_id = d.product_id
-  JOIN tbl_category cat ON cat.category_id = p.category_id
-  JOIN tbl_location l ON l.location_id = i.location_id
-  LEFT JOIN tbl_customer c ON c.customer_id = i.customer_id
-  LEFT JOIN tbl_user cashier ON cashier.user_id = i.created_by_user_id
-  LEFT JOIN tbl_inventory_ledger ledger ON ledger.source_document_type = 'INVOICE'
-    AND ledger.source_document_id = i.invoice_id AND ledger.source_document_line_id = d.invoice_detail_id
-  LEFT JOIN (
-    SELECT rd.invoice_detail_id, SUM(rd.refund_amount) AS refundValue, SUM(rd.quantity) AS refundedQty
-    FROM tbl_invoice_refund_detail rd
-    JOIN tbl_invoice_refund r ON r.invoice_refund_id = rd.invoice_refund_id
-      AND r.tenant_id = ? AND r.status = 'COMPLETED' AND DATE(r.refund_date) BETWEEN ? AND ?
-    GROUP BY rd.invoice_detail_id
-  ) refund_detail ON refund_detail.invoice_detail_id = d.invoice_detail_id
-  LEFT JOIN (
-    SELECT ps.product_id, MIN(ps.supplier_id) AS supplier_id FROM tbl_product_supplier ps
-    WHERE ps.is_primary_supplier = 1 AND ps.is_active = 1 GROUP BY ps.product_id
-  ) primary_ps ON primary_ps.product_id = p.product_id
-  LEFT JOIN tbl_supplier s ON s.supplier_id = primary_ps.supplier_id
-  WHERE i.tenant_id = ? AND i.invoice_status NOT IN ('CANCELLED', 'VOID')
-    AND DATE(i.invoice_date) BETWEEN ? AND ? {LOCATION_FILTER}
-  ORDER BY i.invoice_date DESC, i.invoice_id DESC, d.invoice_detail_id
-`;
-
 const REFUNDS_SQL = `
-  SELECT DATE(r.refund_date) AS reportDate, l.name AS location, r.refund_number AS refund,
+  SELECT CAST(COALESCE(r.business_date, DATE(r.refund_date)) AS CHAR) AS reportDate, l.name AS location, r.refund_number AS refund,
     i.invoice_number AS originalInvoice, p.sku, p.product_name AS product,
-    cat.category_name AS category, COALESCE(s.supplier_name, 'Unassigned') AS primarySupplier,
+    cat.category_name AS category, ${CATEGORY_LEVELS_SQL}, COALESCE(s.supplier_name, 'Unassigned') AS primarySupplier,
     d.quantity AS qty, d.refund_amount AS refundValue, r.reason, r.status
   FROM tbl_invoice_refund r
   JOIN tbl_invoice i ON i.invoice_id = r.invoice_id
   JOIN tbl_invoice_refund_detail d ON d.invoice_refund_id = r.invoice_refund_id
   JOIN tbl_product p ON p.product_id = d.product_id
   JOIN tbl_category cat ON cat.category_id = p.category_id
+  ${CATEGORY_PARENTS_SQL}
   JOIN tbl_location l ON l.location_id = r.location_id
-  LEFT JOIN (
-    SELECT ps.product_id, MIN(ps.supplier_id) AS supplier_id FROM tbl_product_supplier ps
-    WHERE ps.is_primary_supplier = 1 AND ps.is_active = 1 GROUP BY ps.product_id
-  ) primary_ps ON primary_ps.product_id = p.product_id
-  LEFT JOIN tbl_supplier s ON s.supplier_id = primary_ps.supplier_id
+  ${PRIMARY_SUPPLIER_SQL}
   WHERE r.tenant_id = ? AND r.status = 'COMPLETED'
-    AND DATE(r.refund_date) BETWEEN ? AND ? {LOCATION_FILTER}
+    AND COALESCE(r.business_date, DATE(r.refund_date)) BETWEEN ? AND ? {LOCATION_FILTER}
   ORDER BY r.refund_date DESC, r.invoice_refund_id DESC, d.invoice_refund_detail_id
 `;
 
 const PAYMENT_SQL = `
-  SELECT DATE(pay.paid_at) AS reportDate, l.name AS location, pm.payment_method_name AS paymentMethod,
+  SELECT pay.paid_at AS eventAt, l.name AS location, pm.payment_method_name AS paymentMethod,
     COALESCE(pay.payment_channel_name_snapshot, pc.name, '—') AS channel,
     i.invoice_number AS invoice, COALESCE(c.customer_name, 'Walk-in') AS customer,
-    pay.amount AS netSales, pay.amount AS paymentValue, 1 AS billCount
+    pay.amount AS paymentValue, 1 AS billCount
   FROM tbl_invoice_payment pay
   JOIN tbl_invoice i ON i.invoice_id = pay.invoice_id
   JOIN tbl_payment_method pm ON pm.payment_method_id = pay.payment_method_id
   JOIN tbl_location l ON l.location_id = i.location_id
   LEFT JOIN tbl_payment_channel pc ON pc.payment_channel_id = pay.payment_channel_id
   LEFT JOIN tbl_customer c ON c.customer_id = i.customer_id
-  WHERE i.tenant_id = ? AND pay.is_reversed = 0 AND DATE(pay.paid_at) BETWEEN ? AND ? {LOCATION_FILTER}
+  WHERE i.tenant_id = ? AND pay.is_reversed = 0 AND pay.paid_at >= ? AND pay.paid_at < ? {LOCATION_FILTER}
   ORDER BY pay.paid_at DESC, pay.invoice_payment_id DESC
 `;
 
 const STOCK_SQL = `
-  SELECT l.name AS location, cat.category_name AS category, p.sku, p.product_name AS product,
+  SELECT l.name AS location, cat.category_name AS category, ${CATEGORY_LEVELS_SQL}, p.sku, p.product_name AS product,
     b.quantity_on_hand AS qty, b.average_cost AS unitCost,
     (b.quantity_on_hand * b.average_cost) AS stockValue, b.last_movement_at AS lastMovementAt,
     COALESCE(brand.brand_name, 'Unbranded') AS brand,
@@ -90,6 +52,7 @@ const STOCK_SQL = `
   FROM tbl_inventory_balance b
   JOIN tbl_product p ON p.product_id = b.product_id
   JOIN tbl_category cat ON cat.category_id = p.category_id
+  ${CATEGORY_PARENTS_SQL}
   JOIN tbl_location l ON l.location_id = b.location_id
   LEFT JOIN tbl_brand brand ON brand.brand_id = p.brand_id
   LEFT JOIN (
@@ -102,7 +65,7 @@ const STOCK_SQL = `
 `;
 
 const MOVEMENT_SQL = `
-  SELECT DATE(led.movement_date) AS reportDate, l.name AS location, led.movement_type AS movementType,
+  SELECT led.movement_date AS eventAt, l.name AS location, led.movement_type AS movementType,
     led.source_document_type AS sourceDocumentType, led.source_document_id AS sourceDocumentId,
     led.source_document_line_id AS sourceDocumentLineId, p.sku, p.product_name AS product,
     led.quantity_in AS qtyIn, led.quantity_out AS qtyOut, led.unit_cost AS unitCost,
@@ -110,14 +73,14 @@ const MOVEMENT_SQL = `
   FROM tbl_inventory_ledger led
   JOIN tbl_product p ON p.product_id = led.product_id
   JOIN tbl_location l ON l.location_id = led.location_id
-  WHERE led.tenant_id = ? AND DATE(led.movement_date) BETWEEN ? AND ? {LOCATION_FILTER}
+  WHERE led.tenant_id = ? AND led.movement_date >= ? AND led.movement_date < ? {LOCATION_FILTER}
   ORDER BY led.movement_date DESC, led.inventory_ledger_id DESC
 `;
 
 const AGING_SQL = `
-  SELECT age.inventory_age_layer_id AS ageLayerId, l.name AS location, cat.category_name AS category, p.sku, p.product_name AS product,
+  SELECT age.inventory_age_layer_id AS ageLayerId, l.name AS location, cat.category_name AS category, ${CATEGORY_LEVELS_SQL}, p.sku, p.product_name AS product,
     age.source_document_type AS sourceDocumentType, age.source_document_id AS sourceDocumentId,
-    age.receipt_date AS receiptDate, DATEDIFF(CURDATE(), age.receipt_date) AS ageDays,
+    CAST(age.receipt_date AS CHAR) AS receiptDate, DATEDIFF(CURDATE(), age.receipt_date) AS ageDays,
     CASE WHEN DATEDIFF(CURDATE(), age.receipt_date) < 31 THEN '0-30 days'
       WHEN DATEDIFF(CURDATE(), age.receipt_date) < 61 THEN '31-60 days'
       WHEN DATEDIFF(CURDATE(), age.receipt_date) < 91 THEN '61-90 days'
@@ -125,10 +88,11 @@ const AGING_SQL = `
     COALESCE(s.supplier_name, 'Unassigned') AS primarySupplier,
     age.remaining_quantity AS qty, age.original_unit_cost AS unitCost,
     (age.remaining_quantity * age.original_unit_cost) AS stockValue, age.batch_number AS batch,
-    age.expiry_date AS expiryDate
+    CAST(age.expiry_date AS CHAR) AS expiryDate
   FROM tbl_inventory_age_layer age
   JOIN tbl_product p ON p.product_id = age.product_id
   JOIN tbl_category cat ON cat.category_id = p.category_id
+  ${CATEGORY_PARENTS_SQL}
   JOIN tbl_location l ON l.location_id = age.location_id
   LEFT JOIN (
     SELECT ps.product_id, MIN(ps.supplier_id) AS supplier_id FROM tbl_product_supplier ps
@@ -140,7 +104,7 @@ const AGING_SQL = `
 `;
 
 const PURCHASE_ORDER_SQL = `
-  SELECT po.order_date AS reportDate, l.name AS location, po.po_number AS purchaseOrder,
+  SELECT CAST(po.order_date AS CHAR) AS reportDate, l.name AS location, po.po_number AS purchaseOrder,
     po.status, s.supplier_name AS supplier, p.sku, p.product_name AS product,
     line.ordered_qty AS qty, line.received_qty AS receivedQty, line.line_total AS lineValue
   FROM tbl_purchase_order po
@@ -153,7 +117,7 @@ const PURCHASE_ORDER_SQL = `
 `;
 
 const RECEIPT_SQL = `
-  SELECT grn.receipt_date AS reportDate, l.name AS location, grn.grn_number AS grn,
+  SELECT CAST(grn.receipt_date AS CHAR) AS reportDate, l.name AS location, grn.grn_number AS grn,
     grn.status, s.supplier_name AS supplier, po.po_number AS purchaseOrder,
     p.sku, p.product_name AS product, line.received_qty AS qty, line.line_total AS lineValue
   FROM tbl_goods_receipt grn
@@ -167,7 +131,7 @@ const RECEIPT_SQL = `
 `;
 
 const REGISTER_SQL = `
-  SELECT reportRows.reportDate, reportRows.location, reportRows.register, reportRows.terminal,
+  SELECT CAST(reportRows.reportDate AS CHAR) AS reportDate, reportRows.location, reportRows.register, reportRows.terminal,
     reportRows.status, reportRows.eventType, reportRows.sessionId, reportRows.cashier,
     reportRows.paymentMethod, reportRows.channel, reportRows.invoice, reportRows.movementType,
     reportRows.sourceDocument, reportRows.amount, reportRows.openingBalance,
@@ -323,10 +287,12 @@ export class ReportsService {
     if (!report) throw new NotFoundException('Report not found.');
     await this.assertPermission(user, PERMISSION_FOR_REPORT[reportId]);
 
-    const now = new Date();
-    const defaultTo = now.toISOString().slice(0, 10);
-    const defaultFromDate = new Date(now);
-    defaultFromDate.setDate(defaultFromDate.getDate() - 29);
+    const tenant = await this.dataSource.getRepository(Tenant).findOneBy({ tenantId: user.tenantId });
+    if (!tenant) throw new NotFoundException('Tenant not found.');
+    const timeZone = tenant.timeZone;
+    const defaultTo = businessDateAt(new Date(), timeZone);
+    const defaultFromDate = new Date(`${defaultTo}T00:00:00Z`);
+    defaultFromDate.setUTCDate(defaultFromDate.getUTCDate() - 29);
     const from = filters.from || defaultFromDate.toISOString().slice(0, 10);
     const to = filters.to || defaultTo;
     if (!this.isDate(from) || !this.isDate(to) || from > to) {
@@ -345,12 +311,16 @@ export class ReportsService {
     }
     const allowedLocations = location ? [location] : visibleLocations;
     let locationClause = '';
-    const params: Array<string | number> = [];
-    if (report.domain === 'sales') params.push(user.tenantId, from, to);
-    params.push(user.tenantId);
+    const params: Array<string | number | Date> = [];
+    if (report.sql === SALES_SQL) params.push(user.tenantId, from, to, user.tenantId, from, to);
+    if (report.sql !== SALES_SQL) params.push(user.tenantId);
     const hasDateRange = !['stock-on-hand', 'stock-valuation', 'inventory-aging'].includes(reportId);
     if (hasDateRange) {
-      params.push(from, to);
+      if (reportId === 'payment-methods' || reportId === 'inventory-movement') {
+        const nextDay = new Date(`${to}T00:00:00Z`);
+        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+        params.push(businessDayStart(from, timeZone), businessDayStart(nextDay.toISOString().slice(0, 10), timeZone));
+      } else if (report.sql !== SALES_SQL) params.push(from, to);
     }
     if (allowedLocations) {
       if (!allowedLocations.length) {
@@ -361,7 +331,8 @@ export class ReportsService {
       }
     }
 
-    const locationColumn = report.domain === 'sales' ? 'i.location_id'
+    const locationColumn = report.sql === SALES_SQL ? 'events.locationId'
+      : report.domain === 'sales' ? 'i.location_id'
       : report.domain === 'refunds' ? 'r.location_id'
       : report.domain === 'inventory' ? (reportId === 'inventory-movement' ? 'led.location_id' : reportId === 'inventory-aging' ? 'age.location_id' : 'b.location_id')
       : report.domain === 'purchasing' ? (reportId === 'purchase-orders' ? 'po.location_id' : 'grn.location_id')
@@ -369,9 +340,14 @@ export class ReportsService {
     let sql = report.sql
       .replace('{LOCATION_FILTER}', locationClause.replace('{LOCATION_COLUMN}', locationColumn))
       .replace('{LOCATION_COLUMN}', locationColumn);
-    if (reportId === 'credit-sales') sql = sql.replace('AND DATE(i.invoice_date)', 'AND i.is_credit_sale = 1 AND DATE(i.invoice_date)');
-    const rows = await this.dataSource.query(sql, params);
-    return { reportId, from, to, rows, rowCount: rows.length, measures: this.measureNames(report.domain) };
+    sql = sql.replaceAll('{CREDIT_FILTER}', reportId === 'credit-sales' ? 'AND i.is_credit_sale = 1' : '');
+    const rawRows = await this.dataSource.query(sql, params);
+    const rows = report.sql === SALES_SQL
+      ? rawRows.map(salesEventRow)
+      : (reportId === 'payment-methods' || reportId === 'inventory-movement')
+        ? rawRows.map(({ eventAt, ...row }: { eventAt: Date; [key: string]: unknown }) => ({ reportDate: businessDateAt(eventAt, timeZone), ...row }))
+        : rawRows;
+    return { reportId, from, to, rows, rowCount: rows.length, measures: this.measureNames(reportId, report.domain) };
   }
 
   private async assertPermission(user: TenantPrincipal, code: string) {
@@ -397,8 +373,9 @@ export class ReportsService {
     return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
   }
 
-  private measureNames(domain: string) {
-    if (domain === 'sales') return ['qty', 'grossSales', 'discount', 'netSales', 'cogs', 'gp', 'gpPercent', 'refundValue', 'netQty', 'billCount'];
+  private measureNames(reportId: string, domain: string) {
+    if (reportId === 'payment-methods') return ['paymentValue', 'billCount'];
+    if (domain === 'sales') return ['qty', 'refundQty', 'grossSales', 'discount', 'netSalesBeforeRefund', 'refundValue', 'netSales', 'cogs', 'gp', 'gpPercent', 'netQty', 'billCount', 'cogsMissing'];
     if (domain === 'refunds') return ['qty', 'refundValue'];
     if (domain === 'inventory') return ['qty', 'stockValue', 'movementValue'];
     if (domain === 'purchasing') return ['qty', 'receivedQty', 'lineValue'];

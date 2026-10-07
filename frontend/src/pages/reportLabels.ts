@@ -1,7 +1,10 @@
 export const LABELS: Record<string, string> = {
   reportDate: "Date", location: "Location", invoice: "Invoice", cashier: "Cashier",
   customer: "Customer", category: "Category", sku: "SKU", product: "Product",
-  qty: "Qty", grossSales: "Gross Sales", discount: "Discount", netSales: "Net Sales",
+  categoryLevel1: "Category Level 1", categoryLevel2: "Category Level 2", categoryLevel3: "Category Level 3",
+  refundQty: "Refund Qty", netSalesBeforeRefund: "Sales Net Before Refund",
+  cogsMissing: "Missing Cost Records",
+  qty: "Qty", grossSales: "Gross Sales", discount: "Sales Discount", netSales: "Actual Net Sales",
   cogs: "COGS", gp: "GP", gpPercent: "GP %", refundValue: "Refund Value",
   netQty: "Net Qty", billCount: "Bill Count", primarySupplier: "Primary Supplier",
   paymentMethod: "Payment Method", channel: "Channel", paymentValue: "Payment",

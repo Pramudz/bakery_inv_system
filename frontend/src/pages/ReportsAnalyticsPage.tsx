@@ -3,11 +3,13 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "../services/apiClient";
 import { useAuth } from "../features/auth/AuthContext";
+import { SearchableSelect } from "../components/ui/SearchableSelect";
 import { ReportChart } from "./ReportChart";
+import { dashboardDateRange } from "./dashboardData";
 import { LABELS } from "./reportLabels";
 import { downloadFile, reportCsv, reportPdf } from "./reportExport";
 
-import { MEASURE_COLUMNS, filterReportRows, reportFilterOptions, groupRows, paginateReportRows } from "./reportData";
+import { MEASURE_COLUMNS, filterReportRows, formatReportDate, reportFilterOptions, reportSelectorOptions, groupRows, paginateReportRows } from "./reportData";
 import type { ReportRow } from "./reportData";
 type ReportResponse = {
   reportId: string;
@@ -31,10 +33,10 @@ const REPORT_GROUPS: ReportGroup[] = [
     name: "Sales performance",
     icon: "sales",
     reports: [
-      { id: "gross-sales", name: "Gross Sales Summary", description: "Sales performance by date, location, category, product, and invoice.", groupBy: ["location", "reportDate", "category", "product", "invoice"], permission: "SALES_INVOICE_VIEW" },
+      { id: "gross-sales", name: "Gross Sales Summary", description: "Sales performance by date, location, category, product, and invoice.", groupBy: ["location", "reportDate", "categoryLevel1", "categoryLevel2", "categoryLevel3", "product", "invoice"], permission: "SALES_INVOICE_VIEW" },
       { id: "daily-sales", name: "Daily Sales Report", description: "Daily invoice and invoice-line sales detail.", groupBy: ["reportDate", "invoice", "product"], permission: "SALES_INVOICE_VIEW" },
       { id: "product-sales", name: "Product Sales Report", description: "Product and SKU sales with invoice-line detail.", groupBy: ["product", "invoice", "reportDate"], permission: "SALES_INVOICE_VIEW" },
-      { id: "category-sales", name: "Category Sales Report", description: "Category performance with product and invoice filters.", groupBy: ["category", "product", "invoice"], permission: "SALES_INVOICE_VIEW" },
+      { id: "category-sales", name: "Category Sales Report", description: "Category performance at Level 1, 2, or 3.", groupBy: ["categoryLevel1", "categoryLevel2", "categoryLevel3", "product", "invoice"], permission: "SALES_INVOICE_VIEW" },
       { id: "cashier-sales", name: "Cashier Sales Report", description: "Sales by cashier with invoice-line detail.", groupBy: ["cashier", "invoice", "product"], permission: "SALES_INVOICE_VIEW" },
       { id: "customer-sales", name: "Customer Sales Report", description: "Customer purchases with product and invoice detail.", groupBy: ["customer", "product", "invoice"], permission: "SALES_INVOICE_VIEW" },
       { id: "supplier-sales", name: "Sales by Primary Supplier", description: "Product sales attributed to each product's primary supplier.", groupBy: ["primarySupplier", "product", "invoice"], permission: "SALES_INVOICE_VIEW" },
@@ -94,6 +96,7 @@ const GROUP_ICONS: Record<string, string> = {
 
 function displayValue(value: ReportRow[string], column: string) {
   if (value === null || value === undefined || value === "") return "—";
+  if (column === "reportDate") return formatReportDate(value);
   if (MEASURE_COLUMNS.has(column) && typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value)) {
     return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
   }
@@ -104,7 +107,7 @@ function displayValue(value: ReportRow[string], column: string) {
 }
 
 export function ReportsAnalyticsPage() {
-  const { permissions, accessScope } = useAuth();
+  const { permissions, accessScope, tenant } = useAuth();
   const availableGroups = useMemo(
     () => REPORT_GROUPS.map((group) => ({ ...group, reports: group.reports.filter((report) => permissions.includes(report.permission)) }))
       .filter((group) => group.reports.length > 0),
@@ -112,9 +115,10 @@ export function ReportsAnalyticsPage() {
   );
   const firstReport = availableGroups[0]?.reports[0];
   const [searchParams] = useSearchParams();
+  const defaultPeriod = dashboardDateRange(new Date(), tenant?.timeZone ?? "Asia/Colombo", 30);
   const [reportId, setReportId] = useState(() => availableGroups.flatMap(group => group.reports).find(report => report.id === searchParams.get("report"))?.id ?? firstReport?.id ?? "");
-  const [from, setFrom] = useState(() => searchParams.get("from") || new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
-  const [to, setTo] = useState(() => searchParams.get("to") || new Date().toISOString().slice(0, 10));
+  const [from, setFrom] = useState(() => searchParams.get("from") || defaultPeriod.from);
+  const [to, setTo] = useState(() => searchParams.get("to") || defaultPeriod.to);
   const [locationId, setLocationId] = useState(() => searchParams.get("locationId") || "");
   const [exporting, setExporting] = useState<"csv" | "pdf" | null>(null);
   const [exportError, setExportError] = useState("");
@@ -137,8 +141,23 @@ export function ReportsAnalyticsPage() {
     enabled: availableGroups.length > 0,
   });
   const rows = query.data?.rows ?? [];
-  const filterFields = ["category", "brand", "primarySupplier", "supplier", "product", "cashier", "customer", "paymentMethod", "channel", "status", "movementType", "agingBucket", "register", "terminal", "eventType", "reconciliationStatus"]
+  const filterFields = ["categoryLevel1", "categoryLevel2", "categoryLevel3", "category", "brand", "primarySupplier", "supplier", "sku", "cashier", "customer", "paymentMethod", "channel", "status", "movementType", "agingBucket", "register", "terminal", "eventType", "reconciliationStatus"]
+    .filter(field => field !== "category" || !rows.some(row => "categoryLevel1" in row))
     .filter(field => rows.some(row => field in row));
+  const searchableFields = new Set(["categoryLevel1", "categoryLevel2", "categoryLevel3", "category", "primarySupplier", "supplier", "sku", "cashier", "customer", "brand"]);
+  const filterOptions = (field: string) => {
+    const source = field === "categoryLevel2" && filters.categoryLevel1
+      ? rows.filter(row => row.categoryLevel1 === filters.categoryLevel1)
+      : field === "categoryLevel3"
+        ? rows.filter(row => (!filters.categoryLevel1 || row.categoryLevel1 === filters.categoryLevel1) && (!filters.categoryLevel2 || row.categoryLevel2 === filters.categoryLevel2))
+        : rows;
+    return reportSelectorOptions(source, field);
+  };
+  const changeFilter = (field: string, value: string) => setFilters(current => ({
+    ...current, [field]: value,
+    ...(field === "categoryLevel1" ? { categoryLevel2: "", categoryLevel3: "" } : {}),
+    ...(field === "categoryLevel2" ? { categoryLevel3: "" } : {}),
+  }));
   const groupOptions = [...new Set([...(selectedReport?.groupBy ?? []), ...filterFields])];
   const dimension = groupOptions.includes(groupBy) ? groupBy : selectedReport?.groupBy[0] ?? "";
   const filteredRows = filterReportRows(rows, filters);
@@ -153,7 +172,7 @@ export function ReportsAnalyticsPage() {
     : [];
   const isSnapshotReport = ["stock-on-hand", "stock-valuation", "inventory-aging"].includes(reportId);
   const statisticFields: Array<[string, string]> = reportId === "gross-sales" || reportId === "daily-sales" || reportId === "product-sales" || reportId === "category-sales" || reportId === "cashier-sales" || reportId === "customer-sales" || reportId === "supplier-sales" || reportId === "credit-sales"
-    ? [["Gross Sales", "grossSales"], ["Discount", "discount"], ["Net Sales", "netSales"], ["GP", "gp"]]
+    ? [["Gross Sales", "grossSales"], ["Discount", "discount"], ["Actual Net Sales", "netSales"], ["GP", "gp"]]
     : reportId === "payment-methods"
     ? [["Payment Value", "paymentValue"], ["Invoices", "invoice"], ["", ""], ["", ""]]
     : reportId === "stock-on-hand"
@@ -188,8 +207,9 @@ export function ReportsAnalyticsPage() {
   };
 
   const resetFilters = () => {
-    setFrom(new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
-    setTo(new Date().toISOString().slice(0, 10));
+    const period = dashboardDateRange(new Date(), tenant?.timeZone ?? "Asia/Colombo", 30);
+    setFrom(period.from);
+    setTo(period.to);
     setLocationId("");
     setFilters({});
     setGroupBy("");
@@ -205,14 +225,14 @@ export function ReportsAnalyticsPage() {
     setExporting(format);
     try {
       const headers = columns.map(column => LABELS[column] ?? column);
-      const values = displayedRows.map(row => columns.map(column => row[column]));
+      const values = displayedRows.map(row => columns.map(column => column === "reportDate" ? displayValue(row[column], column) : row[column]));
       const filename = `${selectedReport.id}-${isSnapshotReport ? "snapshot" : `${from}-to-${to}`}.${format}`;
       const blob = format === "csv"
         ? new Blob([reportCsv(headers, values)], { type: "text/csv;charset=utf-8" })
         : await reportPdf({
             title: selectedReport.name,
             metadata: [
-              isSnapshotReport ? "Current stock snapshot" : `Period: ${from} to ${to}`,
+              isSnapshotReport ? "Current stock snapshot" : `Period: ${formatReportDate(from)} to ${formatReportDate(to)}`,
               `Location: ${locations.data?.find(location => String(location.locationId) === locationId)?.name ?? "All accessible locations"}`,
               `View: ${view === "SUMMARY" ? "Summary" : "Detailed"} | Group by: ${LABELS[dimension] ?? dimension}`,
               ...activeFilters.map(([field, value]) => `${LABELS[field] ?? field}: ${value}`),
@@ -277,7 +297,7 @@ export function ReportsAnalyticsPage() {
                 <div>
                   <h2>{selectedReport.name}</h2>
                   <p>{selectedReport.description}</p>
-                  <p className="reports-period">Period: {isSnapshotReport ? "Current stock snapshot" : `${from} to ${to}`}</p>
+                  <p className="reports-period">Period: {isSnapshotReport ? "Current stock snapshot" : `${formatReportDate(from)} to ${formatReportDate(to)}`}</p>
                 </div>
               </div>
 
@@ -289,12 +309,9 @@ export function ReportsAnalyticsPage() {
                 <div className="reports-filter-grid">
                   {!isSnapshotReport && <label>From <input className="control" type="date" value={from} max={to} onChange={event => setFrom(event.target.value)} /></label>}
                   {!isSnapshotReport && <label>To <input className="control" type="date" value={to} min={from} onChange={event => setTo(event.target.value)} /></label>}
-                  <label>Location
-                    <select className="control" value={locationId} onChange={event => setLocationId(event.target.value)}>
-                      <option value="">All accessible locations</option>
-                      {(locations.data ?? []).map(location => <option key={location.locationId} value={location.locationId}>{location.name}</option>)}
-                    </select>
-                  </label>
+                  <SearchableSelect label="Location" value={locationId} onChange={setLocationId}
+                    options={(locations.data ?? []).map(location => ({ value: String(location.locationId), label: location.name, code: location.code }))}
+                    placeholder="Search location" emptyMessage="No matching locations" clearLabel="All accessible locations" />
                   <label>View
                     <select className="control" value={view} onChange={event => setView(event.target.value as "SUMMARY" | "DETAIL")}>
                       <option value="SUMMARY">Summary</option><option value="DETAIL">Detailed records</option>
@@ -314,16 +331,21 @@ export function ReportsAnalyticsPage() {
                 {filterFields.length > 0 && <details className="reports-more-filters" open>
                   <summary>Refine results{activeFilters.length ? ` (${activeFilters.length} active)` : ""}</summary>
                   <div className="reports-filter-grid">
-                    {filterFields.map(field => <label key={field}>{LABELS[field] ?? field}
-                      <select className="control" value={filters[field] ?? ""} onChange={event => setFilters(current => ({ ...current, [field]: event.target.value }))}>
-                        <option value="">All</option>
-                        {reportFilterOptions(rows, field).map(value => <option key={value} value={value}>{value}</option>)}
-                      </select>
-                    </label>)}
+                    {filterFields.map(field => searchableFields.has(field)
+                      ? <SearchableSelect key={field} label={field === "sku" ? "Product / SKU" : LABELS[field] ?? field}
+                          value={filters[field] ?? ""} onChange={value => changeFilter(field, value)}
+                          options={filterOptions(field)} placeholder={field === "sku" ? "Search SKU / product name" : `Search ${LABELS[field] ?? field}`}
+                          emptyMessage="No matching options" clearLabel="All" />
+                      : <label key={field}>{LABELS[field] ?? field}
+                          <select className="control" value={filters[field] ?? ""} onChange={event => changeFilter(field, event.target.value)}>
+                            <option value="">All</option>
+                            {reportFilterOptions(rows, field).map(value => <option key={value} value={value}>{value}</option>)}
+                          </select>
+                        </label>)}
                   </div>
                 </details>}
                 {activeFilters.length > 0 && <div className="reports-active-filters" aria-label="Active filters">
-                  {activeFilters.map(([field, value]) => <button key={field} type="button" aria-label={`Remove ${LABELS[field] ?? field} filter: ${value}`} onClick={() => setFilters(current => ({ ...current, [field]: "" }))}>
+                  {activeFilters.map(([field, value]) => <button key={field} type="button" aria-label={`Remove ${LABELS[field] ?? field} filter: ${value}`} onClick={() => changeFilter(field, "")}>
                     {LABELS[field] ?? field}: {value} <span aria-hidden="true">&#215;</span>
                   </button>)}
                 </div>}
@@ -333,12 +355,15 @@ export function ReportsAnalyticsPage() {
               {query.isError && <div className="error-box">{query.error instanceof Error ? query.error.message : "Unable to load this report."}</div>}
               {locations.isError && <div className="error-box">{locations.error instanceof Error ? locations.error.message : "Unable to load locations."}</div>}
               {from > to && <div className="error-box">The start date must be on or before the end date.</div>}
+              {filteredRows.some(row => Number(row.cogsMissing ?? 0) > 0) && <div className="error-box" role="status">Some stock-item transactions have no saved cost ledger entry. COGS and GP for affected groups are unavailable.</div>}
 
               <div className="stats-row reports-stats">
                 {statisticFields.map(([label, field], index) => label ? (
                   <div className="stat-card" key={`${field}-${index}`}>
                     <span>{label}</span>
-                    <strong>{statisticValue(field).toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong>
+                    <strong>{field === "gp" && filteredRows.some(row => Number(row.cogsMissing ?? 0) > 0)
+                      ? "Incomplete"
+                      : statisticValue(field).toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong>
                   </div>
                 ) : <div key={`empty-${index}`} />)}
               </div>

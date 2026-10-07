@@ -4,8 +4,8 @@ const sum = (rows: ReportRow[], field: string) => rows.reduce((total, row) => to
 export function dashboardTotals(sales: ReportRow[], stock: ReportRow[]) {
   return {
     netSales: sum(sales, 'netSales'),
-    grossProfit: sum(sales, 'gp'),
-    invoices: new Set(sales.filter(row => row.invoice != null).map(row => JSON.stringify([row.location, row.invoice]))).size,
+    grossProfit: sales.some(row => Number(row.cogsMissing ?? 0) > 0) ? null : sum(sales, 'gp'),
+    invoices: new Set(sales.filter(row => row.invoice != null && (row.billCount === undefined || Number(row.billCount) > 0)).map(row => JSON.stringify([row.location, row.invoice]))).size,
     stockValue: sum(stock, 'stockValue'),
   };
 }

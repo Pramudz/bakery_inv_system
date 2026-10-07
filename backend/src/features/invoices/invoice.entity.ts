@@ -41,6 +41,7 @@ export class Invoice extends AuditEntity {
   @Column({ name: 'sale_type', type: 'varchar', length: 20 }) saleType!: string;
   @Column({ name: 'subtotal', type: 'decimal', precision: 18, scale: 2 }) subtotal!: string;
   @Column({ name: 'discount_total', type: 'decimal', precision: 18, scale: 2, default: 0 }) discountTotal!: string;
+  @Column({ name: 'tax_total', type: 'decimal', precision: 18, scale: 2, default: 0 }) taxTotal!: string;
   @Column({ name: 'grand_total', type: 'decimal', precision: 18, scale: 2 }) grandTotal!: string;
   @Column({ name: 'paid_amount', type: 'decimal', precision: 18, scale: 2, default: 0 }) paidAmount!: string;
   @Column({ name: 'tendered_amount', type: 'decimal', precision: 18, scale: 2, default: 0 }) tenderedAmount!: string;

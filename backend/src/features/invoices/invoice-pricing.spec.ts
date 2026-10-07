@@ -27,6 +27,7 @@ import { Quotation } from '../quotations/quotation.entity';
 import { QuotationLine } from '../quotations/quotation-line.entity';
 import { ProductLocation } from '../product-locations/product-locations.entity';
 import { ProductUnit } from '../product-units/product-units.entity';
+import { UnitOfMeasure } from '../units/units.entity';
 
 const user = { tenantId: 1, userId: 2, roleId: 4, roleCode: 'TENANT_ADMIN', accessScope: 'LOCATION', assignedLocationIds: [3] } as unknown as TenantPrincipal;
 const activePosSession: any = { terminal: { posTerminalId: 21, terminalCode: 'POS1' }, config: { registerMode: 'TERMINAL_REGISTER' }, register: { receiptCode: null }, registerSession: { posRegisterSessionId: 22 }, cashierSession: { posCashierSessionId: 23 } };
@@ -68,10 +69,11 @@ function fixture(grantCredit = true, fromQuotation = false, currentUnitPrice = 1
     if (entity === InvoiceDetail) return detailRepo;
     if (entity === InvoicePayment) return { create: (value: any) => value, save: async (value: any) => value };
     if (entity === Quotation) return { findOne: async ({ where }: any) => savedQuotation && Number(where.quotationId) === 70 && Number(where.tenantId) === 1 ? savedQuotation : null, save: async (row: any) => { savedQuotation = row; return row; } };
-    if (entity === QuotationLine) return { find: async () => [{ quotationId: 70, lineNumber: 1, productId: 10, unitId: 5, productCodeSnapshot: 'P10', quantity: '2.0000', unitPrice: '100.00', discountPercent: '10.0000', discountAmount: '20.00', grossTotal: '200.00', netTotal: '180.00' }] };
+    if (entity === QuotationLine) return { find: async () => [{ quotationLineId: 71, quotationId: 70, lineNumber: 1, productId: 10, unitId: 5, productCodeSnapshot: 'P10', productNameSnapshot: 'Bread', unitCodeSnapshot: 'EA', unitNameSnapshot: 'Each', quantity: '2.0000', unitPrice: '100.00', discountPercent: '10.0000', discountAmount: '20.00', grossTotal: '200.00', netTotal: '180.00' }] };
     if (entity === ProductLocation) return { findOneBy: async () => ({ productId: 10, locationId: 3, isActive: true, isSellable: true }) };
     if (entity === ProductUnit) return { findOneBy: async () => ({ productId: 10, unitId: 5, isActive: true, isBaseUnit: true, isSalesUnit: true }) };
-    if (entity === Product) return { findOneBy: async () => ({ productId: 10, tenantId: 1, isActive: true, isSellable: true, isStockItem: false }) };
+    if (entity === Product) return { findOneBy: async () => ({ productId: 10, tenantId: 1, baseUnitId: 5, sku: 'P10', productName: 'Bread', isActive: true, isSellable: true, isStockItem: false }) };
+    if (entity === UnitOfMeasure) return { findOneBy: async () => ({ unitId: 5, tenantId: 1, code: 'EA', name: 'Each' }) };
     if (entity === PaymentMethod) return { findOneBy: async (where: any) => where.paymentMethodId === 1 ? { paymentMethodId: 1, tenantId: 1, paymentMethodName: 'Cash', paymentMethodType: PaymentMethodType.CASH, isActive: true } : null };
     if (entity === Permission) return { findOneBy: async () => ({ permissionId: 5, moduleId: 6, code: 'SALES_CREDIT_AUTHORIZE', isActive: true }) };
     if (entity === TenantModule) return { findOneBy: async () => ({ tenantId: 1, moduleId: 6, isEnabled: true }) };
@@ -112,6 +114,12 @@ test('accepted quotation converts through normal checkout and same key returns t
   const request: any = { checkoutKey: 'abcd1111-1111-4111-8111-111111111111', sourceQuotationId: 70, locationId: 3, customerId: 9, saleType: 'RETAIL', details: [{ productId: 10, quantity: 2, quotedUnitPrice: 100, quotedDiscountAmount: 20 }], payments: [{ paymentMethodId: 1, amount: 180 }] };
   const invoice = await f.service.create(request, user);
   assert.equal(invoice.sourceQuotationId, 70);
+  assert.equal(f.savedDetails[0].priceSource, 'QUOTATION');
+  assert.equal(f.savedDetails[0].sourceQuotationLineId, 71);
+  assert.equal(f.savedDetails[0].sourcePriceListItemId, null);
+  assert.equal(f.savedDetails[0].unitCodeSnapshot, 'EA');
+  assert.equal(f.savedDetails[0].cogsAmount, '0.0000');
+  assert.equal(f.savedDetails[0].taxAmount, '0.00');
   assert.equal((invoice.receiptSnapshot as any).details[0].pricingSnapshot.priceListItemId, null);
   assert.equal(invoice.billNo, 1);
   assert.equal(f.quotation.status, 'CONVERTED');
@@ -154,6 +162,10 @@ test('normal POS requires a positive quoted price-list ID and accepts a current 
   const f = fixture();
   const invoice = await f.service.create({ ...base, details: [{ ...base.details[0], quotedPriceListItemId: 40 }] }, user);
   assert.equal(invoice.grandTotal, '180.00');
+  assert.equal(f.savedDetails[0].priceSource, 'PRICE_LIST');
+  assert.equal(f.savedDetails[0].sourcePriceListItemId, 40);
+  assert.equal(f.savedDetails[0].sourceQuotationLineId, null);
+  assert.equal(f.savedDetails[0].lineNumber, 1);
   assert.equal(f.pricingCalls, 1);
   await assert.rejects(f.service.create(base, user), /valid quoted price list item is required/i);
 });
