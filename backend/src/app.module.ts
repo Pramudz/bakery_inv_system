@@ -51,6 +51,8 @@ import { PosRegistersModule } from './features/pos-registers/pos-registers.modul
 import { PosPrintModule } from './features/pos-print/pos-print.module';
 import { ReportsModule } from './features/reports/reports.module';
 import { QuotationsModule } from './features/quotations/quotations.module';
+import { InventoryAgingModule } from './features/inventory-aging/inventory-aging.module';
+import { StockTransfersModule } from './features/stock-transfers/stock-transfers.module';
 
 
 @Module({
@@ -84,6 +86,8 @@ import { QuotationsModule } from './features/quotations/quotations.module';
     InventoryAgeLayerModule,
     InventoryAdjustmentsModule,
     InventoryConversionsModule,
+    InventoryAgingModule,
+    StockTransfersModule,
     AuthModule,
     TenantsModule,
     UsersModule,

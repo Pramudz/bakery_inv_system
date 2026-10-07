@@ -49,6 +49,8 @@ export class AuthorizationCatalogService implements OnModuleInit {
     const inventoryPermissions = [
       'INVENTORY_ADJUSTMENT_VIEW', 'INVENTORY_ADJUSTMENT_CREATE', 'INVENTORY_ADJUSTMENT_UPDATE', 'INVENTORY_ADJUSTMENT_POST', 'INVENTORY_ADJUSTMENT_CANCEL', 'INVENTORY_ADJUSTMENT_REASON_MANAGE', 'INVENTORY_OPENING_POST',
       'INVENTORY_VALUE_ADJUSTMENT_VIEW', 'INVENTORY_VALUE_ADJUSTMENT_CREATE', 'INVENTORY_VALUE_ADJUSTMENT_UPDATE', 'INVENTORY_VALUE_ADJUSTMENT_POST', 'INVENTORY_VALUE_ADJUSTMENT_CANCEL',
+      'INVENTORY_TRANSFER_VIEW', 'INVENTORY_TRANSFER_CREATE', 'INVENTORY_TRANSFER_DISPATCH', 'INVENTORY_TRANSFER_RECEIVE', 'INVENTORY_TRANSFER_CANCEL',
+      'INVENTORY_AGING_VIEW', 'INVENTORY_AGING_SNAPSHOT',
     ];
     for (const code of inventoryPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: inventory.moduleId, code, name: code.replace(/_/g, ' ').toLowerCase(), isActive: true }));
     const sales = byCode.get('SALES')!;
