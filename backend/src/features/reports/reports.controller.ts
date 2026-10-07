@@ -3,7 +3,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantPrincipal } from '../auth/auth.types';
 import { TenantAuthGuard } from '../auth/tenant-auth.guard';
 import { PermissionGuard } from '../auth/permission.guard';
-import { ReportsService } from './reports.service';
+import { ReportFilters, ReportsService } from './reports.service';
 
 @Controller('reports')
 @UseGuards(TenantAuthGuard, PermissionGuard)
@@ -18,11 +18,9 @@ export class ReportsController {
   @Get(':reportId')
   run(
     @Param('reportId') reportId: string,
-    @Query('from') from: string,
-    @Query('to') to: string,
-    @Query('locationId') locationId: string,
+    @Query() filters: ReportFilters,
     @CurrentUser() user: TenantPrincipal,
   ) {
-    return this.service.run(reportId, { from, to, locationId }, user);
+    return this.service.run(reportId, filters, user);
   }
 }

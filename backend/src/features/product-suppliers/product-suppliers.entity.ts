@@ -32,6 +32,7 @@ export class ProductSupplier extends AuditEntity {
   @Column({ name: "is_primary_supplier", default: false })
   isPrimarySupplier!: boolean;
   @Column({ name: "is_active", default: true }) isActive!: boolean;
+  @Column({ name: 'baseline_lead_time_days', type: 'int', nullable: true }) baselineLeadTimeDays!: number | null;
   @OneToMany(
   () => ProductSupplierUnit,
     (supplierUnit) => supplierUnit.productSupplier,

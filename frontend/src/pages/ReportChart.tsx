@@ -8,26 +8,29 @@ function chartMeasures(reportId: string): string[] {
   if (reportId === "inventory-movement") return ["qtyIn", "qtyOut"];
   if (reportId === "purchase-orders") return ["qty", "receivedQty"];
   if (reportId === "register-reconciliation") return ["expectedCash", "countedCash"];
-  if (reportId === "payment-methods") return ["paymentValue"];
+  if (reportId === "payment-methods" || reportId === "payment-analysis") return ["paymentValue"];
   if (reportId === "stock-on-hand") return ["qty"];
-  if (reportId === "stock-valuation" || reportId === "inventory-aging") return ["stockValue"];
+  if (reportId === "stock-valuation" || reportId === "inventory-aging" || reportId === "inventory-position") return ["stockValue"];
   if (reportId === "refunds") return ["refundValue"];
   if (reportId === "grn-report" || reportId === "supplier-purchases") return ["lineValue"];
   return ["netSales"];
 }
 
-export function ReportChart({ reportId, rows, dimension, granularity, hideHeading = false }: { hideHeading?: boolean; reportId: string; rows: ReportRow[]; dimension: string; granularity: "DAY" | "WEEK" | "MONTH" }) {
+export function ReportChart({ reportId, rows, dimension, granularity, hideHeading = false, serverRankedTopN = false }: { hideHeading?: boolean; serverRankedTopN?: boolean; reportId: string; rows: ReportRow[]; dimension: string; granularity: "DAY" | "WEEK" | "MONTH" | "AGGREGATED" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY" }) {
   const measures = chartMeasures(reportId);
+  const isTimeDimension = dimension === "reportDate" || dimension === "periodKey";
   const allData = [...rows].map((row) => ({
-    label: dimension === "reportDate" ? formatReportDate(row[dimension]) : String(row[dimension] ?? "—"),
+    label: dimension === "reportDate" ? formatReportDate(row[dimension])
+      : dimension === "product" && serverRankedTopN ? `${row.sku ?? ""} — ${row.product ?? ""}`
+        : String(row[dimension] ?? "—"),
     sortKey: String(row[dimension] ?? ""), row,
   }));
-  const isDonut = (reportId === "payment-methods" && dimension === "paymentMethod")
+  const isDonut = ((reportId === "payment-methods" || reportId === "payment-analysis") && dimension === "paymentMethod")
     || (reportId === "inventory-aging" && dimension === "agingBucket");
-  const sortedData = dimension === "reportDate"
+  const sortedData = serverRankedTopN ? allData : isTimeDimension
     ? allData.sort((a, b) => a.sortKey.localeCompare(b.sortKey))
     : allData.sort((a, b) => Number(b.row[measures[0]] ?? 0) - Number(a.row[measures[0]] ?? 0));
-  const data = isDonut || dimension === "reportDate" ? sortedData : sortedData.slice(0, 8);
+  const data = serverRankedTopN || isDonut || isTimeDimension ? sortedData : sortedData.slice(0, 8);
   const total = data.reduce((sum, item) => sum + Math.max(0, Number(item.row[measures[0]] ?? 0)), 0);
   const number = (value: ReportRow[string]) => Number(value ?? 0);
   const formatted = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -45,7 +48,7 @@ export function ReportChart({ reportId, rows, dimension, granularity, hideHeadin
     const gradient = slices.map((slice) => `${slice.color} ${slice.start}% ${slice.end}%`).join(", ");
     return (
       <section className="card report-chart-card">
-        {!hideHeading && <div className="report-chart-heading"><div><h3>{reportId === "payment-methods" ? "Payment mix" : "Stock age profile"}</h3><p>Share of {LABELS[measures[0]]?.toLowerCase()} by {LABELS[dimension]?.toLowerCase() ?? "group"}</p></div></div>}
+        {!hideHeading && <div className="report-chart-heading"><div><h3>{reportId === "payment-methods" || reportId === "payment-analysis" ? "Payment mix" : "Stock age profile"}</h3><p>Share of {LABELS[measures[0]]?.toLowerCase()} by {LABELS[dimension]?.toLowerCase() ?? "group"}</p></div></div>}
         <div className="report-donut-layout">
           <div className="report-donut" role="img" aria-label={`${LABELS[measures[0]]} distribution by ${LABELS[dimension]}`} style={{ "--report-donut": `conic-gradient(${gradient})` } as CSSProperties}>
             <div><strong>{formatted(total)}</strong><span>{LABELS[measures[0]]}</span></div>
@@ -54,11 +57,12 @@ export function ReportChart({ reportId, rows, dimension, granularity, hideHeadin
             {slices.map((slice) => <div className="report-legend-row" key={slice.label}><span style={{ background: slice.color }} /><strong>{slice.label}</strong><span>{total ? `${(slice.value / total * 100).toFixed(1)}%` : "0%"}</span></div>)}
           </div>
         </div>
+        {serverRankedTopN && <p className="report-chart-footnote">Top {data.length} by {LABELS[measures[0]] ?? measures[0]}.</p>}
       </section>
     );
   }
 
-  if (dimension === "reportDate" && measures.length === 1) {
+  if (isTimeDimension && measures.length === 1) {
     const values = data.map(({ row }) => number(row[measures[0]]));
     const maxValue = Math.max(0, ...values);
     const minValue = Math.min(0, ...values);
@@ -102,7 +106,7 @@ export function ReportChart({ reportId, rows, dimension, granularity, hideHeadin
     <section className="card report-chart-card">
       {!hideHeading && <div className="report-chart-heading">
         <div>
-          <h3>{dimension === "reportDate" ? "Performance over time" : "Performance breakdown"}</h3>
+          <h3>{isTimeDimension ? "Performance over time" : "Performance breakdown"}</h3>
           <p>{measures.map((measure) => LABELS[measure]?.toLowerCase()).join(" vs ")} by {LABELS[dimension]?.toLowerCase() ?? "report detail"}</p>
         </div>
         {measures.length > 1 && <div className="report-chart-keys">{measures.map((measure, index) => <span key={measure}><i style={{ background: CHART_COLORS[index] }} />{LABELS[measure]}</span>)}</div>}
@@ -124,7 +128,8 @@ export function ReportChart({ reportId, rows, dimension, granularity, hideHeadin
           </div>
         ))}
       </div>
-      {rows.length > data.length && <p className="report-chart-footnote">Showing the top {data.length} of {rows.length} groups.</p>}
+      {serverRankedTopN ? <p className="report-chart-footnote">Top {data.length} by {LABELS[measures[0]] ?? measures[0]}.</p>
+        : rows.length > data.length && <p className="report-chart-footnote">Showing the top {data.length} of {rows.length} groups.</p>}
     </section>
   );
 }

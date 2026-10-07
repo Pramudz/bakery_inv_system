@@ -10,7 +10,7 @@ function fixture(rows: Record<string, unknown>[] = []) {
     getRepository: () => ({ findOneBy: async () => ({ timeZone: 'Asia/Colombo' }) }),
     query: async (sql: string, params: unknown[]) => { calls.push({ sql, params }); return rows; },
   };
-  return { service: new ReportsService(source as any), calls };
+  return { service: new ReportsService(source as any, {} as any), calls };
 }
 
 test('sales report uses inclusive business dates for sale and refund events', async () => {
@@ -21,9 +21,9 @@ test('sales report uses inclusive business dates for sale and refund events', as
   const result = await service.run('daily-sales', { from: '2026-10-06', to: '2026-10-06' }, user);
   assert.deepEqual(calls[0].params, [1, '2026-10-06', '2026-10-06', 1, '2026-10-06', '2026-10-06']);
   assert.equal(result.rows[0].reportDate, '2026-10-06');
-  assert.equal(result.rows[0].netSales, 900);
-  assert.equal(result.rows[1].netSales, -300);
-  assert.equal(result.rows[1].cogs, -150);
+  assert.equal(result.rows[0].netSales, '900.0000');
+  assert.equal(result.rows[1].netSales, '-300.0000');
+  assert.equal(result.rows[1].cogs, '-150.0000');
   assert.match(calls[0].sql, /r\.status = 'COMPLETED'/);
 });
 
@@ -41,4 +41,10 @@ test('timestamp reports use Colombo day boundaries with exclusive next day', asy
   assert.equal((calls[0].params[2] as Date).toISOString(), '2026-10-06T18:30:00.000Z');
   assert.match(calls[0].sql, /pay\.paid_at >= \? AND pay\.paid_at < \?/);
   assert.equal(result.rows[0].reportDate, '2026-10-06');
+});
+
+test('report API rejects unsupported view and grouping combinations', async () => {
+  const { service } = fixture();
+  await assert.rejects(service.run('payment-analysis', { view: 'ITEM_DETAIL' }, user), /Unsupported view/);
+  await assert.rejects(service.run('sales-analysis', { view: 'SUMMARY', groupBy: 'paymentMethod' }, user), /Unsupported grouping/);
 });
