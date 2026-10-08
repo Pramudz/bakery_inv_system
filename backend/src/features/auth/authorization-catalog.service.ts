@@ -4,20 +4,15 @@ import { ModuleEntity } from '../modules/modules.entity';
 import { Permission } from '../permissions/permissions.entity';
 import { Tenant } from '../tenants/tenant.entity';
 import { TenantModule } from '../tenant-modules/tenant-modules.entity';
+import { AUTHORIZATION_MODULES, DEFAULT_TENANT_MODULE_CODES } from './authorization-catalog.constants';
 
-const MODULES = [
-  ['MASTER_DATA', 'Master Data'], ['PRODUCT', 'Products'], ['SUPPLIER', 'Suppliers'],
-  ['LOCATION', 'Locations'], ['PRICING', 'Pricing'], ['USER_MANAGEMENT', 'User Management'],
-  ['PURCHASING', 'Purchasing'], ['INVENTORY', 'Inventory'], ['CUSTOMER', 'Customer'],
-  ['SALES', 'Sales']
-] as const;
 const PERMISSIONS = [
   ['MASTER_DATA', 'CATEGORY'], ['MASTER_DATA', 'BRAND'], ['MASTER_DATA', 'UNIT'], ['MASTER_DATA', 'ATTRIBUTE'], ['MASTER_DATA', 'IDENTIFIER_TYPE'], ['MASTER_DATA', 'CUSTOMER'],
   ['PRODUCT', 'PRODUCT'], ['PRODUCT', 'PRODUCT_UNIT'], ['PRODUCT', 'PRODUCT_IDENTIFIER'], ['PRODUCT', 'PRODUCT_ATTRIBUTE'],
   ['SUPPLIER', 'SUPPLIER'], ['SUPPLIER', 'PRODUCT_SUPPLIER'],
   ['LOCATION', 'LOCATION'], ['LOCATION', 'PRODUCT_LOCATION'],
   ['PRICING', 'PRICE_LIST'], ['PRICING', 'PRICE_LIST_ITEM'], ['PRICING', 'PRODUCT_SUPPLIER_PRICE'],
-  ['CUSTOMER', 'CUSTOMER']
+  ['CUSTOMER', 'CUSTOMER'], ['USER_MANAGEMENT', 'USER'], ['USER_MANAGEMENT', 'ROLE']
 
 ] as const;
 
@@ -30,7 +25,7 @@ export class AuthorizationCatalogService implements OnModuleInit {
     const tenantModules = this.dataSource.getRepository(TenantModule);
     const tenants = await this.dataSource.getRepository(Tenant).find();
     const byCode = new Map<string, ModuleEntity>();
-    for (const [code, name] of MODULES) {
+    for (const [code, name] of AUTHORIZATION_MODULES) {
       let module = await modules.findOneBy({ code });
       if (!module) module = await modules.save(modules.create({ code, name, isActive: true }));
       byCode.set(code, module);
@@ -66,8 +61,12 @@ export class AuthorizationCatalogService implements OnModuleInit {
     const tenantProfilePermission = 'TENANT_PROFILE_UPDATE';
     const masterData = byCode.get('MASTER_DATA')!;
     if (!await permissions.findOneBy({ code: tenantProfilePermission })) await permissions.save(permissions.create({ moduleId: masterData.moduleId, code: tenantProfilePermission, name: 'Update own tenant profile', description: 'Update the authenticated tenant company profile and logo.', isActive: true }));
+    const userManagement = byCode.get('USER_MANAGEMENT')!;
+    for (const code of ['PERMISSION_VIEW', 'ROLE_PERMISSION_VIEW', 'ROLE_PERMISSION_UPDATE']) {
+      if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: userManagement.moduleId, code, name: code.replace(/_/g, ' ').toLowerCase(), isActive: true }));
+    }
     for (const tenant of tenants) for (const module of byCode.values()) {
-      if (module.code === 'PURCHASING') continue;
+      if (!DEFAULT_TENANT_MODULE_CODES.includes(module.code)) continue;
       if (!await tenantModules.findOneBy({ tenantId: tenant.tenantId, moduleId: module.moduleId })) await tenantModules.save(tenantModules.create({ tenantId: tenant.tenantId, moduleId: module.moduleId, isEnabled: true }));
     }
   }

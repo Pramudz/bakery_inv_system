@@ -13,6 +13,7 @@ import { PlatformUsersService } from './platform-users.service';
 import { AuthGuard } from '../auth/auth-guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthPrincipal } from '../auth/auth.types';
+import { assertDevelopmentBootstrapEnabled } from '../auth/development-bootstrap';
 
 @Controller('platform-users')
 export class PlatformUsersController {
@@ -33,6 +34,7 @@ export class PlatformUsersController {
       mobile?: string;
     },
   ) {
+    assertDevelopmentBootstrapEnabled();
     const platformUser =
       await this.platformUsersService.bootstrap(body);
 
@@ -65,8 +67,6 @@ export class PlatformUsersController {
     },
     @CurrentUser() currentUser: AuthPrincipal,
   ) {
-    console.log('Authenticated user:', currentUser);
-
     const platformUser =
       await this.platformUsersService.create(body);
 

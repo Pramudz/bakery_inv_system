@@ -16,12 +16,12 @@ export interface Tenant {
   logoUrl?: string | null; locations?: TenantLocation[]; createdAt?: string; updatedAt?: string | null;
 }
 export type TenantInput = Omit<Tenant, 'tenantId' | 'locations' | 'logoUrl' | 'createdAt' | 'updatedAt'>;
-export type TenantCreateResult = { message: string; tenant: Tenant; bootstrap: Record<string, unknown> };
+export type TenantCreateResult = { message: string; tenant: Tenant; bootstrap: { role: { roleId: number; code: string; name: string }; user: { userId: number; username: string } } };
 export const mediaUrl = (path?: string | null) => path ? (path.startsWith('http') ? path : `${env.apiUrl.replace(/\/api\/?$/, '')}${path}`) : '';
 export const tenantsApi = {
   list: () => apiClient.get<Tenant[]>('/tenants'),
   get: (id: number) => apiClient.get<Tenant>(`/tenants/${id}`),
-  create: (data: TenantInput) => apiClient.post<TenantCreateResult>('/tenants', data),
+  create: (data: TenantInput & { initialAdminPassword: string }) => apiClient.post<TenantCreateResult>('/tenants', data),
   update: (id: number, data: Partial<TenantInput>) => apiClient.put<Tenant>(`/tenants/${id}`, data),
   uploadLogo: (id: number, file: File) => { const body = new FormData(); body.append('logo', file); return apiClient.postForm<Tenant>(`/tenants/${id}/logo`, body); },
   removeLogo: (id: number) => apiClient.delete<Tenant>(`/tenants/${id}/logo`),
