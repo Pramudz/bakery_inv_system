@@ -1,5 +1,5 @@
 import { apiClient } from '../../../services/apiClient';
-export type Category = Record<string, any>;
+export type Category = Record<string, any> & { categoryId: number; parentCategoryId: number | null; categoryName: string; categoryCode: string };
 export type CategoryPage = {
   items: Category[];
   page: number;

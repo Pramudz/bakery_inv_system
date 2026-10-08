@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseIntPipe, Post, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantPrincipal } from '../auth/auth.types';
 import { TenantAuthGuard } from '../auth/tenant-auth.guard';
@@ -9,9 +9,11 @@ import { CreateInvoiceAdjustmentDto } from './dto/create-invoice-adjustment.dto'
 import { MasterRefundPayoutDto, MasterReversalPayoutDto } from './dto/master-payout.dto';
 import { PermissionGuard } from '../auth/permission.guard';
 import { RequirePermission } from '../auth/require-permission.decorator';
+import { PosCostVisibilityInterceptor } from '../invoices/pos-cost-visibility.interceptor';
 
 @Controller()
 @UseGuards(TenantAuthGuard, PermissionGuard)
+@UseInterceptors(PosCostVisibilityInterceptor)
 export class InvoiceRefundsController {
   constructor(private readonly service: InvoiceRefundsService) {}
   @Get('invoice-refunds') @RequirePermission('SALES_REFUND_VIEW') list(@CurrentUser() user: TenantPrincipal) { return this.service.list(user); }

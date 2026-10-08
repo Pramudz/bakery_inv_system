@@ -8,6 +8,7 @@ export class CreateInvoiceDetailDto {
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) unitPrice?: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) discountPercentage?: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) discountAmount?: number;
+  // Optional for quotation conversion; normal POS requires it in InvoicesService.
   @IsOptional() @Type(() => Number) @IsInt() @IsPositive() quotedPriceListItemId?: number;
   @IsOptional() @Type(() => Number) @IsInt() @IsPositive() quotedPriceListItemDiscountId?: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) quotedUnitPrice?: number;
@@ -23,6 +24,7 @@ export class CreateInvoicePaymentDto {
 
 export class CreateInvoiceDto {
   @IsUUID('4') checkoutKey!: string;
+  @IsOptional() @Type(() => Number) @IsInt() @IsPositive() sourceQuotationId?: number;
   @Type(() => Number) @IsInt() @IsPositive() locationId!: number;
   @IsOptional() @Type(() => Number) @IsInt() @IsPositive() customerId?: number;
   @IsIn(['RETAIL', 'WHOLESALE']) saleType!: string;

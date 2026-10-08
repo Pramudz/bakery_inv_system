@@ -49,6 +49,8 @@ export class AuthorizationCatalogService implements OnModuleInit {
     const inventoryPermissions = [
       'INVENTORY_ADJUSTMENT_VIEW', 'INVENTORY_ADJUSTMENT_CREATE', 'INVENTORY_ADJUSTMENT_UPDATE', 'INVENTORY_ADJUSTMENT_POST', 'INVENTORY_ADJUSTMENT_CANCEL', 'INVENTORY_ADJUSTMENT_REASON_MANAGE', 'INVENTORY_OPENING_POST',
       'INVENTORY_VALUE_ADJUSTMENT_VIEW', 'INVENTORY_VALUE_ADJUSTMENT_CREATE', 'INVENTORY_VALUE_ADJUSTMENT_UPDATE', 'INVENTORY_VALUE_ADJUSTMENT_POST', 'INVENTORY_VALUE_ADJUSTMENT_CANCEL',
+      'INVENTORY_TRANSFER_VIEW', 'INVENTORY_TRANSFER_CREATE', 'INVENTORY_TRANSFER_DISPATCH', 'INVENTORY_TRANSFER_RECEIVE', 'INVENTORY_TRANSFER_CANCEL',
+      'INVENTORY_AGING_VIEW', 'INVENTORY_AGING_SNAPSHOT',
     ];
     for (const code of inventoryPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: inventory.moduleId, code, name: code.replace(/_/g, ' ').toLowerCase(), isActive: true }));
     const sales = byCode.get('SALES')!;
@@ -57,6 +59,8 @@ export class AuthorizationCatalogService implements OnModuleInit {
       'SALES_REFUND_VIEW', 'SALES_REFUND_CREATE',
       'SALES_ADJUSTMENT_VIEW', 'SALES_ADJUSTMENT_CREATE',
       'SALES_PAYMENT_REVERSE', 'SALES_PAYMENT_METHOD_VIEW', 'SALES_PAYMENT_METHOD_MANAGE',
+      'SALES_QUOTATION_VIEW', 'SALES_QUOTATION_CREATE', 'SALES_QUOTATION_EDIT', 'SALES_QUOTATION_SEND',
+      'SALES_QUOTATION_ACCEPT', 'SALES_QUOTATION_CONVERT', 'SALES_QUOTATION_CANCEL',
     ];
     for (const code of salesPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: sales.moduleId, code, name: code.replace(/_/g, ' ').toLowerCase(), isActive: true }));
     const tenantProfilePermission = 'TENANT_PROFILE_UPDATE';

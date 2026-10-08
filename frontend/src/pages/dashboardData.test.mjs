@@ -14,6 +14,16 @@ test('dashboard totals retain decimal values and count invoices separately acros
   assert.equal(totals.stockValue, 1600.75);
   assert.equal(dashboardTotals([], []).invoices, 0);
 });
+test('refund-only events reduce dashboard sales without counting another invoice', () => {
+  const totals = dashboardTotals([
+    { invoice: 'I1', location: 'A', billCount: 1, netSales: 900, gp: 400 },
+    { invoice: 'I0', location: 'A', billCount: 0, netSales: -300, gp: -150 },
+  ], []);
+  assert.equal(totals.netSales, 600);
+  assert.equal(totals.grossProfit, 250);
+  assert.equal(totals.invoices, 1);
+  assert.equal(dashboardTotals([{ invoice: 'I2', billCount: 1, netSales: 100, gp: null, cogsMissing: 1 }], []).grossProfit, null);
+});
 test('dashboard dates follow the tenant timezone at UTC day boundaries', () => {
   assert.deepEqual(dashboardDateRange(new Date('2026-10-05T20:00:00Z'), 'Asia/Colombo', 7), { from: '2026-09-30', to: '2026-10-06' });
 });

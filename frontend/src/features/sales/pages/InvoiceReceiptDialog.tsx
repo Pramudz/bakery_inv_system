@@ -12,6 +12,8 @@ export function InvoiceReceiptDialog({ invoiceId, onClose, onDetails }: { invoic
   const { tenant, tenantUser, role, accessScope, assignedLocations } = useAuth();
   const dialog = useRef<HTMLDialogElement>(null);
   const [reprintError, setReprintError] = useState('');
+  const [printPending, setPrintPending] = useState(false);
+  const printLock = useRef(false);
   const invoice = useQuery({
     queryKey: ['invoice', invoiceId, tenant?.tenantId, tenantUser?.userId, role?.roleId, accessScope, assignedLocations.map((location) => location.locationId)],
     queryFn: () => invoicesApi.get(invoiceId),
@@ -27,9 +29,9 @@ export function InvoiceReceiptDialog({ invoiceId, onClose, onDetails }: { invoic
     {invoice.isPending ? <p className="original-bill-message">Loading bill...</p> : invoice.isError ? <div className="error-box" role="alert">{invoice.error.message}<button className="btn btn-secondary" onClick={() => void invoice.refetch()}>Retry</button></div> : <>
       {!invoice.data.receiptSnapshot && <p className="original-bill-message">This older bill is recreated from saved invoice records. An original receipt copy was not stored.</p>}
       <InvoiceReceiptContent invoice={invoice.data} copy />
-      {printStatus.data && <p className="original-bill-message" role="status">Printer: {printStatus.data.status === 'BROWSER_ONLY' ? 'Browser print available; no print agent is configured.' : printStatus.data.status === 'PRINTED' ? 'Sent to the printer.' : printStatus.data.status === 'FAILED' ? `Print failed: ${printStatus.data.lastError ?? 'Check the printer.'} Ask an administrator to retry, or use Print Copy.` : 'Waiting for the local print agent.'}</p>}
+      {printStatus.data && printStatus.data.status !== 'NOT_REQUESTED' && <p className="original-bill-message" role="status">Printer: {printStatus.data.status === 'PRINTED' ? 'Sent to printer.' : printStatus.data.status === 'FAILED' ? `Print failed: ${printStatus.data.lastError ?? 'Check the printer.'}` : 'Sending to printer...'}</p>}
     </>}
     {reprintError && <div className="error-box">{reprintError}</div>}
-    <div className="modal-foot receipt-actions"><button className="btn btn-secondary" onClick={onDetails}>Invoice Details</button><button className="btn btn-secondary" disabled={!invoice.data?.receiptSnapshot || invoice.isError} onClick={async () => { try { await invoicesApi.reprint(invoiceId); setReprintError(''); window.print(); } catch (error) { setReprintError(error instanceof Error ? error.message : 'Reprint failed.'); } }}>Print Copy</button><button className="btn btn-primary" disabled={!invoice.data?.receiptSnapshot || invoice.isError} onClick={async () => { try { await invoicesApi.reprint(invoiceId); setReprintError(''); downloadInvoiceReceipt(invoice.data, true); } catch (error) { setReprintError(error instanceof Error ? error.message : 'Download failed.'); } }}>Download Copy PDF</button></div>
+    <div className="modal-foot receipt-actions"><button className="btn btn-secondary" onClick={onDetails}>Invoice Details</button><button className="btn btn-secondary" disabled={!invoice.data?.receiptSnapshot || invoice.isError || printPending} onClick={async () => { if (printLock.current) return; printLock.current = true; setPrintPending(true); try { await posPrintStatusApi.print('SALE', invoiceId); setReprintError(''); await printStatus.refetch(); } catch (error) { setReprintError(error instanceof Error ? error.message : 'Print request failed.'); } finally { printLock.current = false; setPrintPending(false); } }}>{printPending ? 'Sending to printer...' : 'Print'}</button><button className="btn btn-primary" disabled={!invoice.data?.receiptSnapshot || invoice.isError} onClick={async () => { try { await invoicesApi.reprint(invoiceId); setReprintError(''); downloadInvoiceReceipt(invoice.data, true); } catch (error) { setReprintError(error instanceof Error ? error.message : 'Download failed.'); } }}>Download Copy PDF</button></div>
   </dialog>, document.body);
 }

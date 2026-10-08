@@ -26,6 +26,12 @@ import { tenantBusinessClock } from '../../common/business-date';
 import { nextPosReceiptNumber } from './pos-receipt-number';
 import { posReceiptHeader } from './pos-receipt-header';
 import { PosPrintService } from '../pos-print/pos-print.service';
+import { Quotation } from '../quotations/quotation.entity';
+import { QuotationLine } from '../quotations/quotation-line.entity';
+import { ProductLocation } from '../product-locations/product-locations.entity';
+import { ProductUnit } from '../product-units/product-units.entity';
+import { UnitOfMeasure } from '../units/units.entity';
+import { checked, multiply, units } from '../../common/inventory-decimal';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
@@ -282,6 +288,11 @@ export class InvoicesService {
   }
 
   async create(dto: CreateInvoiceDto, user: TenantPrincipal, credential?: string, deadlockAttempt = 0): Promise<Invoice> {
+    if (!dto.sourceQuotationId && dto.details.some((line) =>
+      !Number.isSafeInteger(Number(line.quotedPriceListItemId)) || Number(line.quotedPriceListItemId) <= 0,
+    )) {
+      throw new BadRequestException('A valid quoted price list item is required for POS checkout.');
+    }
     const checkoutFingerprint = this.checkoutFingerprint(dto);
     const prior = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user);
     if (prior) return prior;
@@ -290,14 +301,25 @@ export class InvoicesService {
     try {
       return await this.dataSource.transaction(async (manager) => {
       const activeSession = await this.posSessions.requireCashierSession(manager, credential, user, dto.locationId, true);
-      const quote = await this.pricing.quoteWithManager(
+      let sourceQuotation: Quotation | null = null;
+      if (dto.sourceQuotationId) {
+        await this.assertQuotationConversionPermission(manager, user);
+        sourceQuotation = await manager.getRepository(Quotation).findOne({ where: { quotationId: dto.sourceQuotationId, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } });
+        if (!sourceQuotation) throw new NotFoundException('Quotation not found.');
+        if (sourceQuotation.status === 'CONVERTED') throw new ConflictException(`Quotation ${sourceQuotation.quotationNumber} has already been converted to invoice ${sourceQuotation.convertedInvoiceId}.`);
+        if (sourceQuotation.status !== 'ACCEPTED') throw new ConflictException('Only accepted quotations can be converted.');
+        if (Number(sourceQuotation.locationId) !== Number(dto.locationId)) throw new ConflictException(`This quotation was issued by ${sourceQuotation.locationNameSnapshot} and must be converted from that location.`);
+        if (Number(sourceQuotation.customerId) !== Number(dto.customerId)) throw new ConflictException('Quotation customer cannot be changed in POS.');
+        if (sourceQuotation.quotationType !== dto.saleType) throw new ConflictException('Quotation sale type cannot be changed in POS.');
+      }
+      const quote = sourceQuotation ? await this.quotationCheckoutPrice(manager, sourceQuotation, dto, user) : await this.pricing.quoteWithManager(
         manager,
         user.tenantId,
         dto.locationId,
         dto.saleType as PosSaleType,
         dto.details.map((line) => ({ productId: line.productId, quantity: line.quantity })),
       );
-      const priceChanges = dto.details.flatMap((request, index) => {
+      const priceChanges = sourceQuotation ? [] : dto.details.flatMap((request, index) => {
         const current = quote.lines[index];
         return this.priceChanged(request, current) ? [{ productId: request.productId, quoted: {
           priceListItemId: request.quotedPriceListItemId ?? null,
@@ -335,6 +357,7 @@ export class InvoicesService {
         tenantId: user.tenantId,
         checkoutKey: dto.checkoutKey,
         checkoutFingerprint,
+        sourceQuotationId: sourceQuotation?.quotationId ?? null,
         locationId: dto.locationId,
         posTerminalId: activeSession.terminal?.posTerminalId ?? null,
         posRegisterSessionId: activeSession.registerSession.posRegisterSessionId,
@@ -345,6 +368,7 @@ export class InvoicesService {
         saleType: dto.saleType,
         subtotal: subtotal.toFixed(2),
         discountTotal: discountTotal.toFixed(2),
+        taxTotal: '0.00',
         grandTotal: grandTotal.toFixed(2),
         paidAmount: paidAmount.toFixed(2),
         tenderedAmount: tenderedAmount.toFixed(2),
@@ -360,14 +384,30 @@ export class InvoicesService {
       invoice.invoiceNumber = this.invoiceNumber(invoice.invoiceId);
       await invoiceRepo.save(invoice);
 
-      for (const line of preparedDetails) {
+      const stockDetails: InvoiceDetail[] = [];
+      for (const [index, line] of preparedDetails.entries()) {
         const product = await manager.getRepository(Product).findOneBy({ productId: line.productId, tenantId: user.tenantId, isActive: true, isSellable: true });
         if (!product) throw new NotFoundException(`Sellable product ${line.productId} was not found.`);
+        const unitId = line.quotedUnitId ?? product.baseUnitId;
+        const unit = await manager.getRepository(UnitOfMeasure).findOneBy({ unitId, tenantId: user.tenantId });
+        if (!unit) throw new NotFoundException(`Selling unit for product ${line.productId} was not found.`);
         const detail = await manager.getRepository(InvoiceDetail).save(manager.getRepository(InvoiceDetail).create({
-          invoiceId: invoice.invoiceId, productId: line.productId, quantity: String(line.quantity), unitPrice: line.unitPrice.toFixed(2),
+          invoiceId: invoice.invoiceId, lineNumber: index + 1, productId: line.productId,
+          skuSnapshot: line.quotedSkuSnapshot ?? product.sku,
+          productNameSnapshot: line.quotedProductNameSnapshot ?? product.productName,
+          unitId, unitCodeSnapshot: line.quotedUnitCodeSnapshot ?? unit.code, unitNameSnapshot: line.quotedUnitNameSnapshot ?? unit.name,
+          quantity: String(line.quantity), unitPrice: line.unitPrice.toFixed(2),
           discountPercentage: line.discountPercentage.toFixed(4), discountAmount: line.discountAmount.toFixed(2), grossTotal: line.grossTotal.toFixed(2), netTotal: line.netTotal.toFixed(2),
+          unitCostSnapshot: product.isStockItem ? null : '0.0000', cogsAmount: product.isStockItem ? null : '0.0000',
+          priceSource: sourceQuotation ? 'QUOTATION' : 'PRICE_LIST',
+          sourcePriceListItemId: sourceQuotation ? null : line.priceListItemId,
+          sourceQuotationLineId: sourceQuotation ? line.sourceQuotationLineId ?? null : null,
+          taxableAmount: line.netTotal.toFixed(2), taxAmount: '0.00', taxRateSnapshot: '0.0000', taxInclusive: false, taxCodeSnapshot: null,
         }));
-        if (product.isStockItem) await this.issueStock(manager, invoice, detail, user);
+        if (product.isStockItem) stockDetails.push(detail);
+      }
+      for (const detail of stockDetails.sort((a, b) => Number(a.productId) - Number(b.productId))) {
+        await this.issueStock(manager, invoice, detail, user);
       }
 
       for (const payment of preparedPayments) {
@@ -383,7 +423,7 @@ export class InvoicesService {
         }));
       }
       const clock = await tenantBusinessClock(manager, user.tenantId);
-      const header = await posReceiptHeader(manager, user.tenantId, dto.locationId, user.userId);
+      const header = await posReceiptHeader(manager, user.tenantId, dto.locationId, activeSession.cashierSession.cashierUserId);
       const registerCode = activeSession.config.registerMode === PosRegisterMode.MASTER_REGISTER
         ? activeSession.register.receiptCode || 'MASTER'
         : activeSession.terminal!.terminalCode.trim().toUpperCase();
@@ -393,6 +433,14 @@ export class InvoicesService {
       invoice.billNo = await nextPosReceiptNumber(manager, 'SALE', user.tenantId, clock.businessDate, header.locationCode, registerCode);
       invoice.issuedAt = clock.now;
       await invoiceRepo.save(invoice);
+      if (sourceQuotation) {
+        sourceQuotation.status = 'CONVERTED';
+        sourceQuotation.convertedAt = clock.now;
+        sourceQuotation.convertedByUserId = user.userId;
+        sourceQuotation.convertedInvoiceId = invoice.invoiceId;
+        sourceQuotation.updatedByUserId = user.userId;
+        await manager.getRepository(Quotation).save(sourceQuotation);
+      }
       const completed = (await this.getWithManager(manager, invoice.invoiceId, user.tenantId))!;
       for (const detail of completed.details) {
         const pricing = quote.lines.find((line) => Number(line.productId) === Number(detail.productId));
@@ -400,13 +448,16 @@ export class InvoicesService {
       }
       completed.receiptSnapshot = snapshotInvoiceReceipt(completed, header);
       await invoiceRepo.update(invoice.invoiceId, { receiptSnapshot: completed.receiptSnapshot });
-      await this.posPrint?.enqueue(manager, 'SALE', invoice.invoiceId, user.tenantId, dto.locationId, activeSession.terminal?.posTerminalId ?? null, completed.receiptSnapshot);
       return completed;
       });
     } catch (error) {
       if (this.isRetryableDeadlock(error) && deadlockAttempt < 2) {
         await new Promise((resolve) => setTimeout(resolve, 10 * (deadlockAttempt + 1)));
         return this.create(dto, user, credential, deadlockAttempt + 1);
+      }
+      if (dto.sourceQuotationId && error instanceof ConflictException) {
+        const committed = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user);
+        if (committed) return committed;
       }
       if (!this.isCheckoutKeyConflict(error)) throw error;
       const committed = await this.checkoutResult(dto.checkoutKey, checkoutFingerprint, user);
@@ -491,7 +542,44 @@ export class InvoicesService {
       details,
       payments,
       sellOnCredit: Boolean(dto.sellOnCredit),
+      sourceQuotationId: dto.sourceQuotationId ? Number(dto.sourceQuotationId) : null,
     })).digest('hex');
+  }
+
+  private async assertQuotationConversionPermission(manager: EntityManager, user: TenantPrincipal) {
+    if (user.roleCode === 'TENANT_ADMIN') return;
+    const permission = await manager.getRepository(Permission).findOneBy({ code: 'SALES_QUOTATION_CONVERT', isActive: true });
+    if (!permission) throw new ForbiddenException('Quotation conversion permission is unavailable.');
+    const enabled = await manager.getRepository(TenantModule).findOneBy({ tenantId: user.tenantId, moduleId: permission.moduleId, isEnabled: true });
+    const grant = await manager.getRepository(RolePermission).findOneBy({ roleId: user.roleId, permissionId: permission.permissionId });
+    if (!enabled || !grant) throw new ForbiddenException('SALES_QUOTATION_CONVERT permission is required.');
+  }
+
+  private async quotationCheckoutPrice(manager: EntityManager, quotation: Quotation, dto: CreateInvoiceDto, user: TenantPrincipal) {
+    const lines = await manager.getRepository(QuotationLine).find({ where: { quotationId: quotation.quotationId }, order: { lineNumber: 'ASC' } });
+    if (dto.details.length !== lines.length) throw new ConflictException('Quotation items cannot be changed in POS.');
+    for (const [index, line] of lines.entries()) {
+      const request = dto.details[index];
+      if (Number(request.productId) !== Number(line.productId) || Number(request.quantity) !== Number(line.quantity)) throw new ConflictException('Quotation items and quantities cannot be changed in POS.');
+      const product = await manager.getRepository(Product).findOneBy({ productId: line.productId, tenantId: user.tenantId, isActive: true, isSellable: true });
+      const assignment = await manager.getRepository(ProductLocation).findOneBy({ productId: line.productId, locationId: quotation.locationId, isActive: true, isSellable: true });
+      const unit = await manager.getRepository(ProductUnit).findOneBy({ productId: line.productId, unitId: line.unitId, isActive: true, isSalesUnit: true, isBaseUnit: true });
+      if (!product || !assignment || !unit) throw new ConflictException(`Quoted product ${line.productCodeSnapshot} is no longer sellable at this location.`);
+      if ((request.quotedUnitPrice !== undefined && money(Number(request.quotedUnitPrice)) !== Number(line.unitPrice)) ||
+        (request.unitPrice !== undefined && money(Number(request.unitPrice)) !== Number(line.unitPrice))) throw new ConflictException('Quotation prices cannot be changed in POS.');
+      if ((request.quotedDiscountAmount !== undefined && money(Number(request.quotedDiscountAmount)) !== Number(line.discountAmount)) ||
+        (request.discountAmount !== undefined && money(Number(request.discountAmount)) !== Number(line.discountAmount)) ||
+        (request.discountPercentage !== undefined && Number(request.discountPercentage) !== Number(line.discountPercent))) throw new ConflictException('Quotation discounts cannot be changed in POS.');
+    }
+    const prepared = lines.map(line => ({ productId: Number(line.productId), quantity: Number(line.quantity),
+      sourceQuotationLineId: Number(line.quotationLineId), quotedSkuSnapshot: line.productCodeSnapshot,
+      quotedProductNameSnapshot: line.productNameSnapshot, quotedUnitId: Number(line.unitId),
+      quotedUnitCodeSnapshot: line.unitCodeSnapshot, quotedUnitNameSnapshot: line.unitNameSnapshot,
+      productUnitId: null, priceListId: null, priceListItemId: null, priceListItemDiscountId: null,
+      discountType: null, discountValue: null, unitPrice: Number(line.unitPrice),
+      discountPerUnit: Number(line.discountAmount) / Number(line.quantity), discountPercentage: Number(line.discountPercent),
+      grossTotal: Number(line.grossTotal), discountAmount: Number(line.discountAmount), netTotal: Number(line.netTotal), currencyCode: 'LKR' }));
+    return { lines: prepared, subtotal: Number(quotation.subtotal), discountTotal: Number(quotation.discountTotal), grandTotal: Number(quotation.grandTotal) };
   }
 
   private async checkoutResult(checkoutKey: string, checkoutFingerprint: string, user: TenantPrincipal) {
@@ -536,13 +624,17 @@ export class InvoicesService {
     balance.quantityOnHand = String(after);
     balance.lastMovementAt = new Date();
     await repo.save(balance);
-    const cost = Number(balance.averageCost);
+    const cost = checked(units(balance.averageCost));
+    const movementValue = checked(multiply(units(detail.quantity), units(cost)));
     await manager.getRepository(InventoryLedger).save(manager.getRepository(InventoryLedger).create({
       tenantId: user.tenantId, locationId: invoice.locationId, productId: detail.productId, movementDate: new Date(), movementType: 'SALE',
       sourceDocumentType: 'INVOICE', sourceDocumentId: invoice.invoiceId, sourceDocumentLineId: detail.invoiceDetailId,
-      quantityIn: '0', quantityOut: String(quantity), unitCost: String(cost), movementValue: String(money(quantity * cost)),
-      quantityBefore: String(before), quantityAfter: String(after), averageCostBefore: String(cost), averageCostAfter: String(cost), createdByUserId: user.userId,
+      quantityIn: '0', quantityOut: String(quantity), unitCost: cost, movementValue,
+      quantityBefore: String(before), quantityAfter: String(after), averageCostBefore: cost, averageCostAfter: cost, createdByUserId: user.userId,
     }));
+    detail.unitCostSnapshot = cost;
+    detail.cogsAmount = movementValue;
+    await manager.getRepository(InvoiceDetail).save(detail);
   }
 
   private invoiceNumber(id: number) {

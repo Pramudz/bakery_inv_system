@@ -67,7 +67,7 @@ export class PurchaseOrdersService {
   async get(id: number, user: TenantPrincipal) {
     const purchaseOrder = await this.find(id, user);
     const [lines, documentHeader] = await Promise.all([
-      this.dataSource.getRepository(PurchaseOrderLine).find({ where: { purchaseOrderId: id }, relations: { product: true, productUnit: { unit: true } } }),
+      this.dataSource.getRepository(PurchaseOrderLine).find({ where: { purchaseOrderId: id }, relations: { product: true, productUnit: { unit: true }, unit: true } }),
       loadDocumentHeader(this.dataSource, user.tenantId, Number(purchaseOrder.locationId)),
     ]);
     return { ...purchaseOrder, lines, documentHeader };
@@ -229,7 +229,7 @@ export class PurchaseOrdersService {
   }
 
   private async find(id: number, user: TenantPrincipal) {
-    const purchaseOrder = await this.dataSource.getRepository(PurchaseOrder).findOne({ where: { purchaseOrderId: id, tenantId: user.tenantId }, relations: { supplier: true, location: true } });
+    const purchaseOrder = await this.dataSource.getRepository(PurchaseOrder).findOne({ where: { purchaseOrderId: id, tenantId: user.tenantId }, relations: { supplier: true, location: true, createdByUser: true, approvedByUser: true, cancelledByUser: true } });
     if (!purchaseOrder) throw new NotFoundException('Purchase order not found.');
     this.assertLocationAccess(purchaseOrder.locationId, user);
     return purchaseOrder;

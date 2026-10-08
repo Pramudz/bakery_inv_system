@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, ParseEnumPipe, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseEnumPipe, ParseIntPipe, Post, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantPrincipal } from '../auth/auth.types';
 import { TenantAuthGuard } from '../auth/tenant-auth.guard';
@@ -8,11 +8,13 @@ import { ReceiveInvoicePaymentDto } from './dto/receive-invoice-payment.dto';
 import { PermissionGuard } from '../auth/permission.guard';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { QuoteInvoiceDto } from './dto/quote-invoice.dto';
+import { PosCostVisibilityInterceptor } from './pos-cost-visibility.interceptor';
 
 enum PosSaleTypeParam { RETAIL = 'RETAIL', WHOLESALE = 'WHOLESALE' }
 
 @Controller('invoices')
 @UseGuards(TenantAuthGuard, PermissionGuard)
+@UseInterceptors(PosCostVisibilityInterceptor)
 export class InvoicesController {
   constructor(private readonly service: InvoicesService) {}
   @Get() @RequirePermission('SALES_INVOICE_VIEW') list(@CurrentUser() user: TenantPrincipal) { return this.service.list(user); }

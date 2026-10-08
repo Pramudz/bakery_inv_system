@@ -35,11 +35,13 @@ export class Invoice extends AuditEntity {
   @Column({ name: 'printed_register_code', type: 'varchar', length: 50, nullable: true }) printedRegisterCode!: string | null;
   @Column({ name: 'issued_at', type: 'datetime', precision: 3, nullable: true }) issuedAt!: Date | null;
   @Column({ name: 'checkout_key', type: 'varchar', length: 36 }) checkoutKey!: string;
+  @Column({ name: 'source_quotation_id', type: 'bigint', nullable: true, unique: true }) sourceQuotationId!: number | null;
   @Column({ name: 'checkout_fingerprint', type: 'char', length: 64 }) checkoutFingerprint!: string;
   @Column({ name: 'invoice_date', type: 'datetime' }) invoiceDate!: Date;
   @Column({ name: 'sale_type', type: 'varchar', length: 20 }) saleType!: string;
   @Column({ name: 'subtotal', type: 'decimal', precision: 18, scale: 2 }) subtotal!: string;
   @Column({ name: 'discount_total', type: 'decimal', precision: 18, scale: 2, default: 0 }) discountTotal!: string;
+  @Column({ name: 'tax_total', type: 'decimal', precision: 18, scale: 2, default: 0 }) taxTotal!: string;
   @Column({ name: 'grand_total', type: 'decimal', precision: 18, scale: 2 }) grandTotal!: string;
   @Column({ name: 'paid_amount', type: 'decimal', precision: 18, scale: 2, default: 0 }) paidAmount!: string;
   @Column({ name: 'tendered_amount', type: 'decimal', precision: 18, scale: 2, default: 0 }) tenderedAmount!: string;

@@ -205,7 +205,7 @@ export class GoodsReceiptsService {
     const goodsReceipt = await this.find(id, user);
     await this.assertLocationAccess(this.dataSource.manager, user, Number(goodsReceipt.locationId));
     const [lines, documentHeader] = await Promise.all([
-      this.dataSource.getRepository(GoodsReceiptLine).find({ where: { goodsReceiptId: id }, relations: { product: true, productUnit: { unit: true } } }),
+      this.dataSource.getRepository(GoodsReceiptLine).find({ where: { goodsReceiptId: id }, relations: { product: true, productUnit: { unit: true }, unit: true } }),
       loadDocumentHeader(this.dataSource, user.tenantId, Number(goodsReceipt.locationId)),
     ]);
     const reversalMovements = goodsReceipt.status === 'REVERSED' ? await this.dataSource.getRepository(InventoryLedger).findBy({ tenantId: user.tenantId, sourceDocumentType: 'GRN', sourceDocumentId: id, movementType: 'GRN_REVERSAL' }) : [];
@@ -439,7 +439,7 @@ export class GoodsReceiptsService {
   }
 
   private async find(id: number, user: TenantPrincipal) {
-    const grn = await this.dataSource.getRepository(GoodsReceipt).findOne({ where: { goodsReceiptId: id, tenantId: user.tenantId }, relations: { supplier: true, location: true, purchaseOrder: true } });
+    const grn = await this.dataSource.getRepository(GoodsReceipt).findOne({ where: { goodsReceiptId: id, tenantId: user.tenantId }, relations: { supplier: true, location: true, purchaseOrder: true, createdByUser: true, postedByUser: true, cancelledByUser: true, reversedByUser: true } });
     if (!grn) throw new NotFoundException('GRN not found.');
     return grn;
   }

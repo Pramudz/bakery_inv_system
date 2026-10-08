@@ -9,6 +9,7 @@ import {
   formatCustomerCode,
   formatInventoryAdjustmentNumber,
   formatInventoryConversionNumber,
+  formatStockTransferNumber,
 } from './number-sequence-formatters';
 import { NumberSequenceKeys } from './number-sequence-keys';
 import { NumberSequencesService } from './number-sequences.service';
@@ -45,6 +46,26 @@ test('formats first SKU, PO, GRN, adjustment and conversion numbers', () => {
   assert.equal(formatInventoryConversionNumber(1515, '2026', 1), 'IVA-1515-2026-000001');
   assert.equal(formatSupplierCode(1), 'SUP-000001');
   assert.equal(formatCustomerCode(1), 'CUS-000001');
+});
+
+test('stock transfer numbering has seven sequence digits beyond the former capacity', () => {
+  for (const [sequence, expected] of [
+    [1, '0000001'], [125, '0000125'], [999999, '0999999'], [1000000, '1000000'],
+    [1095000, '1095000'], [9999999, '9999999'],
+  ] as const) {
+    assert.equal(formatStockTransferNumber('001', '2026', sequence), `TRF-001-2026-${expected}`);
+  }
+  assert.equal(formatStockTransferNumber(1, '2026', 1), 'TRF-1-2026-0000001', 'numeric tenant identifier keeps its existing display');
+});
+
+test('stock transfer sequence keeps tenant and year scopes and continues an existing counter', async () => {
+  const service = new NumberSequencesService();
+  const counters = new Map<string, number>([['1|STOCK_TRANSFER|TENANT|2026', 123]]);
+  const tx = manager(counters);
+  assert.equal(await service.getTenantNextNumber(tx, 1, NumberSequenceKeys.STOCK_TRANSFER, '2026'), 124);
+  assert.equal(await service.getTenantNextNumber(tx, 1, NumberSequenceKeys.STOCK_TRANSFER, '2027'), 1);
+  assert.equal(await service.getTenantNextNumber(tx, 2, NumberSequenceKeys.STOCK_TRANSFER, '2026'), 1);
+  assert.equal(counters.get('1|STOCK_TRANSFER|TENANT|2026'), 124);
 });
 
 test('supplier and customer use separate tenant-level counters', async () => {

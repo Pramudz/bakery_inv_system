@@ -17,7 +17,9 @@ export class PosPrintAdminController {
   @Post('profiles') configure(@Body() input: Parameters<PosPrintService['configure']>[0], @CurrentUser() user: TenantPrincipal) { return this.service.configure(input, user); }
   @Post('profiles/:id/rotate-token') rotate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.rotateToken(id, user); }
   @Post('profiles/:id/test') test(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.test(id, user); }
-  @Get('jobs') jobs(@Query('locationId', ParseIntPipe) locationId: number, @CurrentUser() user: TenantPrincipal) { return this.service.jobs(locationId, user); }
+  @Get('jobs') jobs(@Query('locationId', ParseIntPipe) locationId: number, @CurrentUser() user: TenantPrincipal, @Query('page') rawPage?: string, @Query('pageSize') rawPageSize?: string, @Query('profileId') rawProfileId?: string) {
+    return this.service.jobs(locationId, user, rawPage === undefined ? 1 : Number(rawPage), rawPageSize === undefined ? 20 : Number(rawPageSize), rawProfileId === undefined ? undefined : Number(rawProfileId));
+  }
   @Post('jobs/:id/retry') retry(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.retry(id, user); }
 }
 
@@ -25,6 +27,12 @@ export class PosPrintAdminController {
 @UseGuards(TenantAuthGuard, PermissionGuard)
 export class PosPrintDocumentController {
   constructor(private readonly service: PosPrintService) {}
+  @Post(':documentType/:sourceId/print')
+  @RequireAnyPermission('SALES_BILLING', 'SALES_INVOICE_VIEW', 'SALES_REFUND_CREATE', 'SALES_REFUND_VIEW')
+  print(@Param('documentType') documentType: string, @Param('sourceId', ParseIntPipe) sourceId: number, @CurrentUser() user: TenantPrincipal) {
+    if (documentType !== 'SALE' && documentType !== 'REFUND') throw new BadRequestException('Unsupported receipt document type.');
+    return this.service.requestPrint(documentType, sourceId, user);
+  }
   @Get(':documentType/:sourceId/status')
   @RequireAnyPermission('SALES_BILLING', 'SALES_INVOICE_VIEW', 'SALES_REFUND_CREATE', 'SALES_REFUND_VIEW')
   status(@Param('documentType') documentType: string, @Param('sourceId', ParseIntPipe) sourceId: number, @CurrentUser() user: TenantPrincipal) {

@@ -9,6 +9,7 @@ import { InvoiceRefundsService } from './invoice-refunds.service';
 import { PaymentMethodType } from '../payment-methods/payment-methods.entity';
 import { InvoicePayment } from '../invoices/invoice-payment.entity';
 import { InvoiceRefundDetail } from './invoice-refund-detail.entity';
+import { InventoryLedger } from '../inventory-ledger/inventory-ledger.entity';
 import { InvoiceRefundPayment } from './invoice-refund-payment.entity';
 import { PaymentMethod } from '../payment-methods/payment-methods.entity';
 import { InvoicePaymentReversal } from './invoice-payment-reversal.entity';
@@ -60,10 +61,11 @@ function fixture(paidAmount = '20') {
     : entity === PosCashMovement ? { findOneBy: async (where: any) => cashMovements.find((row) => Object.entries(where).every(([key, value]) => row[key] === value)) ?? null, create: (value: any) => value, save: async (value: any) => { const saved = { posCashMovementId: cashMovements.length + 1, ...value }; cashMovements.push(saved); return saved; } }
     : entity === InvoiceRefundPayment ? { create: (value: any) => value, save: async (value: any) => { const saved = { invoiceRefundPaymentId: 20 + cashMovements.length, ...value }; refunds.find((row) => row.invoiceRefundId === value.invoiceRefundId)?.payments.push(saved); return saved; } }
     : entity === InvoiceRefundDetail ? { createQueryBuilder: () => query, create: (value: any) => value, save: async (value: any) => value }
+    : entity === InventoryLedger ? { find: async () => [], create: (value: any) => value, save: async (value: any) => value }
     : entity === PaymentMethod ? { findOneBy: async () => ({ paymentMethodId: 1, paymentMethodName: 'Cash', paymentMethodType: PaymentMethodType.CASH }) }
     : { create: (value: any) => value, save: async (value: any) => value, findOneBy: async () => null } };
   const service = new InvoiceRefundsService({
-    ...manager, manager, transaction: (run: any) => run(manager),
+    ...manager, manager, transaction: (isolation: any, run?: any) => (run ?? isolation)(manager),
   } as any, { requireCashierSession: async () => ({ terminal: { posTerminalId: 21, terminalCode: 'POS1' }, config: { registerMode: 'TERMINAL_REGISTER' }, register: { receiptCode: null }, registerSession: { posRegisterSessionId: 22 }, cashierSession: { posCashierSessionId: 23 } }), requireOpenMasterRegisterSession: async () => ({ registerSession: { posRegisterSessionId: 88 } }) } as any);
   return { service, invoice, activePayments, cashMovements, refunds, reversals, query, user: { tenantId: 1, userId: 1, accessScope: 'TENANT', assignedLocationIds: [] } as any };
 }
@@ -77,7 +79,7 @@ test('refundable quantities include prior refunds when MySQL returns string IDs'
 
 test('numeric request IDs match MySQL string IDs and reach payment validation', async () => {
   const { service, user } = fixture();
-  await assert.rejects(service.create({ invoiceId: 1, reason: 'Return',
+  await assert.rejects(service.create({ refundKey: '33333333-3333-4333-8333-333333333333', invoiceId: 1, reason: 'Return',
     details: [{ invoiceDetailId: 12, quantity: 1 }],
     payments: [{ paymentMethodId: 1, amount: 11 }],
   }, user), /Refund payments cannot exceed the refund total/);
@@ -85,7 +87,7 @@ test('numeric request IDs match MySQL string IDs and reach payment validation', 
 
 test('prior refunds limit the quantity allowed for string invoice line IDs', async () => {
   const { service, user } = fixture();
-  await assert.rejects(service.create({ invoiceId: 1, reason: 'Return',
+  await assert.rejects(service.create({ refundKey: '33333333-3333-4333-8333-333333333333', invoiceId: 1, reason: 'Return',
     details: [{ invoiceDetailId: 12, quantity: 4 }],
   }, user), /Refund quantity exceeds the available quantity/);
 });
@@ -93,14 +95,14 @@ test('prior refunds limit the quantity allowed for string invoice line IDs', asy
 test('prior refund values prevent another partial return from exceeding the original line net', async () => {
   const { service, query, user } = fixture();
   query.getRawMany = async () => [{ invoiceDetailId: '12', quantity: '2', amount: '49.99' }];
-  await assert.rejects(service.create({ invoiceId: 1, reason: 'Return',
+  await assert.rejects(service.create({ refundKey: '33333333-3333-4333-8333-333333333333', invoiceId: 1, reason: 'Return',
     details: [{ invoiceDetailId: 12, quantity: 1 }],
   }, user), /Refund amount exceeds the remaining value/);
 });
 
 test('lines outside the invoice remain rejected', async () => {
   const { service, user } = fixture();
-  await assert.rejects(service.create({ invoiceId: 1, reason: 'Return',
+  await assert.rejects(service.create({ refundKey: '33333333-3333-4333-8333-333333333333', invoiceId: 1, reason: 'Return',
     details: [{ invoiceDetailId: 99, quantity: 1 }],
   }, user), /One or more invoice lines are invalid/);
 });
@@ -112,7 +114,7 @@ test('lines outside the invoice remain rejected', async () => {
  });
  test('refund cannot pay out more than the remaining customer payment', async () => {
   const { service, user } = fixture();
-  await assert.rejects(service.create({ invoiceId: 1, reason: 'Full return',
+  await assert.rejects(service.create({ refundKey: '33333333-3333-4333-8333-333333333333', invoiceId: 1, reason: 'Full return',
     details: [{ invoiceDetailId: 12, quantity: 3 }],
     payments: [{ paymentMethodId: 1, amount: 16 }],
   }, user), /remaining paid amount/);
@@ -120,7 +122,7 @@ test('lines outside the invoice remain rejected', async () => {
 
 test('returning all remaining items marks the invoice fully refunded', async () => {
   const { service, invoice, user } = fixture();
-  await service.create({ invoiceId: 1, reason: 'Full return',
+  await service.create({ refundKey: '33333333-3333-4333-8333-333333333333', invoiceId: 1, reason: 'Full return',
     details: [{ invoiceDetailId: 12, quantity: 3, returnToStock: false }],
     payments: [{ paymentMethodId: 1, amount: 15 }],
   }, user);
@@ -129,7 +131,7 @@ test('returning all remaining items marks the invoice fully refunded', async () 
 
 test('returning only some remaining items keeps the invoice partially refunded', async () => {
   const { service, invoice, user } = fixture();
-  await service.create({ invoiceId: 1, reason: 'Partial return',
+  await service.create({ refundKey: '33333333-3333-4333-8333-333333333333', invoiceId: 1, reason: 'Partial return',
     details: [{ invoiceDetailId: 12, quantity: 1, returnToStock: false }],
   }, user);
   assert.equal(invoice.invoiceStatus, 'PARTIALLY_REFUNDED');
@@ -140,7 +142,7 @@ test('an unpaid invoice can be fully returned without a cash payout', async () =
   const { service, invoice, user } = fixture('0');
   const preview = await service.refundableInvoice(1, user);
   assert.equal(preview.refundablePaymentAmount, 0);
-  await service.create({ invoiceId: 1, reason: 'Unpaid full return',
+  await service.create({ refundKey: '33333333-3333-4333-8333-333333333333', invoiceId: 1, reason: 'Unpaid full return',
     details: [{ invoiceDetailId: 12, quantity: 3, returnToStock: false }],
   }, user);
   assert.equal(invoice.invoiceStatus, 'FULLY_REFUNDED');

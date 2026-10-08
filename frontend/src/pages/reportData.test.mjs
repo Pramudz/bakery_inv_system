@@ -1,6 +1,6 @@
 ﻿import assert from 'node:assert/strict';
 import test from 'node:test';
-import { filterReportRows, reportFilterOptions, groupRows } from './reportData.ts';
+import { filterReportRows, formatReportDate, reportFilterOptions, reportSelectorOptions, groupRows } from './reportData.ts';
 const rows = [
   { category: 'Bread', product: 'White', cashier: 'Ann', invoice: 'I1', qty: 2, netSales: 200, gp: 40, billCount: 1, reportDate: '2026-10-01' },
   { category: 'Bread', product: 'Brown', cashier: 'Ann', invoice: 'I1', qty: 1, netSales: 150, gp: 30, billCount: 1, reportDate: '2026-10-02' },
@@ -42,4 +42,47 @@ test('pagination slices rows, clamps out-of-range pages and keeps the export dat
   assert.equal(empty.to, 0);
   assert.deepEqual(empty.rows, []);
   assert.deepEqual(paginateReportRows(Array.from({ length: 200 }, () => ({})), 5, 20).visiblePages, [1, 4, 5, 6, 10]);
+});
+
+test('business dates remain calendar dates in daily grouping and display', () => {
+  const day = [{ reportDate: '2026-10-06', invoice: 'I3', billCount: 1, netSales: 900 }];
+  assert.equal(groupRows(day, 'reportDate', 'DAY')[0].reportDate, '2026-10-06');
+  assert.equal(formatReportDate(day[0].reportDate), '06/10/2026');
+  assert.equal(groupRows([{ ...day[0], reportDate: '2026-10-07' }, ...day], 'reportDate', 'MONTH')[0].reportDate, '2026-10');
+});
+
+test('refund events reduce quantities and revenue without increasing bill count', () => {
+  const events = [
+    { reportDate: '2026-10-01', invoice: 'I4', product: 'Cake', sku: 'SKU-25', categoryLevel1: 'Food', qty: 2, refundQty: 0, netQty: 2, netSales: 900, cogs: 500, gp: 400, billCount: 1 },
+    { reportDate: '2026-10-06', invoice: 'I4', product: 'Cake', sku: 'SKU-25', categoryLevel1: 'Food', qty: 0, refundQty: 1, netQty: -1, netSales: -300, cogs: -150, gp: -150, billCount: 0 },
+  ];
+  const product = groupRows(events, 'product', 'DAY')[0];
+  assert.equal(product.sku, 'SKU-25');
+  assert.equal(product.categoryLevel1, 'Food');
+  assert.equal(product.netSales, 600);
+  assert.equal(product.cogs, 350);
+  assert.equal(product.gp, 250);
+  assert.equal(product.billCount, 1);
+  assert.equal(product.netQty, 1);
+  assert.equal(filterReportRows(events, { categoryLevel1: 'Food' }).length, 2);
+  assert.equal(filterReportRows(events, { sku: 'SKU-25' }).length, 2);
+});
+
+test('bill count distinguishes the same invoice number at different locations', () => {
+  const rows = [
+    { reportDate: '2026-10-06', location: 'North', invoice: 'INV-1', billCount: 1, netSales: 100 },
+    { reportDate: '2026-10-06', location: 'South', invoice: 'INV-1', billCount: 1, netSales: 200 },
+  ];
+  assert.equal(groupRows(rows, 'reportDate', 'DAY')[0].billCount, 2);
+});
+
+test('group with a missing sale cost does not show a false GP', () => {
+  const grouped = groupRows([{ product: 'Cake', sku: 'SKU-25', invoice: 'I5', billCount: 1, netSales: 100, cogs: null, gp: null, cogsMissing: 1 }], 'product', 'DAY');
+  assert.equal(grouped[0].cogs, null);
+  assert.equal(grouped[0].gp, null);
+});
+test('SKU selector offers SKU and product name and filters the chosen product', () => {
+  const products = [{ sku: 'SKU-000025', product: 'Astra Margarin 500G Tub' }, { sku: 'SKU-000026', product: 'Butter' }];
+  assert.deepEqual(reportSelectorOptions(products, 'sku')[0], { value: 'SKU-000025', label: 'SKU-000025 — Astra Margarin 500G Tub' });
+  assert.deepEqual(filterReportRows(products, { sku: 'SKU-000025' }), [products[0]]);
 });

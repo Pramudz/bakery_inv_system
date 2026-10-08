@@ -27,3 +27,20 @@ test('payment breakdown includes all methods rather than silently dropping metho
   assert.ok(html.includes('Method 9'));
   assert.ok(html.includes('90'));
 });
+
+test('refund-only day remains negative in the sales chart', () => {
+  const rows = [{ reportDate: '2026-10-06', netSales: -300 }];
+  const html = renderToStaticMarkup(createElement(ReportChart, { reportId: 'daily-sales', rows, dimension: 'reportDate', granularity: 'DAY' }));
+  assert.ok(html.includes('-300'));
+  assert.ok(html.includes('06/10/2026'));
+});
+
+test('server ranked chart shows all ten products in database order with SKU labels', () => {
+  const rows = Array.from({ length: 10 }, (_, i) => ({ sku: `P-${i + 1}`, product: `Bread ${i + 1}`, netSales: 10 - i }));
+  const html = renderToStaticMarkup(createElement(ReportChart, { reportId: 'sales-analysis', rows,
+    dimension: 'product', granularity: 'AGGREGATED', serverRankedTopN: true }));
+  assert.ok(html.includes('P-10 — Bread 10'));
+  assert.ok(html.indexOf('P-1 — Bread 1') < html.indexOf('P-10 — Bread 10'));
+  assert.ok(html.includes('Top 10 by Actual Net Sales'));
+  assert.ok(!html.includes('of 10 groups'));
+});

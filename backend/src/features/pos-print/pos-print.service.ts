@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { Brackets, DataSource, EntityManager } from 'typeorm';
+import { Brackets, DataSource, EntityManager, In } from 'typeorm';
 import { TenantPrincipal } from '../auth/auth.types';
 import { Location } from '../locations/locations.entity';
 import { PosTerminal } from '../pos-registers/pos-terminal.entity';
@@ -95,9 +95,15 @@ export class PosPrintService {
     }));
   }
 
-  async jobs(locationId: number, user: TenantPrincipal) {
+  async jobs(locationId: number, user: TenantPrincipal, page = 1, pageSize = 20, profileId?: number) {
     this.assertLocation(locationId, user);
-    return this.dataSource.getRepository(PosPrintJob).find({ where: { tenantId: user.tenantId, locationId }, select: ['posPrintJobId', 'documentType', 'sourceId', 'status', 'attempts', 'lastError', 'createdAt', 'updatedAt'], order: { posPrintJobId: 'DESC' }, take: 100 });
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100 || (profileId !== undefined && (!Number.isSafeInteger(profileId) || profileId < 1))) throw new BadRequestException('Invalid print queue page or profile.');
+    const [items, total] = await this.dataSource.getRepository(PosPrintJob).findAndCount({
+      where: { tenantId: user.tenantId, locationId, status: In(['PENDING', 'CLAIMED', 'FAILED']), ...(profileId === undefined ? {} : { posPrintProfileId: profileId }) },
+      select: ['posPrintJobId', 'posPrintProfileId', 'posTerminalId', 'documentType', 'sourceId', 'status', 'attempts', 'lastError', 'createdAt', 'updatedAt'],
+      order: { createdAt: 'ASC', posPrintJobId: 'ASC' }, skip: (page - 1) * pageSize, take: pageSize,
+    });
+    return { items, total, page, pageSize };
   }
 
   async documentStatus(documentType: 'SALE' | 'REFUND', sourceId: number, user: TenantPrincipal) {
@@ -110,7 +116,34 @@ export class PosPrintService {
       where: { tenantId: user.tenantId, documentType, sourceId },
       order: { posPrintJobId: 'DESC' },
     });
-    return job ? { jobId: job.posPrintJobId, status: job.status, attempts: job.attempts, lastError: job.lastError, updatedAt: job.updatedAt } : { jobId: null, status: 'BROWSER_ONLY', attempts: 0, lastError: null, updatedAt: null };
+    return job ? { jobId: job.posPrintJobId, status: job.status, attempts: job.attempts, lastError: job.lastError, updatedAt: job.updatedAt } : { jobId: null, status: 'NOT_REQUESTED', attempts: 0, lastError: null, updatedAt: null };
+  }
+
+  async requestPrint(documentType: 'SALE' | 'REFUND', sourceId: number, user: TenantPrincipal) {
+    return this.dataSource.transaction(async (manager) => {
+      const document = documentType === 'SALE'
+        ? await manager.getRepository(Invoice).findOne({ where: { invoiceId: sourceId, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } })
+        : await manager.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: sourceId, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } });
+      if (!document) throw new NotFoundException('Receipt document not found.');
+      this.assertLocation(document.locationId, user);
+      if (!document.receiptSnapshot) throw new BadRequestException('No archived receipt exists for this document.');
+      const repo = manager.getRepository(PosPrintJob);
+      const existing = await repo.findOne({ where: { tenantId: user.tenantId, documentType, sourceId }, order: { posPrintJobId: 'DESC' } });
+      if (existing && (existing.status === 'PENDING' || existing.status === 'CLAIMED'))
+        return { jobId: existing.posPrintJobId, status: existing.status, reprint: existing.receiptSnapshot?.printCopy === true };
+      if (existing) {
+        const reprint = existing.status === 'PRINTED' || existing.receiptSnapshot?.printCopy === true;
+        if (reprint) await this.auditReprint(manager, documentType, sourceId, user, document.locationId, existing.posPrintJobId);
+        existing.receiptSnapshot = { ...document.receiptSnapshot, printCopy: reprint };
+        existing.status = 'PENDING'; existing.leaseUntil = null; existing.lastError = null;
+        await repo.save(existing);
+        return { jobId: existing.posPrintJobId, status: 'PENDING', reprint };
+      }
+      const job = await this.enqueue(manager, documentType, sourceId, user.tenantId, document.locationId,
+        document.posTerminalId ?? null, document.receiptSnapshot);
+      if (!job) throw new BadRequestException('No active receipt printer is configured for this location.');
+      return { jobId: job.posPrintJobId, status: 'PENDING', reprint: false };
+    });
   }
 
   async retry(id: number, user: TenantPrincipal) {
@@ -120,7 +153,10 @@ export class PosPrintService {
       if (!job) throw new NotFoundException('Print job not found.');
       this.assertLocation(job.locationId, user);
       if (job.status === 'CLAIMED' && job.leaseUntil && job.leaseUntil.getTime() > Date.now()) throw new ConflictException('The print agent is still processing this job.');
-      if (job.sourceId && job.documentType !== 'TEST') await this.auditReprint(manager, job.documentType, job.sourceId, user, job.locationId, job.posPrintJobId);
+      if (job.status === 'PRINTED' && job.sourceId && job.documentType !== 'TEST') {
+        await this.auditReprint(manager, job.documentType, job.sourceId, user, job.locationId, job.posPrintJobId);
+        job.receiptSnapshot = { ...job.receiptSnapshot, printCopy: true };
+      }
       job.status = 'PENDING'; job.leaseUntil = null; job.lastError = null;
       return repo.save(job);
     });
@@ -146,7 +182,7 @@ export class PosPrintService {
       if (!job) return null;
       job.status = 'CLAIMED'; job.attempts += 1; job.leaseUntil = new Date(Date.now() + 120000);
       await repo.save(job);
-      return { jobId: job.posPrintJobId, attempt: job.attempts, copy: job.attempts > 1, receipt: job.receiptSnapshot,
+      return { jobId: job.posPrintJobId, attempt: job.attempts, copy: job.receiptSnapshot?.printCopy === true, receipt: job.receiptSnapshot,
         printer: { transport: profile.transport, target: profile.target, port: profile.port, paperWidth: profile.paperWidth, encoding: profile.encoding, cutEnabled: profile.cutEnabled } };
     });
   }

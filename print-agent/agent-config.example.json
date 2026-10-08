@@ -1,0 +1,6 @@
+{
+  "serverUrl": "http://localhost:3000/api",
+  "profileId": 1,
+  "agentToken": "replace-with-the-64-character-token-from-printer-settings",
+  "statePath": "agent-state.json"
+}

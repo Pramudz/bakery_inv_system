@@ -36,6 +36,8 @@ import { PurchaseOrderScreen } from "../features/purchasing/pages/PurchaseOrderS
 import { GoodsReceiptsPage } from "../features/purchasing/pages/GoodsReceiptsPage";
 import { CustomersPage } from "../features/customers/pages/CustomersPage";
 import { BillingPage } from "../features/sales/pages/BillingPage";
+import { QuotationsPage } from "../features/sales/pages/QuotationsPage";
+import { QuotationScreen } from "../features/sales/pages/QuotationScreen";
 import { PendingPaymentsPage } from "../features/sales/pages/PendingPaymentsPage";
 import { RefundsPage } from "../features/sales/pages/RefundsPage";
 import { PaymentMethodsPage } from "../features/sales/pages/PaymentMethodsPage";
@@ -84,6 +86,10 @@ const tenantChildren = [
   { path: "customers", element: <CustomersPage /> },
   { path: "sales", element: <SalesPage /> },
   { path: "billing", element: <BillingPage /> },
+  { path: "quotations", element: <QuotationsPage /> },
+  { path: "quotations/new", element: <QuotationScreen mode="create" /> },
+  { path: "quotations/:id", element: <QuotationScreen mode="view" /> },
+  { path: "quotations/:id/edit", element: <QuotationScreen mode="edit" /> },
   { path: "pending-payments", element: <PendingPaymentsPage /> },
   { path: "refunds", element: <RefundsPage /> },
   { path: "payment-methods", element: <PaymentMethodsPage /> },

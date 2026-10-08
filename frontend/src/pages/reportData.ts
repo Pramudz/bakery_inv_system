@@ -1,17 +1,16 @@
 export type ReportRow = Record<string, string | number | boolean | null>;
 
 export const MEASURE_COLUMNS = new Set([
-  "qty", "grossSales", "discount", "netSales", "cogs", "gp", "gpPercent",
-  "refundValue", "netQty", "billCount", "paymentValue", "stockValue", "unitCost",
+  "qty", "refundQty", "grossSales", "discount", "netSalesBeforeRefund", "netSales", "cogs", "gp", "gpPercent",
+  "refundValue", "netQty", "billCount", "cogsMissing", "paymentValue", "stockValue", "unitCost",
   "movementValue", "qtyIn", "qtyOut", "qtyBefore", "qtyAfter", "ageDays", "amount",
   "receivedQty", "lineValue", "openingBalance", "cashMovementValue", "cashierSessionCount",
   "expectedCash", "countedCash", "variance",
 ]);
 
 function dateBucket(value: ReportRow[string], granularity: "DAY" | "WEEK" | "MONTH") {
-  const date = new Date(String(value));
-  if (Number.isNaN(date.getTime())) return String(value ?? "—");
-  const day = date.toISOString().slice(0, 10);
+  const day = String(value ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return String(value ?? "—");
   if (granularity === "MONTH") return day.slice(0, 7);
   if (granularity === "WEEK") {
     const monday = new Date(`${day}T00:00:00Z`);
@@ -27,13 +26,21 @@ export function groupRows(rows: ReportRow[], dimension: string, granularity: "DA
   for (const row of rows) {
     const key = dimension === "reportDate"
       ? dateBucket(row.reportDate, granularity)
+      : dimension === "product" && row.sku ? `${row.sku}\u0000${row.product}`
       : String(row[dimension] ?? "—");
     const invoices = invoiceKeys.get(key) ?? new Set<string>();
-    if (row.invoice !== null && row.invoice !== undefined) invoices.add(String(row.invoice));
+    if (Number(row.billCount ?? 0) > 0 && row.invoice !== null && row.invoice !== undefined) {
+      invoices.add(JSON.stringify([row.location ?? null, row.invoice]));
+    }
     invoiceKeys.set(key, invoices);
     const current = grouped.get(key);
     if (!current) {
-      const summary: ReportRow = { [dimension]: key };
+      const summary: ReportRow = { [dimension]: dimension === "product" ? row.product ?? key : key };
+      if (dimension === "product") {
+        for (const field of ["sku", "categoryLevel1", "categoryLevel2", "categoryLevel3", "primarySupplier"]) {
+          if (field in row) summary[field] = row[field];
+        }
+      }
       for (const column of MEASURE_COLUMNS) {
         if (column in row) summary[column] = column === "billCount" ? 0 : Number(row[column] ?? 0);
       }
@@ -45,12 +52,24 @@ export function groupRows(rows: ReportRow[], dimension: string, granularity: "DA
     }
   }
   return [...grouped.values()].map((row) => {
-    if ("billCount" in row) row.billCount = invoiceKeys.get(String(row[dimension] ?? "—"))?.size ?? 0;
-    if ("gp" in row && "netSales" in row) {
+    if ("billCount" in row) {
+      const key = dimension === "product" && row.sku ? `${row.sku}\u0000${row.product}` : String(row[dimension] ?? "—");
+      row.billCount = invoiceKeys.get(key)?.size ?? 0;
+    }
+    if (Number(row.cogsMissing ?? 0) > 0) {
+      row.cogs = null;
+      row.gp = null;
+      row.gpPercent = null;
+    } else if ("gp" in row && "netSales" in row) {
       row.gpPercent = Number(row.netSales) === 0 ? 0 : Number(row.gp) / Number(row.netSales) * 100;
     }
     return row;
   });
+}
+
+export function formatReportDate(value: ReportRow[string]): string {
+  const day = String(value ?? "");
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}` : day;
 }
 
 export function filterReportRows(rows: ReportRow[], filters: Record<string, string>): ReportRow[] {
@@ -59,6 +78,16 @@ export function filterReportRows(rows: ReportRow[], filters: Record<string, stri
 
 export function reportFilterOptions(rows: ReportRow[], field: string): string[] {
   return [...new Set(rows.map(row => String(row[field] ?? '')).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+export function reportSelectorOptions(rows: ReportRow[], field: string) {
+  const productsBySku = field === 'sku'
+    ? new Map(rows.filter(row => row.sku).map(row => [String(row.sku), String(row.product ?? 'Product')]))
+    : null;
+  return reportFilterOptions(rows, field).map(value => ({
+    value,
+    label: field === 'sku' ? `${value} — ${productsBySku?.get(value) ?? 'Product'}` : value,
+  }));
 }
 
 export function paginateReportRows<T>(rows: T[], requestedPage: number, size: number) {

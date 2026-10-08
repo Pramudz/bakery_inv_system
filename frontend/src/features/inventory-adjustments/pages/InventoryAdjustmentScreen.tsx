@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { Modal } from "../../../components/ui/Modal";
 import { useAuth } from "../../auth/AuthContext";
+import { DocumentPdfActions } from "../../documents/DocumentPdfActions";
+import { inventoryAdjustmentDocument } from "../../documents/transactionDocuments";
 import {
   inventoryAdjustmentsApi,
   type AdjustmentInput,
@@ -564,6 +566,7 @@ function InventoryAdjustmentFormPage({
           </div>
         </div>
       </header>
+      {mode === "view" && adjustment.data && <DocumentPdfActions document={() => inventoryAdjustmentDocument(adjustment.data!, auth.tenant?.timeZone ?? "Asia/Colombo")} />}
       {restored && editable && (
         <p className="grn-restored-message" role="status">
           Your unsaved Inventory Adjustment draft has been restored.

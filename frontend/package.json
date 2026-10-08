@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --test src/features/sales/pages/*.test.mjs src/pages/*.test.mjs",
+    "test": "node --test src/features/categories/*.test.mjs src/features/documents/*.test.mjs src/features/sales/pages/*.test.mjs src/pages/*.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

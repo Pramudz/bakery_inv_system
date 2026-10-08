@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CategoryService } from './categories.service';
+import { CategoryService, validateCategoryPlacement } from './categories.service';
 
 function categoryPageFixture(total = 45) {
   const calls: Record<string, any[]> = {};
@@ -46,4 +46,50 @@ test('category pagination normalizes invalid paging values and supports inactive
   assert.equal(result.page, 1);
   assert.equal(result.limit, 20);
   assert.equal(result.totalPages, 1);
+});
+
+test('category hierarchy allows three levels and rejects a fourth', () => {
+  const rows = [
+    { categoryId: 1, parentCategoryId: null },
+    { categoryId: 2, parentCategoryId: 1 },
+    { categoryId: 3, parentCategoryId: 2 },
+  ];
+  assert.doesNotThrow(() => validateCategoryPlacement(rows, null, null));
+  assert.doesNotThrow(() => validateCategoryPlacement(rows, null, 1));
+  assert.doesNotThrow(() => validateCategoryPlacement(rows, null, 2));
+  assert.throws(() => validateCategoryPlacement(rows, null, 3), /maximum of 3 levels/);
+});
+
+test('category moves check the whole subtree and prevent cycles', () => {
+  const rows = [
+    { categoryId: 1, parentCategoryId: null },
+    { categoryId: 2, parentCategoryId: 1 },
+    { categoryId: 3, parentCategoryId: 2 },
+    { categoryId: 4, parentCategoryId: null },
+  ];
+  assert.throws(() => validateCategoryPlacement(rows, 1, 4), /maximum of 3 levels/);
+  assert.throws(() => validateCategoryPlacement(rows, 1, 1), /own descendant/);
+  assert.throws(() => validateCategoryPlacement(rows, 1, 3), /own descendant/);
+  assert.doesNotThrow(() => validateCategoryPlacement(rows, 2, 4));
+});
+
+test('category create and update endpoints apply the depth rule', async () => {
+  const rows = [
+    { categoryId: 1, tenantId: 7, parentCategoryId: null },
+    { categoryId: 2, tenantId: 7, parentCategoryId: 1 },
+    { categoryId: 3, tenantId: 7, parentCategoryId: 2 },
+    { categoryId: 4, tenantId: 7, parentCategoryId: null },
+  ];
+  const repo = {
+    find: async () => rows,
+    findOne: async ({ where }: any) => where.categoryId ? rows.find(row => row.categoryId === where.categoryId) ?? null : null,
+    create: (value: any) => value,
+    save: async (value: any) => value,
+    update: async () => undefined,
+  };
+  const service = new CategoryService(repo as any);
+  await assert.rejects(service.create({ parentCategoryId: 3, categoryCode: 'L4', categoryName: 'Level 4' }, 7), /maximum of 3 levels/);
+  await assert.doesNotReject(service.create({ parentCategoryId: 2, categoryCode: 'L3', categoryName: 'Level 3' }, 7));
+  await assert.rejects(service.update(1, { parentCategoryId: 4 }, 7), /maximum of 3 levels/);
+  await assert.rejects(service.update(1, { parentCategoryId: 3 }, 7), /own descendant/);
 });

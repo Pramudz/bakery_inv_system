@@ -1,6 +1,8 @@
 import { apiClient } from "../../../services/apiClient";
+import type { DocumentHeader, DocumentUser } from "../../documents/documentTypes";
 
 export type PurchaseOrderLine = {
+  unit?: { name?: string; code?: string };
   purchaseOrderLineId: number | string;
   productId: number | string;
   productUnitId: number | string | null;
@@ -9,6 +11,8 @@ export type PurchaseOrderLine = {
   receivedQty: number | string;
   notes?: string | null;
   unitCost: number | string;
+  netUnitCost?: number | string;
+  lineTotal?: number | string;
   discountAmount?: number | string;
   taxAmount?: number | string;
   sourceSupplierPriceId?: number | string | null;
@@ -18,6 +22,13 @@ export type PurchaseOrderLine = {
 };
 
 export type PurchaseOrder = {
+  createdAt?: string;
+  createdByUser?: DocumentUser;
+  approvedByUser?: DocumentUser | null;
+  approvedAt?: string | null;
+  cancelledByUser?: DocumentUser | null;
+  cancelledAt?: string | null;
+  documentHeader?: DocumentHeader;
   purchaseOrderId: number | string;
   poNumber: string;
   supplierId: number | string;
@@ -29,7 +40,7 @@ export type PurchaseOrder = {
   expectedDate?: string | null;
   notes?: string | null;
   total?: number | string;
-  supplier?: { supplierCode?: string; supplierName?: string };
+  supplier?: { supplierCode?: string; supplierName?: string; addressLine1?: string | null; addressLine2?: string | null; city?: string | null; phone?: string | null; email?: string | null };
   location?: { code?: string; name?: string };
 };
 
@@ -57,6 +68,13 @@ export type GoodsReceiptLine = {
 };
 
 export type GoodsReceipt = {
+  createdAt?: string;
+  createdByUser?: DocumentUser;
+  postedByUser?: DocumentUser | null;
+  cancelledByUser?: DocumentUser | null;
+  cancelledAt?: string | null;
+  reversedByUser?: DocumentUser | null;
+  documentHeader?: DocumentHeader;
   postedAt?: string | null;
   postedByUserId?: number | string | null;
   postedByName?: string | null;
@@ -79,7 +97,7 @@ export type GoodsReceipt = {
   status: string;
   total?: number | string;
   lines?: GoodsReceiptLine[];
-  supplier?: { supplierCode?: string; supplierName?: string };
+  supplier?: { supplierCode?: string; supplierName?: string; addressLine1?: string | null; addressLine2?: string | null; city?: string | null; phone?: string | null; email?: string | null };
   location?: { code?: string; name?: string };
   purchaseOrder?: { poNumber?: string } | null;
 };

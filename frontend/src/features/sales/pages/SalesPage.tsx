@@ -1,6 +1,6 @@
 ﻿import { FormEvent, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { invoicesApi } from '../api/invoicesApi';
 import { paymentMethodsApi } from '../api/paymentMethodsApi';
 import { SalesBadge, SalesStat } from './SalesUi';
@@ -21,6 +21,7 @@ const originalPaymentMethods = (invoice: any) => {
 
 export function SalesPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { tenant, tenantUser, role, accessScope, assignedLocations, permissions } = useAuth();
   const queryScope = [tenant?.tenantId, tenantUser?.userId, role?.roleId, accessScope, assignedLocations.map((location) => location.locationId)];
   const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
@@ -31,7 +32,7 @@ export function SalesPage() {
   const [recordType, setRecordType] = useState('ALL');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(() => Number(searchParams.get('invoiceId')) || null);
   const [correcting, setCorrecting] = useState<any | null>(null);
   const [correction, setCorrection] = useState({ reversalKey: crypto.randomUUID(), reason: '', replacementPaymentMethodId: '', replacementPaymentChannelId: '', replacementAmount: '', referenceNumber: '', cashPayout: false });
   const history = useQuery({ queryKey: ['invoice-history', page, limit, query, status, recordType, ...queryScope], queryFn: () => invoicesApi.history({ page, limit, search: query, status, recordType }) });
@@ -97,6 +98,7 @@ export function SalesPage() {
     {selectedId !== null && <div className="modal-bg"><div className="modal invoice-detail-modal"><div className="modal-head"><div><h2>{details.data ? saleBillReference(details.data) : 'Invoice details'}</h2><p>{details.data ? `${details.data.customer?.customerName ?? 'Walk-in Customer'} · ${new Date(details.data.invoiceDate).toLocaleString()}` : 'Loading...'}</p></div><button className="icon-btn" onClick={() => setSelectedId(null)}>×</button></div>{details.data && <div className="modal-body">
       <div className="invoice-detail-summary"><div><span>Original total</span><strong>LKR {money(details.data.grandTotal)}</strong></div><div><span>Payments received</span><strong>LKR {money(details.data.paidAmount)}</strong></div><div><span>Outstanding balance</span><strong>LKR {money(details.data.balanceAmount)}</strong></div></div>
       {details.data.isCreditSale && <p><strong>Credit sale</strong> · authorized {details.data.creditAuthorizedAt ? new Date(details.data.creditAuthorizedAt).toLocaleString() : 'on the original sale'}{details.data.creditAuthorizedByUser?.username ? ` by ${details.data.creditAuthorizedByUser.username}` : ''}.</p>}
+      {details.data.sourceQuotationId && <p>Source quotation: <Link to={`/quotations/${details.data.sourceQuotationId}`}>View quotation</Link></p>}
       <h3>Items</h3><table className="table"><thead><tr><th>Product</th><th>Qty</th><th className="right">Price</th><th className="right">Discount</th><th className="right">Net</th></tr></thead><tbody>{details.data.details.map((line: any) => <tr key={line.invoiceDetailId}><td><strong>{line.product.productName}</strong><small className="refund-code">{line.product.sku}</small></td><td>{Number(line.quantity)}</td><td className="right">{money(line.unitPrice)}</td><td className="right">{money(line.discountAmount)}</td><td className="right"><strong>{money(line.netTotal)}</strong></td></tr>)}</tbody></table>
       <h3>Payment History</h3>
       <p>Payments for this invoice, including amounts received later. Recorded balances show the balance at payment time.</p>

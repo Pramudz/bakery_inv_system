@@ -1,9 +1,35 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Category } from './categories.entity';
 import { CreateCategoryDto } from './dto/create-categories.dto';
 import { UpdateCategoryDto } from './dto/update-categories.dto';
+
+type CategoryNode = Pick<Category, 'categoryId' | 'parentCategoryId'>;
+
+export function validateCategoryPlacement(rows: CategoryNode[], categoryId: number | null, parentId: number | null) {
+  const byId = new Map(rows.map(row => [String(row.categoryId), row]));
+  let parentDepth = 0;
+  let cursor = parentId == null ? null : String(parentId);
+  const seen = new Set<string>();
+  while (cursor !== null) {
+    if (cursor === String(categoryId) || seen.has(cursor)) throw new ConflictException('A category cannot be its own descendant.');
+    seen.add(cursor);
+    const parent = byId.get(cursor);
+    if (!parent) throw new NotFoundException('Parent category not found.');
+    parentDepth += 1;
+    cursor = parent.parentCategoryId == null ? null : String(parent.parentCategoryId);
+  }
+  const subtreeDepth = (id: string, path: Set<string>): number => {
+    if (path.has(id)) throw new ConflictException('Category hierarchy contains a cycle.');
+    const next = new Set(path).add(id);
+    const children = rows.filter(row => row.parentCategoryId != null && String(row.parentCategoryId) === id);
+    return 1 + Math.max(0, ...children.map(child => subtreeDepth(String(child.categoryId), next)));
+  };
+  if (parentDepth + (categoryId == null ? 1 : subtreeDepth(String(categoryId), new Set())) > 3) {
+    throw new BadRequestException('Category hierarchy supports a maximum of 3 levels.');
+  }
+}
 
 @Injectable()
 export class CategoryService {
@@ -70,7 +96,7 @@ export class CategoryService {
 
   async create(dto: CreateCategoryDto, tenantId: number) {
     const payload: any = { ...dto, tenantId };
-    await this.validateParentCategory(dto.parentCategoryId, tenantId);
+    validateCategoryPlacement(await this.repo.find({ where: { tenantId } }), null, dto.parentCategoryId ?? null);
     const existing = await this.repo.findOne({
       where: {
         tenantId,
@@ -88,11 +114,13 @@ export class CategoryService {
   }
 
   async update(id: number, dto: UpdateCategoryDto, tenantId: number) {
-    await this.findOne(id, tenantId);
+    const current = await this.findOne(id, tenantId);
     const payload: any = { ...dto };
     delete payload.tenantId;
     if (payload.parentCategoryId !== undefined) {
-      await this.validateParentCategory(payload.parentCategoryId, tenantId, id);
+      if (String(payload.parentCategoryId ?? '') !== String(current.parentCategoryId ?? '')) {
+        validateCategoryPlacement(await this.repo.find({ where: { tenantId } }), id, payload.parentCategoryId ?? null);
+      }
     }
     if (payload.categoryCode) {
       const same = await this.repo.findOne({
@@ -126,15 +154,4 @@ export class CategoryService {
     return this.findOne(id, tenantId);
   }
 
-  private async validateParentCategory(
-    parentCategoryId: number | undefined,
-    tenantId: number,
-    categoryId?: number,
-  ) {
-    if (parentCategoryId === undefined || parentCategoryId === null) return;
-    if (parentCategoryId === categoryId) {
-      throw new ConflictException('A category cannot be its own parent.');
-    }
-    await this.findOne(parentCategoryId, tenantId);
-  }
 }

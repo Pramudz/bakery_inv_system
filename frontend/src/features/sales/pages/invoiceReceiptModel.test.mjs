@@ -20,6 +20,7 @@ test('sale preview uses issued fields and payment breakdown from the archived re
   assert.equal(model.registerCode, 'POS1');
   assert.equal(model.header.companyName, 'Original Bakery');
   assert.equal(model.cart[0].name, 'Bread');
+  assert.equal(model.cart[0].lineNumber, 1);
   assert.equal(model.paidTotal, 220);
   assert.equal(model.tenderedTotal, 250);
   assert.equal(model.changeTotal, 30);
