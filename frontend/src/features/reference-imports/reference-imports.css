@@ -1,0 +1,10 @@
+.reference-imports-page { display: grid; gap: 16px; min-width: 0; }
+.reference-imports-workspace, .reference-imports-preview { padding: 20px; min-width: 0; }
+.reference-imports-workspace { display: grid; gap: 12px; align-items: start; }
+.reference-imports-workspace .control { width: min(100%, 520px); }
+.reference-imports-label { color: #33445d; font-weight: 700; }
+.reference-imports-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.reference-imports-preview h2 { margin: 0 0 8px; font-size: 16px; }
+.reference-imports-preview .table-wrap { max-height: 520px; overflow: auto; }
+.reference-imports-preview .table { min-width: 650px; }
+@media (max-width: 600px) { .reference-imports-workspace, .reference-imports-preview { padding: 14px; } .reference-imports-actions .btn { flex: 1 1 180px; } }

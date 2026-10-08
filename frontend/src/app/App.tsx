@@ -51,6 +51,10 @@ const tenantGroups = [
     ],
   },
   {
+    title: "Master Data",
+    items: [["Bulk Data Import", "/bulk-data-import"]],
+  },
+  {
     title: "Supply & Pricing",
     items: [["Suppliers", "/suppliers"]],
   },
@@ -173,6 +177,7 @@ const viewPermissionForPath: Record<string, string> = {
 };
 
 const viewAnyPermissionForPath: Record<string, string[]> = {
+  "/bulk-data-import": ["CATEGORY_VIEW", "BRAND_VIEW", "UNIT_VIEW", "SUPPLIER_VIEW", "PRICE_LIST_VIEW", "LOCATION_VIEW"],
   "/reports-analytics": [
     "SALES_INVOICE_VIEW",
     "INVENTORY_ADJUSTMENT_VIEW",

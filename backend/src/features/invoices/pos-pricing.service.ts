@@ -8,7 +8,7 @@ import { Product } from '../products/products.entity';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
-function normalizedPriceListType(value: string) {
+export function normalizedPriceListType(value: string) {
   const type = value.trim().toUpperCase().replace(/[^A-Z]/g, '');
   if (type === 'WHOLE' || type === 'WHOLSALE') return 'WHOLESALE';
   return type;

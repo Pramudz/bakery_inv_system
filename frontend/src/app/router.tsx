@@ -29,6 +29,7 @@ import { PermissionsPage } from "../features/permissions/pages/PermissionsPage";
 import { UserRolesPage } from "../features/user-roles/pages/UserRolesPage";
 import { RolePermissionsPage } from "../features/role-permissions/pages/RolePermissionsPage";
 import { UnitsPage } from "../features/units/pages/UnitsPage";
+import { ReferenceImportsPage } from "../features/reference-imports/ReferenceImportsPage";
 import { ProductUnitsPage } from "../features/product-units/pages/ProductUnitsPage";
 import { UserSessionsPage } from "../features/user-sessions/pages/UserSessionsPage";
 import { PurchaseOrdersPage } from "../features/purchasing/pages/PurchaseOrdersPage";
@@ -76,6 +77,7 @@ const tenantChildren = [
   { path: "user-roles", element: <UserRolesPage /> },
   { path: "role-permissions", element: <RolePermissionsPage /> },
   { path: "units", element: <UnitsPage /> },
+  { path: "bulk-data-import", element: <ReferenceImportsPage /> },
   { path: "product-units", element: <ProductUnitsPage /> },
   { path: "user-sessions", element: <UserSessionsPage /> },
   { path: "purchase-orders", element: <PurchaseOrdersPage /> },
