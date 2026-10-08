@@ -48,7 +48,7 @@ export function InvoiceReceiptContent({ invoice, copy = false }: { invoice: Reco
               </div>
               <div className="receipt-two-line-head">
                 <div className="receipt-identity-row">
-                  <span>Code</span>
+                  <span>S/N · Code</span>
                   <span>Item Name</span>
                 </div>
                 <div className="receipt-values-row">
@@ -59,9 +59,9 @@ export function InvoiceReceiptContent({ invoice, copy = false }: { invoice: Reco
                 </div>
               </div>
               {cart.map((x) => (
-                <div className="receipt-two-line-item" key={x.code}>
+                <div className="receipt-two-line-item" key={x.lineNumber}>
                   <div className="receipt-identity-row">
-                    <b>{x.code}</b>
+                    <b>{x.lineNumber}. {x.code}</b>
                     <strong>{x.name}</strong>
                   </div>
                   <div className="receipt-values-row">
@@ -106,7 +106,7 @@ export function InvoiceReceiptContent({ invoice, copy = false }: { invoice: Reco
                   <span>Payment method</span>
                   <b>{method}</b>
                 </div>
-                {payments.map((payment: any, index: number) => <div key={index}><span>{payment.paymentMethod?.paymentMethodName ?? 'Payment'}</span><b>LKR {Number(payment.amount).toFixed(2)}</b></div>)}
+                {payments.map((payment: any, index: number) => <div key={index}><span>{payment.paymentMethod?.paymentMethodName ?? 'Payment'}{payment.paymentChannel?.name ? ` / ${payment.paymentChannel.name}` : ''}{payment.referenceNumber ? ` · Ref ${payment.referenceNumber}` : ''}</span><b>LKR {Number(payment.amount).toFixed(2)}</b></div>)}
                 <div>
                   <span>Payment status</span>
                   <b

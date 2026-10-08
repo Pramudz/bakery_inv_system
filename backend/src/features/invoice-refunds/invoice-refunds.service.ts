@@ -258,7 +258,8 @@ export class InvoiceRefundsService {
       invoice.invoiceStatus = fullyReturned ? 'FULLY_REFUNDED' : 'PARTIALLY_REFUNDED';
       await this.recalculateInvoicePayments(manager, invoice);
       const clock = await tenantBusinessClock(manager, user.tenantId);
-      const header = await posReceiptHeader(manager, user.tenantId, invoice.locationId, user.userId);
+      const header = await posReceiptHeader(manager, user.tenantId, invoice.locationId,
+        activeSession?.cashierSession.cashierUserId ?? refund.createdByUserId);
       refund.businessDate = clock.businessDate;
       refund.printedLocationCode = header.locationCode;
       refund.printedRegisterCode = activeSession
@@ -270,7 +271,6 @@ export class InvoiceRefundsService {
       Object.assign(completed, { businessDate: refund.businessDate, printedLocationCode: refund.printedLocationCode, printedRegisterCode: refund.printedRegisterCode, refundNo: refund.refundNo, issuedAt: refund.issuedAt });
       refund.receiptSnapshot = snapshotRefundReceipt(completed, invoice, header);
       await repo.save(refund);
-      await this.posPrint?.enqueue(manager, 'REFUND', refund.invoiceRefundId, user.tenantId, invoice.locationId, activeSession?.terminal?.posTerminalId ?? null, refund.receiptSnapshot);
       completed.receiptSnapshot = refund.receiptSnapshot;
       return completed;
       });

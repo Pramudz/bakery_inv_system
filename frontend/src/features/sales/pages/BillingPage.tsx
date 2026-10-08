@@ -4,6 +4,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { customersApi } from "../../customers/api/customersApi";
 import { InvoiceQuote, invoicesApi } from "../api/invoicesApi";
 import { InvoiceReceiptContent } from "./InvoiceReceiptContent";
+import { requestCompletionPrint } from "./completionPrint";
+import { posPrintStatusApi } from "../api/posPrintStatusApi";
 import { downloadInvoiceReceipt } from "./invoiceReceiptPdf";
 import { saleBillReference } from "./saleBillReference";
 import { PaymentMethod, paymentMethodsApi } from "../api/paymentMethodsApi";
@@ -90,6 +92,14 @@ export function BillingPage() {
     string,
     any
   > | null>(null);
+  const [printPending, setPrintPending] = useState(false);
+  const [printError, setPrintError] = useState('');
+  const [printNotice, setPrintNotice] = useState('');
+  const printLock = useRef(false);
+  const salePrintStatus = useQuery({ queryKey: ['pos-print-status', 'SALE', completedInvoice?.invoiceId],
+    queryFn: () => posPrintStatusApi.get('SALE', Number(completedInvoice!.invoiceId)),
+    enabled: Boolean(completedInvoice?.invoiceId),
+    refetchInterval: (query) => ['PENDING', 'CLAIMED'].includes(query.state.data?.status ?? '') ? 3000 : false });
   const [priceChangeQuote, setPriceChangeQuote] = useState<InvoiceQuote | null>(
     null,
   );
@@ -307,6 +317,7 @@ export function BillingPage() {
       }),
     onSuccess: (invoice) => {
       if (draftKey) removeBillingDraft(localStorage, draftKey);
+      setPrintNotice('');
       setPriceChangeQuote(null);
       setCompletedInvoice(invoice);
       setComplete(true);
@@ -694,9 +705,13 @@ export function BillingPage() {
     window.addEventListener("keydown", shortcuts);
     return () => window.removeEventListener("keydown", shortcuts);
   }, []);
-  const outputReceipt = (printOnly = false) => {
-    if (printOnly) window.print();
-    else if (completedInvoice) downloadInvoiceReceipt(completedInvoice);
+  const outputReceipt = async (printOnly = false) => {
+    if (!completedInvoice) return;
+    if (!printOnly) { downloadInvoiceReceipt(completedInvoice); return; }
+    await requestCompletionPrint(printLock, () => posPrintStatusApi.print('SALE', Number(completedInvoice.invoiceId)), {
+      pending: setPrintPending, error: setPrintError,
+      accepted: () => { setPrintNotice('Print request accepted. Waiting for the printer.'); resetSale(); },
+    });
   };
   const resetSale = () => {
     if (sourceQuotationId) { navigate(`/quotations/${sourceQuotationId}`); return; }
@@ -759,6 +774,7 @@ export function BillingPage() {
           <strong>{completedInvoice ? saleBillReference(completedInvoice) : "New bill"}</strong>
         </div>
       </div>
+      {printNotice && <div className="success-box" role="status">{printNotice}</div>}
       <div className="pos-layout">
         <section className="pos-workspace">
           <div className="card billing-location-section">
@@ -1594,6 +1610,8 @@ export function BillingPage() {
             {completedInvoice && (
               <InvoiceReceiptContent invoice={completedInvoice} />
             )}
+            {printError && <div className="error-box" role="alert">{printError}</div>}
+            {salePrintStatus.data?.status !== 'NOT_REQUESTED' && salePrintStatus.data && <p role="status">{salePrintStatus.data.status === 'PRINTED' ? 'Sent to printer.' : salePrintStatus.data.status === 'FAILED' ? `Print failed: ${salePrintStatus.data.lastError ?? 'Check the printer.'}` : 'Sending to printer...'}</p>}
             <div className="modal-foot receipt-actions">
               {Number(completedInvoice?.balanceAmount ?? 0) > 0 &&
                 hasPermission("SALES_PAYMENT_COLLECT") && (
@@ -1612,9 +1630,10 @@ export function BillingPage() {
                 autoFocus
                 data-receipt-action
                 className="btn btn-secondary"
-                onClick={() => outputReceipt(true)}
+                disabled={printPending || !completedInvoice?.receiptSnapshot}
+                onClick={() => void outputReceipt(true)}
               >
-                ▣ Print Receipt
+                {printPending ? 'Sending to printer...' : 'Print'}
               </button>
               <button
                 data-receipt-action

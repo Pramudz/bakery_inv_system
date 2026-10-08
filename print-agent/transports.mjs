@@ -1,6 +1,6 @@
 import net from 'node:net';
 import { spawn } from 'node:child_process';
-import { writeFile, unlink } from 'node:fs/promises';
+import { writeFile, unlink, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +33,15 @@ export async function windowsQueuePrint(printer, bytes) {
   } finally { await unlink(path).catch(() => undefined); }
 }
 
-export async function deliver(printer, bytes, adapters = { TCP: tcpPrint, WINDOWS_QUEUE: windowsQueuePrint }) {
+export async function filePrint(printer, bytes) {
+  await mkdir(printer.target, { recursive: true });
+  const kind = ['SALE', 'REFUND', 'TEST'].includes(printer.documentType) ? printer.documentType.toLowerCase() : 'receipt';
+  const path = join(printer.target, `${kind}-${randomUUID()}.bin`);
+  await writeFile(path, bytes, { flag: 'wx' });
+  return path;
+}
+
+export async function deliver(printer, bytes, adapters = { TCP: tcpPrint, WINDOWS_QUEUE: windowsQueuePrint, FILE: filePrint }) {
   const adapter = adapters[printer.transport];
   if (!adapter) throw new Error('Unsupported print transport.');
   return adapter(printer, bytes);

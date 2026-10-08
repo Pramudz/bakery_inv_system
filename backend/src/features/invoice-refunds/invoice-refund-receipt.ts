@@ -25,11 +25,12 @@ export function snapshotRefundReceipt(refund: InvoiceRefund, invoice: Invoice, h
     },
     customer: sale?.customer ?? null,
     details: [...(refund.details ?? [])].sort((a, b) => Number(a.invoiceRefundDetailId) - Number(b.invoiceRefundDetailId)).map((line) => ({
-      quantity: line.quantity, unitPrice: line.unitPrice, discountAmount: line.discountAmount,
+      lineNumber: line.lineNumber, quantity: line.quantity, unitPrice: line.unitPrice, discountAmount: line.discountAmount,
       refundAmount: line.refundAmount, product: { sku: line.product.sku, productName: line.product.productName },
     })),
     payments: (refund.payments ?? []).map((payment) => ({
       amount: payment.amount,
+      referenceNumber: payment.referenceNumber,
       paymentMethod: { paymentMethodName: payment.paymentMethod?.paymentMethodName ?? payment.paymentMethodTypeSnapshot ?? 'Payment', paymentMethodType: payment.paymentMethodTypeSnapshot },
       paymentChannel: payment.paymentChannelId ? { name: payment.paymentChannelNameSnapshot, code: payment.paymentChannelCodeSnapshot } : null,
     })),

@@ -423,7 +423,7 @@ export class InvoicesService {
         }));
       }
       const clock = await tenantBusinessClock(manager, user.tenantId);
-      const header = await posReceiptHeader(manager, user.tenantId, dto.locationId, user.userId);
+      const header = await posReceiptHeader(manager, user.tenantId, dto.locationId, activeSession.cashierSession.cashierUserId);
       const registerCode = activeSession.config.registerMode === PosRegisterMode.MASTER_REGISTER
         ? activeSession.register.receiptCode || 'MASTER'
         : activeSession.terminal!.terminalCode.trim().toUpperCase();
@@ -448,7 +448,6 @@ export class InvoicesService {
       }
       completed.receiptSnapshot = snapshotInvoiceReceipt(completed, header);
       await invoiceRepo.update(invoice.invoiceId, { receiptSnapshot: completed.receiptSnapshot });
-      await this.posPrint?.enqueue(manager, 'SALE', invoice.invoiceId, user.tenantId, dto.locationId, activeSession.terminal?.posTerminalId ?? null, completed.receiptSnapshot);
       return completed;
       });
     } catch (error) {

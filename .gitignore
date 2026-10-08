@@ -6,3 +6,7 @@ frontend/.env*
 !frontend/.env.example
 backend/.env
 *.log
+print-agent/agent-config.json
+print-agent/agent-state.json
+print-agent/agent-config.json.state.json
+print-agent/test-output/

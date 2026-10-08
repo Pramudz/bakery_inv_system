@@ -39,7 +39,7 @@ export function PosRegisterManagementPage() {
   useEffect(() => {
     if (locationId || !locations.data?.length) return;
     const preferred = Number(auth.currentLocationId ?? 0);
-    setLocationId(locations.data.some((row) => row.locationId === preferred) ? preferred : locations.data[0].locationId);
+    setLocationId(locations.data.some((row) => Number(row.locationId) === preferred) ? preferred : Number(locations.data[0].locationId));
   }, [auth.currentLocationId, locationId, locations.data]);
   useEffect(() => {
     if (!locationId) return;

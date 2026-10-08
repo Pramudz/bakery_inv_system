@@ -1,4 +1,4 @@
-type ReceiptLine = { code: string; name: string; qty: number; rate: number; discountRs: number; net: number };
+type ReceiptLine = { lineNumber: number; code: string; name: string; qty: number; rate: number; discountRs: number; net: number };
 
 export function invoiceReceiptModel(invoice: Record<string, any>) {
   const original = invoice.receiptSnapshot ?? invoice;
@@ -11,8 +11,8 @@ export function invoiceReceiptModel(invoice: Record<string, any>) {
   const total = Number(original.grandTotal);
   const names = [...new Set(initialPayments.map((payment: any) => payment.paymentMethod?.paymentMethodName ? `${payment.paymentMethod.paymentMethodName}${payment.paymentChannel?.name ? ` → ${payment.paymentChannel.name}` : ''}` : null).filter(Boolean))];
   const method = names.join(' + ') || 'Unpaid';
-  const cart: ReceiptLine[] = [...(original.details ?? [])].sort((a: any, b: any) => Number(a.invoiceDetailId) - Number(b.invoiceDetailId)).map((line: any) => ({
-    code: line.product?.sku ?? '', name: line.product?.productName ?? '', qty: Number(line.quantity), rate: Number(line.unitPrice), discountRs: Number(line.discountAmount), net: Number(line.netTotal),
+  const cart: ReceiptLine[] = [...(original.details ?? [])].sort((a: any, b: any) => Number(a.lineNumber ?? a.invoiceDetailId) - Number(b.lineNumber ?? b.invoiceDetailId)).map((line: any, index: number) => ({
+    lineNumber: line.lineNumber ?? index + 1, code: line.product?.sku ?? '', name: line.product?.productName ?? '', qty: Number(line.quantity), rate: Number(line.unitPrice), discountRs: Number(line.discountAmount), net: Number(line.netTotal),
   }));
   const date = new Date(original.invoiceDate);
   const header = original.header ?? null;

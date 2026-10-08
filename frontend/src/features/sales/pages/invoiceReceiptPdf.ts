@@ -1,13 +1,13 @@
 import { invoiceReceiptModel } from './invoiceReceiptModel';
 
 export function downloadInvoiceReceipt(invoice: Record<string, any>, copy = false) {
-    const { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, receiptDate, unitPrice, lineNet, header, billNo, locationCode, registerCode } = invoiceReceiptModel(invoice);
+    const { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, receiptDate, unitPrice, lineNet, header, billNo, locationCode, registerCode, payments } = invoiceReceiptModel(invoice);
     const paidAmount = paidTotal,
       change = changeTotal;
     const escapePdf = (value: string) =>
       value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
     const pageWidth = 226.77,
-      pageHeight = 500 + cart.length * 33;
+      pageHeight = 540 + cart.length * 33 + payments.length * 15;
     let y = pageHeight - 24;
     const commands: string[] = [];
     const text = (
@@ -68,10 +68,12 @@ export function downloadInvoiceReceipt(invoice: Record<string, any>, copy = fals
     y -= 11;
     text("Payment", 14, 5);
     text(method, 105, 5.5, true, "right");
+    text("Sale type", 119, 5);
+    text(saleType, 212, 5.5, true, "right");
     y -= 11;
     rule();
     y -= 12;
-    text("CODE", 14, 6, true);
+    text("S/N CODE", 14, 6, true);
     text("ITEM NAME", 62, 6, true);
     y -= 10;
     text("QTY", 44, 6, true, "right");
@@ -82,7 +84,7 @@ export function downloadInvoiceReceipt(invoice: Record<string, any>, copy = fals
     rule(true);
     y -= 13;
     cart.forEach((item) => {
-      text(item.code, 14, 6, true);
+      text(`${item.lineNumber}. ${item.code}`, 14, 6, true);
       text(item.name.slice(0, 25), 62, 6, true);
       y -= 11;
       text(item.qty.toFixed(3), 44, 6, true, "right");
@@ -112,10 +114,11 @@ export function downloadInvoiceReceipt(invoice: Record<string, any>, copy = fals
     rule();
     y -= 13;
     summary("Paid Amount", `LKR ${paidAmount.toFixed(2)}`);
-    if (change > 0) summary("Cash Tendered", `LKR ${tenderedTotal.toFixed(2)}`);
+    summary("Tendered", `LKR ${tenderedTotal.toFixed(2)}`);
     summary("Outstanding Balance", `LKR ${outstandingBalance.toFixed(2)}`);
     if (change > 0) summary("Change", `LKR ${change.toFixed(2)}`);
     summary("Payment method", method);
+    for (const payment of payments) summary(`${payment.paymentMethod?.paymentMethodName ?? 'Payment'}${payment.paymentChannel?.name ? ` / ${payment.paymentChannel.name}` : ''}${payment.referenceNumber ? ` Ref ${payment.referenceNumber}` : ''}`, `LKR ${Number(payment.amount).toFixed(2)}`);
     summary(
       "Payment status",
       paymentStatus,
