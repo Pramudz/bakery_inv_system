@@ -2,6 +2,7 @@ node_modules/
 dist/
 frontend/dist/
 backend/dist/
+build/
 frontend/.env*
 !frontend/.env.example
 backend/.env

@@ -1,4 +1,4 @@
-import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, IsTimeZone, IsUrl, Length, MaxLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, IsTimeZone, IsUrl, Length, MaxLength, MinLength, Matches } from 'class-validator';
 import { Transform } from 'class-transformer';
 const EmptyToNull = () => Transform(({ value }) => value === '' ? null : value);
 export class CreateTenantDto {
@@ -18,5 +18,6 @@ export class CreateTenantDto {
   @EmptyToNull() @IsOptional() @IsString() @MaxLength(100) stateProvince?: string;
   @EmptyToNull() @IsOptional() @IsString() @MaxLength(30) postalCode?: string;
   @EmptyToNull() @IsOptional() @IsString() @Length(2, 2) countryCode?: string;
-  @IsOptional() @IsString() @IsTimeZone() @MaxLength(64) timeZone?: string;
+  @IsString() @IsNotEmpty() @IsTimeZone() @MaxLength(64) timeZone!: string;
+  @IsString() @MinLength(12) @MaxLength(72) @Matches(/[a-z]/) @Matches(/[A-Z]/) @Matches(/[0-9]/) @Matches(/[^A-Za-z0-9]/) initialAdminPassword!: string;
 }

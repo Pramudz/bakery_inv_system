@@ -8,6 +8,14 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
 import { TenantSelfController } from './tenant-self.controller';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import * as bcrypt from 'bcrypt';
+import { Tenant } from './tenant.entity';
+import { User } from '../users/user.entity';
+import { Role } from '../roles/roles.entity';
+import { UserRole } from '../user-roles/user-roles.entity';
+import { ModuleEntity } from '../modules/modules.entity';
+import { TenantModule } from '../tenant-modules/tenant-modules.entity';
+import { InventoryAdjustmentReason } from '../inventory-adjustments/inventory-adjustment-reason.entity';
 
 const tenant = { tenantId: 7, code: 'BAKE', name: 'Bake House', isActive: true, locations: [] };
 
@@ -36,19 +44,72 @@ test('tenant update rejects another tenant code', async () => {
 test('tenant create rejects a globally duplicated code before bootstrap', async () => {
   const repository = { findOneBy: async () => tenant };
   const service = new TenantsService(repository as any, {} as any, {} as any);
-  await assert.rejects(() => service.create({ code: 'BAKE', name: 'Duplicate', isActive: true }), ConflictException);
+  await assert.rejects(() => service.create({ code: 'BAKE', name: 'Duplicate', isActive: true, timeZone: 'Asia/Colombo', initialAdminPassword: 'TestBootstrap9!' }), ConflictException);
 });
 
 test('blank optional tenant fields do not fail validation', async () => {
-  const dto = plainToInstance(CreateTenantDto, { code: 'NEW', name: 'New Tenant', isActive: true, email: '', website: '', countryCode: '' });
+  const dto = plainToInstance(CreateTenantDto, { code: 'NEW', name: 'New Tenant', isActive: true, email: '', website: '', countryCode: '', timeZone: 'Asia/Colombo', initialAdminPassword: 'TestBootstrap9!' });
   assert.deepEqual(await validate(dto), []);
 });
 
 test('platform tenant creation accepts a valid IANA timezone and rejects invalid values', async () => {
-  const valid = plainToInstance(CreateTenantDto, { code: 'NEW', name: 'New Tenant', isActive: true, timeZone: 'America/New_York' });
-  const invalid = plainToInstance(CreateTenantDto, { code: 'NEW', name: 'New Tenant', isActive: true, timeZone: 'UTC+05:30' });
+  const valid = plainToInstance(CreateTenantDto, { code: 'NEW', name: 'New Tenant', isActive: true, timeZone: 'America/New_York', initialAdminPassword: 'TestBootstrap9!' });
+  const invalid = plainToInstance(CreateTenantDto, { code: 'NEW', name: 'New Tenant', isActive: true, timeZone: 'UTC+05:30', initialAdminPassword: 'TestBootstrap9!' });
   assert.deepEqual(await validate(valid), []);
   assert.ok((await validate(invalid)).some((error) => error.property === 'timeZone'));
+});
+
+test('tenant creation requires strong password and explicit timezone', async () => {
+  const base = { code: 'NEW', name: 'New Tenant', isActive: true };
+  for (const dto of [base, { ...base, timeZone: 'Asia/Colombo' }, { ...base, timeZone: 'UTC+05:30', initialAdminPassword: 'StrongPassword9!' }, { ...base, timeZone: 'Asia/Colombo', initialAdminPassword: 'weakpassword' }]) {
+    const errors = await validate(plainToInstance(CreateTenantDto, dto));
+    assert.ok(errors.some((error) => ['timeZone', 'initialAdminPassword'].includes(error.property)));
+  }
+  const service = new TenantsService({ findOneBy: async () => null } as any, {} as any, {} as any);
+  await assert.rejects(() => service.create({ ...base, timeZone: 'Asia/Colombo', initialAdminPassword: 'weakpassword' }), BadRequestException);
+});
+
+test('tenant creation hashes administrator password and saves all bootstrap records atomically', async () => {
+  const saved: Array<{ entity: unknown; row: any }> = [];
+  const ids = new Map<unknown, number>();
+  let transactionCompleted = false;
+  const repo = (entity: unknown) => ({
+    findOneBy: async () => null,
+    create: (row: any) => row,
+    save: async (row: any) => {
+      const next = (ids.get(entity) ?? 0) + 1; ids.set(entity, next);
+      const idField = entity === Tenant ? 'tenantId' : entity === User ? 'userId' : entity === Role ? 'roleId' : entity === ModuleEntity ? 'moduleId' : 'id';
+      const result = { ...row, [idField]: next };
+      saved.push({ entity, row: result });
+      return result;
+    },
+  });
+  const manager = { getRepository: repo };
+  const dataSource = { transaction: async (work: (manager: any) => Promise<any>) => { const result = await work(manager); transactionCompleted = true; return result; } };
+  const service = new TenantsService({ findOneBy: async () => null } as any, dataSource as any, {} as any);
+  const result = await service.create({ code: 'TIFOAM', name: 'Tifoam', isActive: true, timeZone: 'America/New_York', initialAdminPassword: 'StrongPassword9!' });
+  assert.equal(transactionCompleted, true);
+  assert.equal(result.tenant.timeZone, 'America/New_York');
+  assert.equal((result.tenant as any).initialAdminPassword, undefined);
+  assert.equal(JSON.stringify(result).includes('StrongPassword9!'), false);
+  assert.equal(saved.filter((entry) => entry.entity === TenantModule).length, 9);
+  assert.equal(saved.filter((entry) => entry.entity === InventoryAdjustmentReason).length, 9);
+  assert.equal(saved.filter((entry) => entry.entity === UserRole).length, 1);
+  const user = saved.find((entry) => entry.entity === User)?.row;
+  assert.equal(await bcrypt.compare('StrongPassword9!', user.passwordHash), true);
+  assert.notEqual(user.passwordHash, 'StrongPassword9!');
+});
+
+test('tenant bootstrap failure propagates and does not complete the transaction', async () => {
+  let completed = false;
+  const repo = (entity: unknown) => ({ findOneBy: async () => null, create: (row: any) => row, save: async (row: any) => {
+    if (entity === Role) throw new Error('role insert failed');
+    return { ...row, tenantId: 1, moduleId: 1 };
+  } });
+  const dataSource = { transaction: async (work: (manager: any) => Promise<any>) => { const result = await work({ getRepository: repo }); completed = true; return result; } };
+  const service = new TenantsService({ findOneBy: async () => null } as any, dataSource as any, {} as any);
+  await assert.rejects(() => service.create({ code: 'TIFOAM', name: 'Tifoam', isActive: true, timeZone: 'Asia/Colombo', initialAdminPassword: 'StrongPassword9!' }), /role insert failed/);
+  assert.equal(completed, false);
 });
 
 test('normal platform and My Tenant updates reject timezone changes', async () => {

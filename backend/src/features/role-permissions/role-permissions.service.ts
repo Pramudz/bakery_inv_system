@@ -39,6 +39,16 @@ export class RolePermissionService {
 
   async update(id:number,dto:UpdateRolePermissionDto,tenantId:number) {
     await this.findOne(id,tenantId);
+    if (dto.roleId !== undefined) {
+      const role = await this.dataSource.getRepository(Role).findOne({ where: { roleId: dto.roleId, tenantId } });
+      if (!role) throw new NotFoundException('Role not found for this tenant.');
+    }
+    if (dto.permissionId !== undefined) {
+      const permission = await this.dataSource.getRepository(Permission).findOneBy({ permissionId: dto.permissionId, isActive: true });
+      if (!permission) throw new NotFoundException('Permission not found.');
+      const enabled = await this.dataSource.getRepository(TenantModule).findOneBy({ tenantId, moduleId: permission.moduleId, isEnabled: true });
+      if (!enabled) throw new NotFoundException('Permission module is not enabled for this tenant.');
+    }
     await this.repo.update(id,dto as any);
     return this.findOne(id,tenantId);
   }

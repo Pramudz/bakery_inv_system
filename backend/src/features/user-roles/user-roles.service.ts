@@ -36,6 +36,14 @@ export class UserRoleService {
 
   async update(id:number,dto:UpdateUserRoleDto,tenantId:number) {
     await this.findOne(id,tenantId);
+    if (dto.userId !== undefined) {
+      const user = await this.dataSource.getRepository(User).findOne({ where: { userId: dto.userId, tenantId } });
+      if (!user) throw new NotFoundException('User not found for this tenant.');
+    }
+    if (dto.roleId !== undefined) {
+      const role = await this.dataSource.getRepository(Role).findOne({ where: { roleId: dto.roleId, tenantId } });
+      if (!role) throw new NotFoundException('Role not found for this tenant.');
+    }
     await this.repo.update(id,dto as any);
     return this.findOne(id,tenantId);
   }

@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
+import { databaseType } from './database-type';
 
 export default new DataSource({
-  type: 'mysql',
+  type: databaseType(process.env.DB_TYPE),
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT || 3306),
   username: process.env.DB_USERNAME,
