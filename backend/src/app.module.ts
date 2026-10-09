@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { databaseType } from './database-type';
+import { staticAppOptions } from './static-app';
 
 import { TenantsModule } from './features/tenants/tenants.module';
 import { UsersModule } from './features/users/users.module';
@@ -59,19 +62,19 @@ import { ReferenceImportModule } from './features/reference-imports/reference-im
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ServeStaticModule.forRoot(staticAppOptions),
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        type: 'mysql',
+        type: databaseType(config.get<string>('DB_TYPE')),
         host: config.get<string>('DB_HOST'),
         port: Number(config.get<string>('DB_PORT', '3306')),
         username: config.get<string>('DB_USERNAME'),
         password: config.get<string>('DB_PASSWORD'),
         database: config.get<string>('DB_DATABASE'),
         autoLoadEntities: true,
-        synchronize:
-          config.get<string>('DB_SYNCHRONIZE') === 'true',
+        synchronize: false,
       }),
     }),
 

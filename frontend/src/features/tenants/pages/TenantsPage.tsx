@@ -4,9 +4,15 @@ import { mediaUrl, Tenant, TenantInput, tenantsApi } from '../api/tenantsApi';
 import { Modal } from '../../../components/ui/Modal';
 import { Field } from '../../../components/ui/Field';
 
+const supportedTimeZones = typeof Intl.supportedValuesOf === 'function'
+  ? Intl.supportedValuesOf('timeZone')
+  : ['America/New_York', 'Asia/Dubai', 'Asia/Kolkata', 'Europe/London', 'Australia/Sydney'];
+const timeZones = ['Asia/Colombo', 'UTC', ...supportedTimeZones]
+  .filter((zone, index, values) => values.indexOf(zone) === index);
+
 const emptyForm = (): TenantInput => ({
   code: '', name: '', isActive: true, legalName: '', registrationNumber: '', businessCategory: '', taxRegistrationNumber: '',
-  email: '', phone: '', website: '', addressLine1: '', addressLine2: '', city: '', stateProvince: '', postalCode: '', countryCode: '', timeZone: 'Asia/Colombo',
+  email: '', phone: '', website: '', addressLine1: '', addressLine2: '', city: '', stateProvince: '', postalCode: '', countryCode: '', timeZone: '',
 });
 const toForm = (tenant: Tenant): TenantInput => ({
   code: tenant.code ?? '', name: tenant.name ?? '', isActive: tenant.isActive,
@@ -24,6 +30,7 @@ export function TenantsPage() {
   const [modulesTenant, setModulesTenant] = useState<Tenant | null>(null);
   const [search, setSearch] = useState('');
   const [form, setForm] = useState<TenantInput>(emptyForm);
+  const [initialAdminPassword, setInitialAdminPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [duplicateCode, setDuplicateCode] = useState('');
   const [apiError, setApiError] = useState('');
@@ -35,7 +42,7 @@ export function TenantsPage() {
   const [fileKey, setFileKey] = useState(0);
 
   const resetModal = () => {
-    setForm(emptyForm()); setEditing(null); setFieldErrors({}); setDuplicateCode(''); setApiError('');
+    setForm(emptyForm()); setInitialAdminPassword(''); setEditing(null); setFieldErrors({}); setDuplicateCode(''); setApiError('');
     setLogoFile(null); setLogoPreview(''); setRemoveLogo(false); setEditLoading(false); setFileKey((key) => key + 1); save.reset();
   };
   const closeModal = () => { setOpen(false); resetModal(); };
@@ -50,9 +57,9 @@ export function TenantsPage() {
   };
 
   const save = useMutation({
-    mutationFn: async ({ data, tenantId }: { data: TenantInput; tenantId?: number }) => {
+    mutationFn: async ({ data, tenantId, adminPassword }: { data: TenantInput; tenantId?: number; adminPassword?: string }) => {
       const { timeZone: _creationTimeZone, ...ordinaryUpdate } = data;
-      let saved = tenantId ? await tenantsApi.update(tenantId, ordinaryUpdate) : (await tenantsApi.create(data)).tenant;
+      let saved = tenantId ? await tenantsApi.update(tenantId, ordinaryUpdate) : (await tenantsApi.create({ ...data, initialAdminPassword: adminPassword ?? '' })).tenant;
       if (tenantId && removeLogo && !logoFile) saved = await tenantsApi.removeLogo(tenantId);
       if (logoFile) saved = await tenantsApi.uploadLogo(saved.tenantId, logoFile);
       return saved;
@@ -85,8 +92,9 @@ export function TenantsPage() {
     if (!form.name.trim()) errors.name = 'Tenant name is required.';
     if (form.countryCode && form.countryCode.length !== 2) errors.countryCode = 'Country code must contain 2 letters.';
     if (!editing && !form.timeZone.trim()) errors.timeZone = 'IANA timezone is required.';
+    if (!editing && (initialAdminPassword.length < 12 || !/[a-z]/.test(initialAdminPassword) || !/[A-Z]/.test(initialAdminPassword) || !/[0-9]/.test(initialAdminPassword) || !/[^A-Za-z0-9]/.test(initialAdminPassword) || new TextEncoder().encode(initialAdminPassword).length > 72)) errors.initialAdminPassword = 'Use 12 or more characters with uppercase, lowercase, number, and symbol (72 UTF-8 bytes maximum).';
     if (Object.keys(errors).length) { setFieldErrors(errors); return; }
-    setApiError(''); setDuplicateCode(''); save.mutate({ data: { ...form, code: form.code.trim().toUpperCase(), countryCode: form.countryCode?.toUpperCase() }, tenantId: editing?.tenantId });
+    setApiError(''); setDuplicateCode(''); save.mutate({ data: { ...form, code: form.code.trim().toUpperCase(), countryCode: form.countryCode?.toUpperCase() }, tenantId: editing?.tenantId, adminPassword: editing ? undefined : initialAdminPassword });
   };
   const selectLogo = (file?: File) => {
     setApiError('');
@@ -100,11 +108,12 @@ export function TenantsPage() {
     {success && <div className="success-box">{success}</div>}
     <div className="stats-row"><div className="stat-card"><span>Total tenants</span><strong>{tenants.data?.length ?? 0}</strong></div><div className="stat-card"><span>Active</span><strong>{(tenants.data ?? []).filter((row) => row.isActive).length}</strong></div><div className="stat-card"><span>Inactive</span><strong>{(tenants.data ?? []).filter((row) => !row.isActive).length}</strong></div></div>
     <div className="card"><div className="toolbar"><div className="search-wrap"><span>⌕</span><input className="input search" placeholder="Search by tenant name or code..." value={search} onChange={(event) => setSearch(event.target.value)} /></div><button className="btn btn-secondary" onClick={() => tenants.refetch()}>↻ Refresh</button></div>
-      {tenants.isLoading ? <div className="empty">Loading tenants...</div> : rows.length === 0 ? <div className="empty">No tenants found.</div> : <table className="table"><thead><tr><th>Tenant</th><th>Code</th><th>Status</th><th>Created</th><th className="right">Actions</th></tr></thead><tbody>{rows.map((tenant) => <tr key={tenant.tenantId}><td><div className="primary-cell">{tenant.logoUrl ? <img className="avatar tenant-logo-small" src={mediaUrl(tenant.logoUrl)} alt="" /> : <span className="avatar tenant-avatar">{tenant.name.slice(0, 1).toUpperCase()}</span>}<div><strong>{tenant.name}</strong><small>{tenant.legalName || `Tenant #${tenant.tenantId}`}</small></div></div></td><td><span className="code-chip">{tenant.code}</span></td><td><span className={tenant.isActive ? 'status status-on' : 'status status-off'}><i /> {tenant.isActive ? 'Active' : 'Inactive'}</span></td><td>{tenant.createdAt ? new Date(tenant.createdAt).toLocaleDateString() : '—'}</td><td className="right actions"><button className="btn btn-ghost" onClick={() => setViewingId(tenant.tenantId)}>View</button><button className="btn btn-ghost" onClick={() => openEdit(tenant)}>Edit</button><button className="btn btn-ghost" onClick={() => setModulesTenant(tenant)}>Manage Modules</button><button className={tenant.isActive ? 'btn btn-danger-soft' : 'btn btn-primary'} disabled={statusMutation.isPending} onClick={() => statusMutation.mutate({ id: tenant.tenantId, active: !tenant.isActive })}>{tenant.isActive ? 'Deactivate' : 'Activate'}</button></td></tr>)}</tbody></table>}
+      {tenants.isLoading ? <div className="empty">Loading tenants...</div> : tenants.isError ? <div className="error-box">{tenants.error instanceof Error ? tenants.error.message : 'Unable to load tenants.'}</div> : rows.length === 0 ? <div className="empty">No tenants found.</div> : <table className="table"><thead><tr><th>Tenant</th><th>Code</th><th>Status</th><th>Created</th><th className="right">Actions</th></tr></thead><tbody>{rows.map((tenant) => <tr key={tenant.tenantId}><td><div className="primary-cell">{tenant.logoUrl ? <img className="avatar tenant-logo-small" src={mediaUrl(tenant.logoUrl)} alt="" /> : <span className="avatar tenant-avatar">{tenant.name.slice(0, 1).toUpperCase()}</span>}<div><strong>{tenant.name}</strong><small>{tenant.legalName || `Tenant #${tenant.tenantId}`}</small></div></div></td><td><span className="code-chip">{tenant.code}</span></td><td><span className={tenant.isActive ? 'status status-on' : 'status status-off'}><i /> {tenant.isActive ? 'Active' : 'Inactive'}</span></td><td>{tenant.createdAt ? new Date(tenant.createdAt).toLocaleDateString() : '—'}</td><td className="right actions"><button className="btn btn-ghost" onClick={() => setViewingId(tenant.tenantId)}>View</button><button className="btn btn-ghost" onClick={() => openEdit(tenant)}>Edit</button><button className="btn btn-ghost" onClick={() => setModulesTenant(tenant)}>Manage Modules</button><button className={tenant.isActive ? 'btn btn-danger-soft' : 'btn btn-primary'} disabled={statusMutation.isPending} onClick={() => statusMutation.mutate({ id: tenant.tenantId, active: !tenant.isActive })}>{tenant.isActive ? 'Deactivate' : 'Activate'}</button></td></tr>)}</tbody></table>}
     </div>
 
     <Modal open={open} onClose={closeModal} title={editing ? 'Edit tenant' : 'Create tenant'} subtitle="Tenant identity, contact, address, and branding." wide><form onSubmit={submit}><div className="modal-body tenant-form-body">{editLoading ? <div className="empty">Loading tenant data...</div> : <>
-      <FormSection title="Basic Information"><Field label="Tenant code" value={form.code} onChange={(value) => change('code', value.toUpperCase())} required /><Field label="Tenant name" value={form.name} onChange={(value) => change('name', value)} required /><Field label="Legal name" value={form.legalName} onChange={(value) => change('legalName', value)} /><Field label="Registration number" value={form.registrationNumber} onChange={(value) => change('registrationNumber', value)} /><Field label="Business category" value={form.businessCategory} onChange={(value) => change('businessCategory', value)} /><Field label="Tax registration number" value={form.taxRegistrationNumber} onChange={(value) => change('taxRegistrationNumber', value)} />{!editing && <Field label="Business timezone" value={form.timeZone} onChange={(value) => change('timeZone', value)} placeholder="Asia/Colombo" hint="IANA timezone set by the platform administrator." required />}<label className="check tenant-active"><input type="checkbox" checked={form.isActive} onChange={(event) => change('isActive', event.target.checked)} /> Active</label></FormSection>
+      <FormSection title="Basic Information"><Field label="Tenant code" value={form.code} onChange={(value) => change('code', value.toUpperCase())} required /><Field label="Tenant name" value={form.name} onChange={(value) => change('name', value)} required /><Field label="Legal name" value={form.legalName} onChange={(value) => change('legalName', value)} /><Field label="Registration number" value={form.registrationNumber} onChange={(value) => change('registrationNumber', value)} /><Field label="Business category" value={form.businessCategory} onChange={(value) => change('businessCategory', value)} /><Field label="Tax registration number" value={form.taxRegistrationNumber} onChange={(value) => change('taxRegistrationNumber', value)} />{!editing && <div className="field"><label htmlFor="business-time-zone">Business timezone *</label><select id="business-time-zone" className="input" value={form.timeZone} onChange={(event) => change('timeZone', event.target.value)} required><option value="">Select business timezone</option>{timeZones.map((zone) => <option key={zone} value={zone}>{zone}{zone === 'Asia/Colombo' ? ' (suggested)' : ''}</option>)}</select><small className="field-hint">This choice cannot be changed through normal tenant administration.</small></div>}<label className="check tenant-active"><input type="checkbox" checked={form.isActive} onChange={(event) => change('isActive', event.target.checked)} /> Active</label></FormSection>
+      {!editing && <FormSection title="Initial tenant administrator"><div className="field"><label htmlFor="initial-admin-password">Administrator password *</label><input id="initial-admin-password" className="input" type="password" autoComplete="new-password" value={initialAdminPassword} onChange={(event) => { setInitialAdminPassword(event.target.value); setFieldErrors((current) => ({ ...current, initialAdminPassword: '' })); }} required /><small className="field-hint">At least 12 characters with uppercase, lowercase, number, and symbol. Username: Admin.</small></div></FormSection>}
       <FormSection title="Contact Details"><Field label="Email" type="email" value={form.email} onChange={(value) => change('email', value)} /><Field label="Phone" value={form.phone} onChange={(value) => change('phone', value)} /><Field label="Website" type="url" value={form.website} onChange={(value) => change('website', value)} full /></FormSection>
       <FormSection title="Head Office Address"><Field label="Address line 1" value={form.addressLine1} onChange={(value) => change('addressLine1', value)} /><Field label="Address line 2" value={form.addressLine2} onChange={(value) => change('addressLine2', value)} /><Field label="City" value={form.city} onChange={(value) => change('city', value)} /><Field label="State / Province" value={form.stateProvince} onChange={(value) => change('stateProvince', value)} /><Field label="Postal code" value={form.postalCode} onChange={(value) => change('postalCode', value)} /><Field label="Country code" value={form.countryCode} onChange={(value) => change('countryCode', value.toUpperCase().slice(0, 2))} placeholder="LK" /></FormSection>
       <FormSection title="Branding"><div className="branding-editor">{logoPreview && !removeLogo ? <img className="tenant-logo-preview" src={logoPreview} alt="Tenant logo preview" /> : <div className="tenant-logo-placeholder">No logo</div>}<div><input key={fileKey} type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" onChange={(event) => selectLogo(event.target.files?.[0])} /><small className="field-hint">PNG, JPG, JPEG or WEBP. Maximum 2MB.</small>{logoPreview && !removeLogo && <button type="button" className="btn btn-danger-soft" onClick={() => { setLogoFile(null); setLogoPreview(''); setRemoveLogo(true); setFileKey((key) => key + 1); }}>Remove logo</button>}</div></div></FormSection>

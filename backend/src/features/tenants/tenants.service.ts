@@ -19,11 +19,12 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { MediaStorageService } from '../../common/media-storage.service';
 import { UpdateMyTenantDto } from './dto/update-my-tenant.dto';
-import { assertSupportedIanaTimeZone, DEFAULT_TENANT_TIME_ZONE } from '../../common/business-date';
+import { assertSupportedIanaTimeZone } from '../../common/business-date';
 import { ensureSystemAdjustmentReasons } from '../inventory-adjustments/inventory-adjustment-reasons.service';
+import { assertStrongInitialAdminPassword } from './initial-admin-password';
+import { AUTHORIZATION_MODULES, DEFAULT_TENANT_MODULE_CODES } from '../auth/authorization-catalog.constants';
 
 const DEFAULT_ADMIN_USERNAME = 'Admin';
-const DEFAULT_ADMIN_PASSWORD = 'tenantadmin@123';
 const DEFAULT_ADMIN_ROLE_CODE = 'TENANT_ADMIN';
 const DEFAULT_ADMIN_ROLE_NAME = 'Administrator';
 
@@ -51,6 +52,8 @@ export class TenantsService {
    * Password-change enforcement is intentionally not enabled yet.
    */
   async create(dto: CreateTenantDto) {
+    const adminPassword = assertStrongInitialAdminPassword(dto.initialAdminPassword);
+    const timeZone = assertSupportedIanaTimeZone(dto.timeZone);
     const existing = await this.repo.findOneBy({
       code: dto.code.trim().toUpperCase(),
     });
@@ -80,17 +83,13 @@ export class TenantsService {
       // 1. Tenant
       const tenant = tenantRepository.create({
         ...this.cleanPayload(dto),
-        timeZone: assertSupportedIanaTimeZone(dto.timeZone ?? DEFAULT_TENANT_TIME_ZONE),
+        timeZone,
       });
 
       const savedTenant = await tenantRepository.save(tenant);
       await ensureSystemAdjustmentReasons(manager, Number(savedTenant.tenantId));
-      const defaultModules = [
-        ['MASTER_DATA', 'Master Data'], ['PRODUCT', 'Products'], ['SUPPLIER', 'Suppliers'],
-        ['LOCATION', 'Locations'], ['PRICING', 'Pricing'], ['USER_MANAGEMENT', 'User Management'],
-        ['INVENTORY', 'Inventory'], ['SALES', 'Sales'],
-      ];
-      for (const [code, name] of defaultModules) {
+      for (const [code, name] of AUTHORIZATION_MODULES) {
+        if (!DEFAULT_TENANT_MODULE_CODES.includes(code)) continue;
         let module = await moduleRepository.findOneBy({ code });
         if (!module) module = await moduleRepository.save(moduleRepository.create({ code, name, isActive: true }));
         await tenantModuleRepository.save(tenantModuleRepository.create({ tenantId: savedTenant.tenantId, moduleId: module.moduleId, isEnabled: true }));
@@ -112,7 +111,7 @@ export class TenantsService {
 
       // 3. First tenant user
       const passwordHash = await bcrypt.hash(
-        DEFAULT_ADMIN_PASSWORD,
+        adminPassword,
         12,
       );
 
@@ -158,7 +157,6 @@ export class TenantsService {
             isActive: savedUser.isActive,
           },
           username: DEFAULT_ADMIN_USERNAME,
-          defaultPassword: DEFAULT_ADMIN_PASSWORD,
         },
       };
     });
@@ -218,6 +216,7 @@ export class TenantsService {
 
   private cleanPayload(dto: Partial<CreateTenantDto | UpdateTenantDto | UpdateMyTenantDto>): Partial<Tenant> {
     const payload: Record<string, unknown> = { ...dto };
+    delete payload.initialAdminPassword;
     for (const key of Object.keys(payload)) {
       const value = payload[key];
       if (typeof value === 'string') payload[key] = value.trim() || null;

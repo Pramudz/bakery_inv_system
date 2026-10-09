@@ -4,6 +4,7 @@ import { AuthService } from './auth.service';
 import { BootstrapDto } from './dto/bootstrap.dto';
 import { LoginDto } from './dto/login.dto';
 import { TenantLoginDto } from './dto/tenant-login.dto';
+import { assertDevelopmentBootstrapEnabled } from './development-bootstrap';
 
 @Controller('auth')
 export class AuthController {
@@ -11,6 +12,7 @@ export class AuthController {
 
   @Post('bootstrap')
   async bootstrap(@Body() dto: BootstrapDto) {
+    assertDevelopmentBootstrapEnabled();
     return this.authService.bootstrap(dto);
   }
 

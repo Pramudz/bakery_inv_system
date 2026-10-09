@@ -104,7 +104,7 @@ test('configured local MySQL: inventory adjustment migration and posting integra
       const facade = bundle.dataSource;
       const tenants = new TenantsService(manager.getRepository(Tenant), facade, {} as any);
       const code = `ADJBOOT${++unique}`;
-      const result = await tenants.create({ code, name: 'Adjustment Bootstrap Test', isActive: true, timeZone: 'Asia/Colombo' });
+      const result = await tenants.create({ code, name: 'Adjustment Bootstrap Test', isActive: true, timeZone: 'Asia/Colombo', initialAdminPassword: 'TestBootstrap9!' });
       const reasons = await manager.getRepository(InventoryAdjustmentReason).findBy({ tenantId: Number(result.tenant.tenantId), isSystemReason: true });
       assert.equal(reasons.length, 8);
       assert.deepEqual(reasons.map(row => row.code).sort(), SYSTEM_ADJUSTMENT_REASONS.map(row => row[0]).sort());
