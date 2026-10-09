@@ -31,7 +31,7 @@ export const IMPORT_SPECS: Record<Master, { title: string; filename: string; cod
   ] },
   suppliers: { title: 'Supplier Master', filename: 'Suppliers', codeField: 'supplierCode', columns: [
     col('SupplierCode', 'supplierCode', 'Optional manual code, maximum 50 characters. Leave blank for automatic SUP number.', '', { max: 50 }),
-    col('SupplierImportRef', 'supplierImportRef', 'Required when SupplierCode is blank. Stable unique reference for safe retries; maximum 100 characters.', 'SUP-REF-001', { max: 100 }),
+    col('Supplier Reference', 'supplierImportRef', 'Required when SupplierCode is blank. Use a stable unique reference such as S001; reuse it on retries. This is not the ERP Supplier Code. Maximum 100 characters.', 'S001', { max: 100 }),
     col('SupplierName', 'supplierName', 'Required; maximum 200 characters.', 'Island Wholesale Foods', { required: true, max: 200 }),
     col('IsActive', 'isActive', 'Optional TRUE or FALSE; default TRUE.', true, yesNo),
     col('ContactName', 'contactName', 'Optional; maximum 150 characters.', 'Sales Desk', { max: 150 }),

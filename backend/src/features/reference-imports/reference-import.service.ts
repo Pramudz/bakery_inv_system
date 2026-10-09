@@ -12,7 +12,7 @@ import { PriceList } from '../price-lists/price-lists.entity';
 import { Location } from '../locations/locations.entity';
 import { ReferenceImportBatch } from './reference-import-batch.entity';
 import { SupplierImportRef } from './supplier-import-ref.entity';
-import { makeWorkbook, parseWorkbook, RawImportRow, resultWorkbook } from './reference-import.excel';
+import { makeWorkbook, parseWorkbook, RawImportRow, resultDetails, resultWorkbook } from './reference-import.excel';
 import { IMPORT_SPECS, Master } from './reference-import.schema';
 import { ImportResultRow, validateImportRows } from './reference-import.validation';
 
@@ -99,7 +99,7 @@ export class ReferenceImportService {
   async results(master: Master, tenantId: number, batchId: number) {
     const batch = await this.batch(this.dataSource.manager, master, tenantId, batchId);
     if (batch.status !== 'COMPLETED') throw new BadRequestException('Confirm the import before downloading results.');
-    return resultWorkbook(JSON.parse(batch.resultsJson!));
+    return resultWorkbook(master, JSON.parse(batch.resultsJson!));
   }
 
   private async batch(manager: EntityManager, master: Master, tenantId: number, batchId: number) {
@@ -117,7 +117,7 @@ export class ReferenceImportService {
     return {
       batchId: Number(batch.batchId), master: batch.master, status: batch.status,
       counts: { create: rows.filter((r) => r.action === 'CREATE').length, skip: rows.filter((r) => r.action === 'SKIP').length, error: rows.filter((r) => r.action === 'ERROR').length },
-      rows: rows.map(({ rowNumber, action, code, errors, values }) => ({ rowNumber, action, code, errors, values })),
+      rows: rows.map(({ rowNumber, action, code, errors, details, values }) => ({ rowNumber, action, code, errors, details: batch.status === 'COMPLETED' || action === 'SKIP' ? resultDetails(batch.master as Master, { action, code, errors, details, values }) : details, values })),
     };
   }
   private async validate(master: Master, tenantId: number, raw: RawImportRow[], manager: EntityManager) {

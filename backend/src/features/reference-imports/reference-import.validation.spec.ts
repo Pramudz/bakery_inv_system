@@ -65,6 +65,17 @@ test('suppliers require a stable reference for generated codes and reuse tenant 
   assert.equal(repeated[0].code, 'SUP-000123');
 });
 
+test('new supplier header and legacy SupplierImportRef header both parse', async () => {
+  const buffer = await makeWorkbook('suppliers', true);
+  const modern = await parseWorkbook(buffer, 'suppliers');
+  assert.equal(modern[0].values.supplierImportRef, 'S001');
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as any);
+  workbook.getWorksheet('Data')!.getRow(1).getCell(2).value = 'SupplierImportRef';
+  const legacy = await parseWorkbook(Buffer.from(await workbook.xlsx.writeBuffer()), 'suppliers');
+  assert.deepEqual(legacy, modern);
+});
+
 test('price list validation prevents ambiguous defaults without changing ordinary CRUD', () => {
   const two = validateImportRows('price-lists', [
     { rowNumber: 2, values: { code: 'R1', name: 'Retail One', priceListType: 'RETAIL', isDefault: true } },

@@ -15,10 +15,12 @@ export interface ImportResultRow {
   action: 'CREATE' | 'SKIP' | 'ERROR';
   code: string;
   errors: string[];
+  details: string;
   values: Record<string, any>;
 }
 const dtos = { categories: CreateCategoryDto, brands: CreateBrandDto, units: CreateUnitOfMeasureDto, suppliers: CreateSupplierDto, 'price-lists': CreatePriceListDto, locations: CreateLocationDto };
 const norm = (value: unknown) => String(value ?? '').trim().toLocaleUpperCase('en-US');
+const singular: Record<Master, string> = { categories: 'category', brands: 'brand', units: 'unit', suppliers: 'supplier', 'price-lists': 'price list', locations: 'location' };
 
 export function validateImportRows(master: Master, raw: RawImportRow[], existing: any[], supplierRefs: Array<{ importRef: string; supplierCode: string }> = []): ImportResultRow[] {
   const spec = IMPORT_SPECS[master];
@@ -64,12 +66,12 @@ export function validateImportRows(master: Master, raw: RawImportRow[], existing
     if (master === 'suppliers') {
       if (values.supplierCode) values.supplierCode = norm(values.supplierCode);
       if (values.countryCode) values.countryCode = norm(values.countryCode);
-      if (!values.supplierCode && !values.supplierImportRef) errors.push('SupplierImportRef is required when SupplierCode is blank.');
+      if (!values.supplierCode && !values.supplierImportRef) errors.push('Supplier Reference is required when SupplierCode is blank.');
       if (values.supplierImportRef) {
         const ref = norm(values.supplierImportRef);
-        if (seenRefs.has(ref)) errors.push(`SupplierImportRef duplicates Excel row ${seenRefs.get(ref)}.`);
+        if (seenRefs.has(ref)) errors.push(`Supplier Reference duplicates Excel row ${seenRefs.get(ref)}.`);
         else seenRefs.set(ref, source.rowNumber);
-        if (values.supplierCode && existingRefs.has(ref) && norm(existingRefs.get(ref)) !== norm(values.supplierCode)) errors.push('SupplierImportRef already maps to another code.');
+        if (values.supplierCode && existingRefs.has(ref) && norm(existingRefs.get(ref)) !== norm(values.supplierCode)) errors.push('Supplier Reference already maps to another code.');
       }
     }
     if (master === 'price-lists') {
@@ -99,7 +101,16 @@ export function validateImportRows(master: Master, raw: RawImportRow[], existing
     }
     const mappedCode = !code && master === 'suppliers' && values.supplierImportRef ? existingRefs.get(norm(values.supplierImportRef)) : undefined;
     const action = errors.length ? 'ERROR' : code && existingByCode.has(norm(code)) || mappedCode ? 'SKIP' : 'CREATE';
-    results.push({ rowNumber: source.rowNumber, action, code: code || mappedCode || '', errors, values });
+    let details = '';
+    if (action === 'SKIP') {
+      const existingRow = existingByCode.get(norm(code || mappedCode));
+      const changed = existingRow && spec.columns.some((column) => column.field !== 'supplierImportRef' && values[column.field] !== undefined && norm(values[column.field]) !== norm(existingRow[column.field]));
+      details = mappedCode && !code
+        ? `Skipped: supplier reference ${values.supplierImportRef} was previously imported as ${mappedCode}.`
+        : `Skipped: ${singular[master]} code ${code} already exists.`;
+      details += changed ? ' Uploaded values differ; the existing record was not updated.' : ' Existing records are not updated.';
+    }
+    results.push({ rowNumber: source.rowNumber, action, code: code || mappedCode || '', errors, details, values });
   }
   if (master === 'categories') validateCategoryRows(results, existing);
   if (master === 'price-lists') validateDefaultPriceLists(results, existing);

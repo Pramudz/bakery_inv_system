@@ -7,4 +7,22 @@
 .reference-imports-preview h2 { margin: 0 0 8px; font-size: 16px; }
 .reference-imports-preview .table-wrap { max-height: 520px; overflow: auto; }
 .reference-imports-preview .table { min-width: 650px; }
+.reference-imports-stages { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 0; }
+.reference-imports-stages li { padding: 9px 13px; border: 1px solid #d4dce6; border-radius: 999px; color: #66758a; background: #fff; font-weight: 600; }
+.reference-imports-stages li.active { color: #174469; border-color: #8eb5d1; background: #eaf4fb; }
+.reference-imports-top { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.reference-imports-top h2 { margin: 0; }
+.reference-imports-top p { margin: 6px 0 0; }
+.reference-imports-help, .reference-imports-notice { margin: 0; padding: 12px; border-radius: 6px; background: #eef6fc; color: #254b68; }
+.reference-imports-file { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.reference-imports-status { display: flex; align-items: center; gap: 9px; font-weight: 700; color: #174469; }
+.reference-imports-spinner { display: inline-block; width: 17px; height: 17px; border: 2px solid #bed3e3; border-top-color: #174469; border-radius: 50%; animation: reference-import-spin .8s linear infinite; }
+@keyframes reference-import-spin { to { transform: rotate(360deg); } }
+.reference-imports-counts { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.reference-imports-counts span { min-width: 115px; padding: 10px 14px; border-radius: 6px; background: #f1f5f9; }
+.reference-imports-counts strong { font-size: 20px; margin-right: 4px; }
+.reference-imports-confirm { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.reference-imports-confirm p { margin: 0; }
+.reference-imports-dialog { display: grid; gap: 10px; padding: 16px 20px 20px; }
+.reference-imports-dialog p { margin: 0; }
 @media (max-width: 600px) { .reference-imports-workspace, .reference-imports-preview { padding: 14px; } .reference-imports-actions .btn { flex: 1 1 180px; } }

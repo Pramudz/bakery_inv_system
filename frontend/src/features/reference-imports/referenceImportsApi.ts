@@ -1,7 +1,7 @@
 import { apiClient } from '../../services/apiClient';
 
 export type ImportMaster = 'categories' | 'brands' | 'units' | 'suppliers' | 'price-lists' | 'locations';
-export interface ImportRow { rowNumber: number; action: 'CREATE' | 'SKIP' | 'ERROR'; code: string; errors: string[]; values: Record<string, unknown> }
+export interface ImportRow { rowNumber: number; action: 'CREATE' | 'SKIP' | 'ERROR'; code: string; errors: string[]; details: string; values: Record<string, unknown> }
 export interface ImportPreview { batchId: number; master: ImportMaster; status: 'PREVIEW' | 'COMPLETED'; counts: { create: number; skip: number; error: number }; rows: ImportRow[] }
 
 export const referenceImportsApi = {
@@ -12,5 +12,6 @@ export const referenceImportsApi = {
     return apiClient.postForm<ImportPreview>(`/reference-imports/${master}/preview`, form);
   },
   confirm: (master: ImportMaster, batchId: number) => apiClient.post<ImportPreview>(`/reference-imports/${master}/${batchId}/confirm`, {}),
+  get: (master: ImportMaster, batchId: number) => apiClient.get<ImportPreview>(`/reference-imports/${master}/${batchId}`),
   results: (master: ImportMaster, batchId: number) => apiClient.getBlob(`/reference-imports/${master}/${batchId}/results`),
 };

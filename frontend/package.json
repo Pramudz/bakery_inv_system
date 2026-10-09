@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --test src/features/categories/*.test.mjs src/features/documents/*.test.mjs src/features/sales/pages/*.test.mjs src/pages/*.test.mjs",
+    "test": "node --test src/features/categories/*.test.mjs src/features/documents/*.test.mjs src/features/reference-imports/*.test.mjs src/features/sales/pages/*.test.mjs src/pages/*.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -18,6 +18,8 @@
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.2",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.2",
     "prettier": "^3.9.6",
     "typescript": "^5.9.2",
     "vite": "^7.1.3"
