@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "nest build",
+    "generate:reference-import-files": "npm run build && node scripts/generate-reference-import-files.cjs",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
@@ -30,6 +31,7 @@
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
+    "exceljs": "^4.4.0",
     "mysql2": "^3.14.4",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",

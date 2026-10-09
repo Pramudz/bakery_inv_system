@@ -81,24 +81,24 @@ export class SupplierService {
   async create(dto: CreateSupplierDto, tenantId: number) {
     try {
       const supplierId = await this.dataSource.transaction(async (manager) => {
-        const repository = manager.getRepository(Supplier);
-        const manualCode = this.normalizeCode(dto.supplierCode);
-        let supplierCode: string;
-        if (manualCode) {
-          if (await repository.findOneBy({ tenantId, supplierCode: manualCode })) throw new ConflictException('Supplier code already exists for this tenant.');
-          supplierCode = manualCode;
-        } else supplierCode = await this.nextAvailableCode(manager, tenantId);
-        const supplier = await repository.save(repository.create({
-          tenantId,
-          supplierCode,
-          ...this.directPayload(dto),
-        }));
+        const supplier = await this.createWithManager(dto, tenantId, manager);
         return supplier.supplierId;
       });
       return this.findOne(Number(supplierId), tenantId);
     } catch (error) {
       this.rethrowConstraint(error);
     }
+  }
+
+  async createWithManager(dto: CreateSupplierDto, tenantId: number, manager: EntityManager): Promise<Supplier> {
+    const repository = manager.getRepository(Supplier);
+    const manualCode = this.normalizeCode(dto.supplierCode);
+    let supplierCode: string;
+    if (manualCode) {
+      if (await repository.findOneBy({ tenantId, supplierCode: manualCode })) throw new ConflictException('Supplier code already exists for this tenant.');
+      supplierCode = manualCode;
+    } else supplierCode = await this.nextAvailableCode(manager, tenantId);
+    return repository.save(repository.create({ tenantId, supplierCode, ...this.directPayload(dto) }));
   }
 
   async update(id: number, dto: UpdateSupplierDto, tenantId: number) {

@@ -20,6 +20,7 @@ export class ApiError extends Error {
 async function request<T>(
   path: string,
   options: RequestInit = {},
+  binary = false,
 ): Promise<T> {
   const headers = new Headers(options.headers);
 
@@ -42,6 +43,8 @@ async function request<T>(
     ...options,
     headers,
   });
+
+  if (binary && response.ok) return await response.blob() as T;
 
   const contentType =
     response.headers.get('content-type') ?? '';
@@ -79,6 +82,7 @@ async function request<T>(
 export const apiClient = {
   get: <T>(path: string) =>
     request<T>(path),
+  getBlob: (path: string) => request<Blob>(path, {}, true),
 
   post: <T>(
     path: string,
