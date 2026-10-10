@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, ParseEnumPipe, ParseIntPipe, Post, Query, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseEnumPipe, ParseIntPipe, ParseUUIDPipe, Post, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { TenantPrincipal } from '../auth/auth.types';
 import { TenantAuthGuard } from '../auth/tenant-auth.guard';
@@ -28,6 +28,7 @@ export class InvoicesController {
   @Get('payment-breakdown') @RequirePermission('SALES_INVOICE_VIEW') paymentBreakdown(@CurrentUser() user: TenantPrincipal) { return this.service.paymentBreakdown(user); }
   @Get('history') @RequirePermission('SALES_INVOICE_VIEW') history(@Query('page') page: string, @Query('limit') limit: string, @Query('search') search: string, @Query('recordType') recordType: string, @Query('status') status: string, @CurrentUser() user: TenantPrincipal) { return this.service.history(user, Number(page), Number(limit), search ?? '', recordType ?? 'ALL', status ?? 'ALL'); }
   @Post(':id/payments') @RequirePermission('SALES_PAYMENT_COLLECT') receivePayment(@Param('id', ParseIntPipe) id: number, @Body() dto: ReceiveInvoicePaymentDto, @Headers('x-pos-terminal-credential') credential: string | undefined, @CurrentUser() user: TenantPrincipal) { return this.service.receivePayment(id, dto, user, credential); }
+  @Get(':id/payments/by-key/:key') @RequirePermission('SALES_PAYMENT_COLLECT') collectionOutcome(@Param('id', ParseIntPipe) id: number, @Param('key', new ParseUUIDPipe({ version: '4' })) key: string, @CurrentUser() user: TenantPrincipal) { return this.service.collectionOutcome(id, key, user); }
   @Get(':id') @RequirePermission('SALES_INVOICE_VIEW') get(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.get(id, user); }
   @Post(':id/reprint') @RequirePermission('SALES_INVOICE_VIEW') reprint(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: TenantPrincipal) { return this.service.reprint(id, user); }
   @Post() @RequirePermission('SALES_BILLING') create(@Body() dto: CreateInvoiceDto, @Headers('x-pos-terminal-credential') credential: string | undefined, @CurrentUser() user: TenantPrincipal) { return this.service.create(dto, user, credential); }

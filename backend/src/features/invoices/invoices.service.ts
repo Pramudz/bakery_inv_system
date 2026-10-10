@@ -104,6 +104,7 @@ export class InvoicesService {
   }
 
   async receivePayment(id: number, dto: ReceiveInvoicePaymentDto, user: TenantPrincipal, credential?: string) {
+    if (!dto.collectionKey) throw new BadRequestException('A collection key is required for retry-safe posting.');
     if (!Number.isFinite(dto.amount) || dto.amount <= 0 || money(dto.amount) !== dto.amount) {
       throw new BadRequestException('Payment amount must be positive with at most two decimal places.');
     }
@@ -114,15 +115,15 @@ export class InvoicesService {
       if (user.accessScope === 'LOCATION' && !user.assignedLocationIds.map(Number).includes(Number(invoice.locationId))) {
         throw new ForbiddenException('You do not have access to this location.');
       }
-      const activeSession = await this.posSessions.requireCashierSession(manager, credential, user, invoice.locationId, true);
       const repo = manager.getRepository(InvoicePayment);
       const existing = await repo.findOneBy({ invoiceId: invoice.invoiceId, collectionKey: dto.collectionKey });
       if (existing) {
-        if (Number(existing.posCashierSessionId ?? 0) !== Number(activeSession.cashierSession.posCashierSessionId) || Number(existing.tenderedAmount) !== dto.amount || Number(existing.paymentMethodId) !== dto.paymentMethodId || Number(existing.paymentChannelId ?? 0) !== Number(dto.paymentChannelId ?? 0) || existing.referenceNumber !== (dto.referenceNumber?.trim() || null)) {
-          throw new BadRequestException('This receipt request was already used for a different payment. Refresh and try again.');
-        }
+        this.assertCollectionRetry(existing, dto, user);
         return existing;
       }
+      const reusedElsewhere = await repo.findOne({ where: { collectionKey: dto.collectionKey, invoice: { tenantId: user.tenantId } }, relations: { invoice: true } });
+      if (reusedElsewhere) throw new ConflictException('This collection key was already used for another invoice.');
+      const activeSession = await this.posSessions.requireCashierSession(manager, credential, user, invoice.locationId, true);
       if (!['COMPLETED', 'PARTIALLY_REFUNDED'].includes(invoice.invoiceStatus)) throw new BadRequestException('This invoice cannot receive payments.');
       if (!invoice.customerId || !(await manager.getRepository(Customer).findOneBy({ customerId: invoice.customerId, tenantId: user.tenantId }))) {
         throw new BadRequestException('A customer-owned invoice is required for a later collection. Historical anonymous balances remain read-only.');
@@ -150,6 +151,28 @@ export class InvoicesService {
       await invoiceRepo.save(invoice);
       return payment;
     });
+  }
+
+  async collectionOutcome(id: number, key: string, user: TenantPrincipal) {
+    const invoice = await this.dataSource.getRepository(Invoice).findOneBy({ invoiceId: id, tenantId: user.tenantId });
+    if (!invoice) throw new NotFoundException('Invoice not found.');
+    this.assertLocationAccess(invoice.locationId, user);
+    const payment = await this.dataSource.getRepository(InvoicePayment).findOne({
+      where: { invoiceId: id, collectionKey: key },
+      relations: { invoice: { customer: true, location: true }, paymentMethod: true, paymentChannel: true },
+    });
+    if (!payment) throw new NotFoundException('Collection outcome not found.');
+    return payment;
+  }
+
+  private assertCollectionRetry(existing: InvoicePayment, dto: ReceiveInvoicePaymentDto, user: TenantPrincipal) {
+    if (Number(existing.createdByUserId) !== Number(user.userId)
+      || Number(existing.tenderedAmount) !== dto.amount
+      || Number(existing.paymentMethodId) !== dto.paymentMethodId
+      || Number(existing.paymentChannelId ?? 0) !== Number(dto.paymentChannelId ?? 0)
+      || existing.referenceNumber !== (dto.referenceNumber?.trim() || null)) {
+      throw new ConflictException('This collection key was already used for different payment data.');
+    }
   }
 
   list(user: TenantPrincipal) {

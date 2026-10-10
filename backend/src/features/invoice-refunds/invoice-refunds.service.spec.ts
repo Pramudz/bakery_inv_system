@@ -39,10 +39,10 @@ function fixture(paidAmount = '20') {
     : entity === Location ? { findOneByOrFail: async () => ({ locationId: 3, tenantId: 1, code: 'BANDA', name: 'Bandaragama', addressLine1: 'Main Road' }) }
     : entity === User ? { findOneByOrFail: async () => ({ userId: 1, tenantId: 1, username: 'C17', firstName: 'Cashier' }) }
     : entity === Invoice
-    ? { findOne: async () => invoice, save: async (value: any) => Object.assign(invoice, value) }
+    ? { findOne: async () => invoice, findOneBy: async (where: any) => Number(where.invoiceId) === 1 && Number(where.tenantId) === 1 ? invoice : null, save: async (value: any) => Object.assign(invoice, value) }
     : entity === InvoiceRefund ? {
       find: async () => refunds,
-      findOneBy: async ({ refundKey }: any) => refunds.find((row) => row.refundKey === refundKey) ?? null,
+      findOneBy: async ({ refundKey, tenantId }: any) => refunds.find((row) => row.refundKey === refundKey && (tenantId === undefined || Number(row.tenantId) === Number(tenantId))) ?? null,
       create: (value: any) => value,
       save: async (value: any) => {
         if (!value.invoiceRefundId) { value.invoiceRefundId = 10; value.payments = []; refunds.push(value); }
@@ -166,6 +166,24 @@ test('cash refund payouts are reflected in the recalculated balance', async () =
   assert.equal(cashMovements.length, 1, 'retry does not post a second payout');
   assert.equal(refunds.filter((row) => row.refundKey === refundKey).length, 1);
   await assert.rejects(service.create({ refundKey, invoiceId: 1, reason: 'Changed retry', details: [{ invoiceDetailId: 12, quantity: 1, returnToStock: false }], payments: [{ paymentMethodId: 1, amount: 10 }] }, user), /different refund data/i);
+});
+
+test('refund outcome lookup returns the committed result without another payout and enforces scope', async () => {
+  const { service, user, refunds, cashMovements } = fixture();
+  const key = '6bc73c10-e974-4121-accc-b8295a294a78';
+  const dto = { refundKey: key, invoiceId: 1, reason: 'Partial return', details: [{ invoiceDetailId: 12, quantity: 1, returnToStock: false }], payments: [{ paymentMethodId: 1, amount: 10 }] };
+  const first = await service.create(dto, user);
+  const outcome = await service.outcomeByKey(1, key, user);
+  assert.equal(outcome?.invoiceRefundId, first?.invoiceRefundId);
+  assert.equal(refunds.filter((row) => row.refundKey === key).length, 1);
+  assert.equal(cashMovements.length, 1);
+  await assert.rejects(service.outcomeByKey(1, key, { ...user, tenantId: 9 }), /not found/i);
+  await assert.rejects(service.outcomeByKey(1, key, { ...user, accessScope: 'LOCATION', assignedLocationIds: [] }), /access/i);
+  await assert.rejects(service.outcomeByKey(2, key, user), /not found/i);
+});
+
+test('refund outcome endpoint requires refund creation permission', () => {
+  assert.equal(Reflect.getMetadata(REQUIRE_PERMISSION, InvoiceRefundsController.prototype.outcomeByKey), 'SALES_REFUND_CREATE');
 });
 
 test('reversing a payment restores the accurate outstanding balance', async () => {
