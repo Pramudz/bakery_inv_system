@@ -58,6 +58,7 @@ import { InventoryAgingModule } from './features/inventory-aging/inventory-aging
 import { StockTransfersModule } from './features/stock-transfers/stock-transfers.module';
 import { ReferenceImportModule } from './features/reference-imports/reference-import.module';
 import { ProductImportModule } from './features/product-imports/product-import.module';
+import { OpeningInventoryImportModule } from './features/opening-inventory-imports/opening-inventory-import.module';
 
 
 @Module({
@@ -95,6 +96,7 @@ import { ProductImportModule } from './features/product-imports/product-import.m
     StockTransfersModule,
     ReferenceImportModule,
     ProductImportModule,
+    OpeningInventoryImportModule,
     AuthModule,
     TenantsModule,
     UsersModule,

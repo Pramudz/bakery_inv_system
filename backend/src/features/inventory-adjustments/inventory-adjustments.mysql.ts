@@ -26,6 +26,7 @@ import { User } from '../users/user.entity';
 import { InventoryAdjustmentLine } from './inventory-adjustment-line.entity';
 import { InventoryAdjustmentReason } from './inventory-adjustment-reason.entity';
 import { InventoryAdjustment } from './inventory-adjustment.entity';
+import { InventoryOpeningClaim } from './inventory-opening-claim.entity';
 import { InventoryAdjustmentReasonsService, SYSTEM_ADJUSTMENT_REASONS } from './inventory-adjustment-reasons.service';
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
 
@@ -96,17 +97,17 @@ test('configured local MySQL: inventory adjustment migration and posting integra
       const tenantCount = await ds.getRepository(Tenant).count();
       assert.equal(seeded.length, tenantCount);
       const expectedCodes = SYSTEM_ADJUSTMENT_REASONS.map(row => row[0]).sort().join(',');
-      for (const row of seeded) { assert.equal(Number(row.systemCount), 8); assert.equal(row.codes, expectedCodes); }
+      for (const row of seeded) { assert.equal(Number(row.systemCount), SYSTEM_ADJUSTMENT_REASONS.length); assert.equal(row.codes, expectedCodes); }
       t.diagnostic(JSON.stringify({ database: db, columns, indexes, foreignKeyNames: [...fkNames].sort(), seededTenants: seeded.length }));
     });
 
-    await withRollback('new tenant bootstrap immediately creates eight protected system reasons', async (manager, bundle) => {
+    await withRollback('new tenant bootstrap immediately creates protected system reasons', async (manager, bundle) => {
       const facade = bundle.dataSource;
       const tenants = new TenantsService(manager.getRepository(Tenant), facade, {} as any);
       const code = `ADJBOOT${++unique}`;
       const result = await tenants.create({ code, name: 'Adjustment Bootstrap Test', isActive: true, timeZone: 'Asia/Colombo', initialAdminPassword: 'TestBootstrap9!' });
       const reasons = await manager.getRepository(InventoryAdjustmentReason).findBy({ tenantId: Number(result.tenant.tenantId), isSystemReason: true });
-      assert.equal(reasons.length, 8);
+      assert.equal(reasons.length, SYSTEM_ADJUSTMENT_REASONS.length);
       assert.deepEqual(reasons.map(row => row.code).sort(), SYSTEM_ADJUSTMENT_REASONS.map(row => row[0]).sort());
       assert.ok(reasons.every(row => row.isActive));
     });
@@ -174,15 +175,19 @@ test('configured local MySQL: inventory adjustment migration and posting integra
       await assert.rejects(() => manager.query('UPDATE tbl_inventory_balance SET average_cost=NULL WHERE inventory_balance_id=?', [zeroBalance.inventoryBalanceId]), /cannot be null/i);
     });
 
-    await withRollback('Scenario E: opening inventory uses explicit manual cost, including intentional zero', async (manager, bundle) => {
+    await withRollback('Scenario E: opening inventory requires positive cost and creates a once-only claim', async (manager, bundle) => {
       const f = await fixture(manager, bundle.reasons, 2);
       const valued = await create(bundle.adjustments, f, 'ADJI', f.reason.OPENING_INVENTORY, [{ product: 0, unit: 'base', quantity: '100', unitCost: '450' }]);
-      const zero = await create(bundle.adjustments, f, 'ADJI', f.reason.OPENING_INVENTORY, [{ product: 1, unit: 'base', quantity: '5', unitCost: '0' }]);
       await bundle.adjustments.post(Number(valued.inventoryAdjustmentId), {}, f.user);
-      await bundle.adjustments.post(Number(zero.inventoryAdjustmentId), {}, f.user);
-      const a = await posted(manager, valued), b = await posted(manager, zero);
+      const a = await posted(manager, valued);
       assert.deepEqual([a.balance().quantityOnHand, a.balance().averageCost, a.lines[0].unitCost, a.lines[0].inventoryValue], ['100.0000', '450.0000', '450.0000', '45000.0000']);
-      assert.deepEqual([b.balance().quantityOnHand, b.balance().averageCost, b.lines[0].unitCost, b.lines[0].inventoryValue], ['5.0000', '0.0000', '0.0000', '0.0000']);
+      assert.ok(await manager.getRepository(InventoryOpeningClaim).findOneBy({ tenantId: f.tenantId,
+        productId: f.products[0].productId, locationId: f.location.locationId }));
+      await assert.rejects(create(bundle.adjustments, f, 'ADJI', f.reason.OPENING_INVENTORY,
+        [{ product: 1, unit: 'base', quantity: '5', unitCost: '0' }]), /positive base-unit cost/);
+      const second = await create(bundle.adjustments, f, 'ADJI', f.reason.OPENING_INVENTORY,
+        [{ product: 0, unit: 'base', quantity: '1', unitCost: '450' }]);
+      await assert.rejects(bundle.adjustments.post(Number(second.inventoryAdjustmentId), {}, f.user), /only once/);
     });
 
     await withRollback('Scenario F: CASE and decimal ProductUnit conversion persist exact base quantities and values', async (manager, bundle) => {
@@ -418,6 +423,7 @@ async function inventoryTotals(manager: EntityManager) {
     (SELECT COUNT(*) FROM tbl_inventory_balance) balances,
     (SELECT COUNT(*) FROM tbl_inventory_ledger) ledgers,
     (SELECT COUNT(*) FROM tbl_inventory_age_layer) layers,
+    (SELECT COUNT(*) FROM tbl_inventory_opening_claim) openingClaims,
     (SELECT COALESCE(SUM(quantity_on_hand),0) FROM tbl_inventory_balance) totalQuantity,
     (SELECT COALESCE(SUM(remaining_quantity),0) FROM tbl_inventory_age_layer) remainingLayers`);
   return row;

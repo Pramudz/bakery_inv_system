@@ -9,13 +9,14 @@ import { InventoryAdjustmentReason } from './inventory-adjustment-reason.entity'
 import { InventoryAdjustmentReasonsController } from './inventory-adjustment-reasons.controller';
 import { InventoryAdjustmentReasonsService } from './inventory-adjustment-reasons.service';
 import { InventoryAdjustment } from './inventory-adjustment.entity';
+import { InventoryOpeningClaim } from './inventory-opening-claim.entity';
 import { InventoryAdjustmentsController } from './inventory-adjustments.controller';
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([InventoryAdjustment, InventoryAdjustmentLine, InventoryAdjustmentReason]), InventoryBalanceModule, InventoryLedgerModule, InventoryAgeLayerModule, NumberSequencesModule],
+  imports: [TypeOrmModule.forFeature([InventoryAdjustment, InventoryAdjustmentLine, InventoryAdjustmentReason, InventoryOpeningClaim]), InventoryBalanceModule, InventoryLedgerModule, InventoryAgeLayerModule, NumberSequencesModule],
   controllers: [InventoryAdjustmentsController, InventoryAdjustmentReasonsController],
   providers: [InventoryAdjustmentsService, InventoryAdjustmentReasonsService],
-  exports: [InventoryAdjustmentReasonsService],
+  exports: [InventoryAdjustmentReasonsService, InventoryAdjustmentsService],
 })
 export class InventoryAdjustmentsModule {}

@@ -13,6 +13,17 @@ export class InventoryBalanceService {
       .getOne();
   }
 
+  // A missing balance row cannot be locked. Reserve its unique key in the
+  // caller's transaction so inbound writers and opening stock serialize.
+  async lockOrCreateZero(manager: EntityManager, tenantId: number, locationId: number, productId: number) {
+    await manager.query(`INSERT INTO tbl_inventory_balance
+      (tenant_id, location_id, product_id, quantity_on_hand, average_cost, created_at)
+      VALUES (?, ?, ?, 0, 0, CURRENT_TIMESTAMP)
+      ON DUPLICATE KEY UPDATE inventory_balance_id = inventory_balance_id`,
+      [tenantId, locationId, productId]);
+    return (await this.lock(manager, tenantId, locationId, productId))!;
+  }
+
   adjustmentSnapshot(balance: Pick<InventoryBalance, 'quantityOnHand' | 'averageCost'> | null, quantity: string, unitCost: string, direction: 'IN' | 'OUT') {
     const before = units(balance?.quantityOnHand ?? '0');
     const averageBefore = units(balance?.averageCost ?? '0');

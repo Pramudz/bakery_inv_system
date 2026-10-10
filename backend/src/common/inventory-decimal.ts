@@ -40,6 +40,11 @@ export function baseQuantity(quantity: string, conversionFactor: string) {
   return checked(roundDivide(units(quantity) * factor, 1_000_000n));
 }
 
+export function hasExactBaseQuantity(quantity: string, conversionFactor: string) {
+  const factor = decimal6(conversionFactor);
+  return factor > 0n && units(quantity) * factor % 1_000_000n === 0n;
+}
+
 // Divides one DECIMAL(18,4) value by another and returns DECIMAL(18,4).
 export function divide4(value: bigint, divisor: bigint) {
   if (divisor === 0n) throw new ConflictException("Inventory decimal division by zero.");
