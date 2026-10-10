@@ -47,4 +47,5 @@ export class ProductSupplierLinkInputDto {
   @IsInt() supplierId!: number;
   @IsOptional() @IsBoolean() isPrimarySupplier?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() baselineLeadTimeDays?: number;
 }

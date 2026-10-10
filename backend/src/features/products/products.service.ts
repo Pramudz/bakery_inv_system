@@ -323,8 +323,11 @@ export class ProductService {
   }
 
   async create(dto: CreateProductDto, user: TenantPrincipal) {
+    return this.dataSource.transaction((manager) => this.createWithManager(dto, user, manager));
+  }
+
+  async createWithManager(dto: CreateProductDto, user: TenantPrincipal, manager: EntityManager) {
     const tenantId = user.tenantId;
-    return this.dataSource.transaction(async (manager) => {
       const clock = await tenantBusinessClock(manager, tenantId, new Date());
       const createDto: CreateProductDto = {
         ...dto,
@@ -415,7 +418,6 @@ export class ProductService {
         clock.now,
       );
       return this.findOneWithManager(manager, productId, tenantId);
-    });
   }
 
   private withInitialSupplierBusinessDate(
@@ -537,7 +539,7 @@ export class ProductService {
     this.assertNoDuplicates(
       (dto.prices ?? []).map(
         (row) =>
-          `${row.priceListId}:${row.unitId}:${(row.currencyCode || "LKR").toUpperCase()}:1:${new Date(row.effectiveFrom).toISOString()}`,
+          `${row.priceListId}:${row.unitId}:${(row.currencyCode || "LKR").toUpperCase()}:${row.minimumQuantity ?? 1}:${new Date(row.effectiveFrom).toISOString()}`,
       ),
       "Duplicate price list item.",
     );
@@ -572,7 +574,7 @@ export class ProductService {
         this.assertNoDuplicates(
           unit.prices.map(
             (price) =>
-              `${(price.currencyCode || "LKR").toUpperCase()}:1:${price.effectiveFrom ?? "ON_CREATE"}`,
+              `${(price.currencyCode || "LKR").toUpperCase()}:${price.minimumQuantity ?? 1}:${price.effectiveFrom ?? "ON_CREATE"}`,
           ),
           "Duplicate supplier price.",
         );
@@ -635,6 +637,7 @@ export class ProductService {
         (row) =>
           current(row) &&
           Number(row.sellingPrice) > 0 &&
+          Number(row.minimumQuantity ?? 1) <= 1 &&
           Number(row.unitId) === Number(baseUnit?.unitId),
       )
     )
@@ -727,8 +730,9 @@ export class ProductService {
     id: number,
     dto: UpdateProductGeneralDto,
     tenantId: number,
+    transaction?: EntityManager,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    const work = async (manager: EntityManager) => {
       const product = await this.assertProductOwner(manager, id, tenantId);
       if (dto.categoryId !== undefined)
         await this.assertTenantReferences(
@@ -752,15 +756,17 @@ export class ProductService {
       await manager.getRepository(Product).save(product);
       await assertProductOperationalReadiness(manager, id, tenantId);
       return this.findOneWithManager(manager, id, tenantId);
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
   async updateUnits(
     id: number,
     units: NonNullable<CreateProductDto["productUnits"]>,
     tenantId: number,
+    transaction?: EntityManager,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    const work = async (manager: EntityManager) => {
       await this.assertProductOwner(manager, id, tenantId);
       await this.assertTenantReferences(
         manager,
@@ -773,27 +779,31 @@ export class ProductService {
       await this.syncProductUnits(manager, id, units);
       await assertProductOperationalReadiness(manager, id, tenantId);
       return this.findOneWithManager(manager, id, tenantId);
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
   async updateIdentifiers(
     id: number,
     identifiers: NonNullable<CreateProductDto["identifiers"]>,
     tenantId: number,
+    transaction?: EntityManager,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    const work = async (manager: EntityManager) => {
       await this.assertProductOwner(manager, id, tenantId);
       await this.syncIdentifiers(manager, id, tenantId, identifiers);
       return this.findOneWithManager(manager, id, tenantId);
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
   async updateLocations(
     id: number,
     locations: NonNullable<CreateProductDto["locations"]>,
     tenantId: number,
+    transaction?: EntityManager,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    const work = async (manager: EntityManager) => {
       await this.assertProductOwner(manager, id, tenantId);
       await this.assertTenantReferences(
         manager,
@@ -806,15 +816,17 @@ export class ProductService {
       await this.syncLocations(manager, id, locations);
       await assertProductOperationalReadiness(manager, id, tenantId);
       return this.findOneWithManager(manager, id, tenantId);
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
   async updateAttributes(
     id: number,
     attributes: NonNullable<CreateProductDto["productAttributes"]>,
     tenantId: number,
+    transaction?: EntityManager,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    const work = async (manager: EntityManager) => {
       await this.assertProductOwner(manager, id, tenantId);
       await this.assertTenantReferences(
         manager,
@@ -826,15 +838,17 @@ export class ProductService {
       );
       await this.syncAttributes(manager, id, attributes);
       return this.findOneWithManager(manager, id, tenantId);
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
   async updateSupplierLinks(
     id: number,
     suppliers: ProductSupplierLinkInputDto[],
     tenantId: number,
+    transaction?: EntityManager,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    const work = async (manager: EntityManager) => {
       await this.assertProductOwner(manager, id, tenantId);
       await this.assertTenantReferences(
         manager,
@@ -847,7 +861,8 @@ export class ProductService {
       await this.syncSupplierLinks(manager, id, suppliers);
       await assertProductOperationalReadiness(manager, id, tenantId);
       return this.findOneWithManager(manager, id, tenantId);
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
   private async findOneWithManager(
@@ -1262,6 +1277,7 @@ export class ProductService {
       | "productId"
       | "priceListId"
       | "productUnitId"
+      | "currencyCode"
       | "minimumQuantity"
     >,
     now: Date,
@@ -1272,6 +1288,7 @@ export class ProductService {
         productId: target.productId,
         priceListId: target.priceListId,
         productUnitId: target.productUnitId,
+        currencyCode: target.currencyCode,
         minimumQuantity: target.minimumQuantity,
         isActive: true,
       },
@@ -1286,12 +1303,13 @@ export class ProductService {
     dto: PublishSellingPricesDto,
     tenantId: number,
     userId = 0,
+    transaction?: EntityManager,
   ) {
     if (!dto.actions.length)
       throw new BadRequestException(
         "At least one draft price action is required.",
       );
-    await this.dataSource.transaction(async (manager) => {
+    const work = async (manager: EntityManager) => {
       await this.assertProductOwner(manager, productId, tenantId);
       const targetedIds = dto.actions
         .map((action) => action.priceListItemId)
@@ -1309,7 +1327,9 @@ export class ProductService {
           userId,
         );
       await assertProductOperationalReadiness(manager, productId, tenantId);
-    });
+    };
+    if (transaction) { await work(transaction); return null; }
+    await this.dataSource.transaction(work);
     return this.getSellingPriceSummary(productId, tenantId);
   }
 
@@ -1333,6 +1353,10 @@ export class ProductService {
         tenantId,
         action,
       );
+      const currencyCode = (action.currencyCode ?? priceList.currencyCode ?? 'LKR').trim().toUpperCase();
+      const minimumQuantity = action.minimumQuantity ?? 1;
+      if (!/^[A-Z]{3}$/.test(currencyCode) || !Number.isFinite(minimumQuantity) || minimumQuantity <= 0)
+        throw new BadRequestException('Valid currency and minimum quantity are required.');
       const from =
         action.effectiveMode === "SCHEDULED"
           ? this.actionDate(action.effectiveFrom, "Effective From")
@@ -1348,7 +1372,8 @@ export class ProductService {
           productId,
           priceListId: priceList.priceListId,
           productUnitId: productUnit.productUnitId,
-          minimumQuantity: "1",
+          currencyCode,
+          minimumQuantity: String(minimumQuantity),
         },
         now,
       );
@@ -1364,8 +1389,8 @@ export class ProductService {
           productUnitId: productUnit.productUnitId,
           unitId: productUnit.unitId,
           sellingPrice: String(action.price),
-          currencyCode: priceList.currencyCode || "LKR",
-          minimumQuantity: "1",
+          currencyCode,
+          minimumQuantity: String(minimumQuantity),
           effectiveFrom: from,
           effectiveTo: null,
           isActive: true,
@@ -1387,6 +1412,11 @@ export class ProductService {
       tenantId,
       action.priceListItemId,
     );
+    if ((action.currencyCode && action.currencyCode.trim().toUpperCase() !== target.currencyCode) ||
+      (action.minimumQuantity !== undefined && Number(action.minimumQuantity) !== Number(target.minimumQuantity)) ||
+      (action.priceListId !== undefined && Number(action.priceListId) !== Number(target.priceListId)) ||
+      (action.productUnitId !== undefined && Number(action.productUnitId) !== Number(target.productUnitId)))
+      throw new BadRequestException('Selling price context does not match the selected version.');
     const status = this.sellingPriceStatus(target, now);
     if (action.action === "CANCEL_FUTURE_PRICE") {
       if (status !== "FUTURE")
@@ -1763,13 +1793,14 @@ export class ProductService {
     manager: EntityManager,
     productSupplierUnitId: number,
     currencyCode: string,
+    minimumQuantity: string,
     now: Date,
   ) {
     const rows = await manager.getRepository(ProductSupplierPrice).find({
       where: {
         productSupplierUnitId,
         currencyCode,
-        minimumQuantity: "1",
+        minimumQuantity,
         isActive: true,
       },
     });
@@ -1782,12 +1813,13 @@ export class ProductService {
     productId: number,
     dto: PublishSupplierPurchasePricesDto,
     tenantId: number,
+    transaction?: EntityManager,
   ) {
     if (!dto.actions.length)
       throw new BadRequestException(
         "At least one draft purchase-price action is required.",
       );
-    await this.dataSource.transaction(async (manager) => {
+    const work = async (manager: EntityManager) => {
       await this.assertProductOwner(manager, productId, tenantId);
       const targets = dto.actions
         .map((action) => action.productSupplierPriceId)
@@ -1804,7 +1836,9 @@ export class ProductService {
           action,
         );
       await assertProductOperationalReadiness(manager, productId, tenantId);
-    });
+    };
+    if (transaction) { await work(transaction); return null; }
+    await this.dataSource.transaction(work);
     return this.getSupplierPurchasePriceSummary(productId, tenantId);
   }
 
@@ -1816,6 +1850,10 @@ export class ProductService {
   ) {
     const repo = manager.getRepository(ProductSupplierPrice);
     const now = new Date();
+    // Supplier price effective columns are DATETIME(0), so store whole-second boundaries.
+    const storedStart = (instant: Date, scheduled: boolean) =>
+      new Date((scheduled ? Math.ceil : Math.floor)(instant.getTime() / 1000) * 1000);
+    const storedEnd = (instant: Date) => new Date(Math.floor(instant.getTime() / 1000) * 1000);
     if (action.action === "ADD_INITIAL_PRICE") {
       if (!action.price || action.price <= 0)
         throw new BadRequestException(
@@ -1849,10 +1887,12 @@ export class ProductService {
         throw new BadRequestException(
           "Purchase Unit is not active for this product. Save Product Unit changes first.",
         );
-      const from =
-        action.effectiveMode === "SCHEDULED"
-          ? this.actionDate(action.effectiveFrom, "Effective From")
-          : now;
+      const currencyCode = (action.currencyCode ?? 'LKR').trim().toUpperCase();
+      const minimumQuantity = action.minimumQuantity ?? 1;
+      if (!/^[A-Z]{3}$/.test(currencyCode) || !Number.isFinite(minimumQuantity) || minimumQuantity <= 0)
+        throw new BadRequestException('Valid currency and minimum quantity are required.');
+      const from = storedStart(action.effectiveMode === "SCHEDULED"
+        ? this.actionDate(action.effectiveFrom, "Effective From") : now, action.effectiveMode === "SCHEDULED");
       if (action.effectiveMode === "SCHEDULED" && from <= now)
         throw new BadRequestException(
           "A scheduled purchase price must start in the future.",
@@ -1860,7 +1900,8 @@ export class ProductService {
       const context = await this.activeSupplierPriceContext(
         manager,
         supplierUnit.productSupplierUnitId,
-        "LKR",
+        currencyCode,
+        String(minimumQuantity),
         now,
       );
       if (context.length)
@@ -1871,8 +1912,8 @@ export class ProductService {
         repo.create({
           productSupplierUnitId: supplierUnit.productSupplierUnitId,
           purchasePrice: String(action.price),
-          currencyCode: "LKR",
-          minimumQuantity: "1",
+          currencyCode,
+          minimumQuantity: String(minimumQuantity),
           effectiveFrom: from,
           effectiveTo: null,
           isActive: true,
@@ -1886,6 +1927,10 @@ export class ProductService {
       tenantId,
       action.productSupplierPriceId,
     );
+    if ((action.currencyCode && action.currencyCode.trim().toUpperCase() !== target.currencyCode) ||
+      (action.minimumQuantity !== undefined && Number(action.minimumQuantity) !== Number(target.minimumQuantity)) ||
+      (action.productSupplierUnitId !== undefined && Number(action.productSupplierUnitId) !== Number(target.productSupplierUnitId)))
+      throw new BadRequestException('Supplier price context does not match the selected version.');
     const status = this.supplierPriceStatus(target, now);
     if (action.action === "CANCEL_FUTURE_PRICE") {
       if (status !== "FUTURE")
@@ -1907,10 +1952,8 @@ export class ProductService {
         throw new BadRequestException(
           "New purchase price must be greater than zero.",
         );
-      const from =
-        action.effectiveMode === "SCHEDULED"
-          ? this.actionDate(action.effectiveFrom, "Effective From")
-          : now;
+      const from = storedStart(action.effectiveMode === "SCHEDULED"
+        ? this.actionDate(action.effectiveFrom, "Effective From") : now, action.effectiveMode === "SCHEDULED");
       if (action.effectiveMode === "SCHEDULED" && from <= now)
         throw new BadRequestException(
           "A scheduled purchase price must start in the future.",
@@ -1923,6 +1966,7 @@ export class ProductService {
         manager,
         target.productSupplierUnitId,
         target.currencyCode,
+        target.minimumQuantity,
         now,
       );
       if (
@@ -1938,14 +1982,14 @@ export class ProductService {
         );
       await repo.update(
         { productSupplierPriceId: target.productSupplierPriceId },
-        { effectiveTo: new Date(from.getTime() - 1) },
+        { effectiveTo: new Date(from.getTime() - 1000) },
       );
       await repo.save(
         repo.create({
           productSupplierUnitId: target.productSupplierUnitId,
           purchasePrice: String(action.price),
           currencyCode: target.currencyCode,
-          minimumQuantity: "1",
+          minimumQuantity: target.minimumQuantity,
           effectiveFrom: from,
           effectiveTo: null,
           isActive: true,
@@ -1958,10 +2002,8 @@ export class ProductService {
         throw new BadRequestException(
           "Only the current purchase price can be ended.",
         );
-      const end =
-        action.effectiveMode === "NOW"
-          ? now
-          : this.actionDate(action.effectiveTo ?? undefined, "Effective End");
+      const end = storedEnd(action.effectiveMode === "NOW"
+        ? now : this.actionDate(action.effectiveTo ?? undefined, "Effective End"));
       if (end < now && action.effectiveMode !== "NOW")
         throw new BadRequestException("Effective End cannot be in the past.");
       if (end < target.effectiveFrom)
@@ -1972,6 +2014,7 @@ export class ProductService {
         manager,
         target.productSupplierUnitId,
         target.currencyCode,
+        target.minimumQuantity,
         now,
       );
       const future = context
@@ -2051,6 +2094,8 @@ export class ProductService {
         throw new BadRequestException(
           "Product unit does not belong to this product.",
         );
+      if (entity && Number(entity.conversionFactor) !== Number(row.conversionFactor) && baseUnitLocked)
+        throw new BadRequestException('Product unit conversion cannot change after transactions or stock records exist.');
       if (entity && Number(entity.unitId) !== Number(row.unitId)) {
         const reason = await this.productUnitReferenceReason(
           manager,
@@ -2263,7 +2308,7 @@ export class ProductService {
         locationId: row.locationId,
         isSellable: row.isSellable ?? true,
         isPurchasable: row.isPurchasable ?? true,
-        isActive: true,
+        isActive: row.isActive ?? true,
       });
       const saved = await repo.save(entity);
       kept.add(Number(saved.productLocationId));
@@ -2357,7 +2402,7 @@ export class ProductService {
           Number(entity.priceListId) !== Number(row.priceListId) ||
           Number(entity.unitId) !== Number(row.unitId) ||
           entity.currencyCode !== (row.currencyCode || "LKR").toUpperCase() ||
-          Number(entity.minimumQuantity) !== 1 ||
+          Number(entity.minimumQuantity) !== Number(row.minimumQuantity ?? 1) ||
           Number(entity.sellingPrice) !== Number(row.sellingPrice)
         )
           throw new BadRequestException(
@@ -2426,7 +2471,7 @@ export class ProductService {
           Number(x.priceListId) === Number(row.priceListId) &&
           Number(x.unitId) === Number(row.unitId) &&
           x.currencyCode === currency &&
-          Number(x.minimumQuantity) === 1 &&
+          Number(x.minimumQuantity) === Number(row.minimumQuantity ?? 1) &&
           x.isActive,
       );
       const laterOverlap = context.find(
@@ -2446,6 +2491,8 @@ export class ProductService {
         .sort(
           (a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime(),
         )[0];
+      if (prior && tenantId && createdBy)
+        await endDiscountsForPriceItemWithManager(manager, Number(prior.priceListItemId), tenantId, new Date(from.getTime() - 1), createdBy);
       if (prior)
         await repo.update(
           { priceListItemId: prior.priceListItemId, productId },
@@ -2476,7 +2523,7 @@ export class ProductService {
           unitId: row.unitId,
           sellingPrice: String(row.sellingPrice),
           currencyCode: currency,
-          minimumQuantity: "1",
+          minimumQuantity: String(row.minimumQuantity ?? 1),
           effectiveFrom: from,
           effectiveTo: to,
           isActive: row.isActive ?? true,
@@ -2525,6 +2572,7 @@ export class ProductService {
           supplierId: input.supplierId,
           isPrimarySupplier: input.isPrimarySupplier ?? false,
           isActive: input.isActive ?? true,
+          baselineLeadTimeDays: input.baselineLeadTimeDays ?? null,
         }),
       );
       const explicitDefault = input.units.findIndex(
@@ -2563,7 +2611,7 @@ export class ProductService {
             timeZone,
           );
           const effectiveTo = priceInput.effectiveTo
-            ? priceDateEnd(priceInput.effectiveTo, timeZone)
+            ? new Date(Math.floor(priceDateEnd(priceInput.effectiveTo, timeZone).getTime() / 1000) * 1000)
             : null;
           if (effectiveTo && effectiveTo < effectiveFrom)
             throw new BadRequestException(
@@ -2575,6 +2623,7 @@ export class ProductService {
               (row) =>
                 row.isActive &&
                 row.currencyCode === currencyCode &&
+                Number(row.minimumQuantity) === Number(priceInput.minimumQuantity ?? 1) &&
                 periodsOverlap(
                   row.effectiveFrom,
                   row.effectiveTo,
@@ -2591,7 +2640,7 @@ export class ProductService {
               productSupplierUnitId: supplierUnit.productSupplierUnitId,
               purchasePrice: String(priceInput.purchasePrice),
               currencyCode,
-              minimumQuantity: "1",
+              minimumQuantity: String(priceInput.minimumQuantity ?? 1),
               effectiveFrom,
               effectiveTo,
               isActive: priceInput.isActive ?? true,
@@ -2646,6 +2695,7 @@ export class ProductService {
         isPrimarySupplier:
           row.isActive === false ? false : (row.isPrimarySupplier ?? false),
         isActive: row.isActive ?? true,
+        baselineLeadTimeDays: row.baselineLeadTimeDays ?? link.baselineLeadTimeDays ?? null,
       });
       const saved = await repository.save(link);
       kept.add(Number(saved.productSupplierId));

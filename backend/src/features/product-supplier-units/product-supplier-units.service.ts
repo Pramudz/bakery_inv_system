@@ -93,8 +93,8 @@ export class ProductSupplierUnitsService {
     }
   }
 
-  async create(dto: CreateProductSupplierUnitDto, tenantId: number) {
-    return this.dataSource.transaction(async (manager) => {
+  async create(dto: CreateProductSupplierUnitDto, tenantId: number, transaction?: EntityManager) {
+    const work = async (manager: EntityManager) => {
       const supplierLink = await manager
         .getRepository(ProductSupplier)
         .findOne({
@@ -186,15 +186,17 @@ export class ProductSupplierUnitsService {
       );
 
       return saved;
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
   async update(
     id: number,
     dto: UpdateProductSupplierUnitDto,
     tenantId: number,
+    transaction?: EntityManager,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    const work = async (manager: EntityManager) => {
       const repository = manager.getRepository(ProductSupplierUnit);
       const current = await this.findOneWithRepository(repository, id, tenantId);
       if (!current) throw new NotFoundException('Supplier purchase unit not found.');
@@ -240,11 +242,12 @@ export class ProductSupplierUnitsService {
       );
 
       return this.findOneWithRepository(repository, id, tenantId);
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
-  async deactivate(id: number, tenantId: number) {
-    return this.dataSource.transaction(async (manager) => {
+  async deactivate(id: number, tenantId: number, transaction?: EntityManager) {
+    const work = async (manager: EntityManager) => {
       const repository = manager.getRepository(ProductSupplierUnit);
       const current = await this.findOneWithRepository(repository, id, tenantId);
       if (!current) throw new NotFoundException('Supplier purchase unit not found.');
@@ -269,11 +272,12 @@ export class ProductSupplierUnitsService {
       );
 
       return this.findOneWithRepository(repository, id, tenantId);
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
-  async activate(id: number, tenantId: number) {
-    return this.dataSource.transaction(async (manager) => {
+  async activate(id: number, tenantId: number, transaction?: EntityManager) {
+    const work = async (manager: EntityManager) => {
       const repository = manager.getRepository(ProductSupplierUnit);
       const current = await this.findOneWithRepository(repository, id, tenantId);
       if (!current) throw new NotFoundException('Supplier purchase unit not found.');
@@ -291,6 +295,7 @@ export class ProductSupplierUnitsService {
       );
 
       return this.findOneWithRepository(repository, id, tenantId);
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 }

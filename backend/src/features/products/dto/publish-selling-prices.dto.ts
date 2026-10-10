@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsDateString, IsIn, IsInt, IsNumber, IsOptional, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsDateString, IsIn, IsInt, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
 import { PublishPriceListItemDiscountDto } from '../../price-list-item-discounts/dto/price-list-item-discount.dto';
 
 export const SELLING_PRICE_ACTIONS = ['ADD_INITIAL_PRICE', 'CHANGE_PRICE', 'END_PRICE', 'CANCEL_FUTURE_PRICE'] as const;
@@ -9,6 +9,8 @@ export class SellingPriceDraftActionDto {
   @IsOptional() @IsInt() priceListItemId?: number;
   @IsOptional() @IsInt() priceListId?: number;
   @IsOptional() @IsInt() productUnitId?: number;
+  @IsOptional() @IsString() @MaxLength(3) currencyCode?: string;
+  @IsOptional() @IsNumber() @Min(0.000001) minimumQuantity?: number;
   @IsOptional() @IsNumber() @Min(0.000001) price?: number;
   @IsOptional() @IsIn(['NOW', 'SCHEDULED']) effectiveMode?: 'NOW' | 'SCHEDULED';
   @IsOptional() @IsDateString() effectiveFrom?: string;

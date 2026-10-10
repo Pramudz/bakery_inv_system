@@ -51,6 +51,7 @@ export class CreateProductIdentifierInputDto {
 export class CreateProductSupplierPriceInputDto {
   @IsNumber() @Min(0) purchasePrice!: number;
   @IsOptional() @IsString() @MaxLength(3) currencyCode?: string;
+  @IsOptional() @IsNumber() @Min(0.000001) minimumQuantity?: number;
   @IsOptional() @IsDateString() effectiveFrom?: string;
   @IsOptional() @IsDateString() effectiveTo?: string | null;
   @IsOptional() @IsBoolean() isActive?: boolean;
@@ -71,6 +72,7 @@ export class CreateProductSupplierLinkInputDto {
   @IsInt() supplierId!: number;
   @IsOptional() @IsBoolean() isPrimarySupplier?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() @Min(0) baselineLeadTimeDays?: number;
   @IsArray() @ValidateNested({ each: true }) @Type(() => CreateProductSupplierUnitInputDto)
   units!: CreateProductSupplierUnitInputDto[];
 }
@@ -80,6 +82,7 @@ export class CreateProductLocationInputDto {
   @IsInt() locationId!: number;
   @IsOptional() @IsBoolean() isSellable?: boolean;
   @IsOptional() @IsBoolean() isPurchasable?: boolean;
+  @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 export class CreateProductAttributeInputDto {
@@ -94,6 +97,7 @@ export class ProductPriceListItemInputDto {
   @IsInt() unitId!: number;
   @IsNumber() @Min(0) sellingPrice!: number;
   @IsOptional() @IsString() @MaxLength(3) currencyCode?: string;
+  @IsOptional() @IsNumber() @Min(0.000001) minimumQuantity?: number;
   @IsDateString() effectiveFrom!: string;
   @IsOptional() @IsDateString() effectiveTo?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;

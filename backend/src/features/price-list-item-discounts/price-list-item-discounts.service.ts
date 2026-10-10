@@ -114,12 +114,13 @@ export async function endDiscountsForPriceItemWithManager(manager: EntityManager
 export class PriceListItemDiscountService {
   constructor(@InjectRepository(PriceListItemDiscount) private readonly repo: Repository<PriceListItemDiscount>, private readonly dataSource: DataSource) {}
 
-  publishDiscount(priceListItemId: number, dto: PublishPriceListItemDiscountDto, tenantId: number, userId: number) {
-    return this.dataSource.transaction(async (manager) => createDiscountWithManager(manager, await lockedParent(manager, priceListItemId, tenantId), tenantId, userId, dto));
+  publishDiscount(priceListItemId: number, dto: PublishPriceListItemDiscountDto, tenantId: number, userId: number, transaction?: EntityManager) {
+    const work = async (manager: EntityManager) => createDiscountWithManager(manager, await lockedParent(manager, priceListItemId, tenantId), tenantId, userId, dto);
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
-  changeDiscount(priceListItemId: number, dto: ChangePriceListItemDiscountDto, tenantId: number, userId: number) {
-    return this.dataSource.transaction(async (manager) => {
+  changeDiscount(priceListItemId: number, dto: ChangePriceListItemDiscountDto, tenantId: number, userId: number, transaction?: EntityManager) {
+    const work = async (manager: EntityManager) => {
       const parent = await lockedParent(manager, priceListItemId, tenantId);
       const { from } = validatePriceItemDiscount(parent, dto);
       const current = await manager.getRepository(PriceListItemDiscount).createQueryBuilder('discount')
@@ -132,11 +133,12 @@ export class PriceListItemDiscountService {
       const end = new Date(from.getTime() - 1);
       await manager.getRepository(PriceListItemDiscount).update({ priceListItemDiscountId: current.priceListItemDiscountId, tenantId }, { effectiveTo: end, endedBy: userId });
       return createDiscountWithManager(manager, parent, tenantId, userId, dto);
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
-  endDiscount(discountId: number, dto: EndPriceListItemDiscountDto, tenantId: number, userId: number) {
-    return this.dataSource.transaction(async (manager) => {
+  endDiscount(discountId: number, dto: EndPriceListItemDiscountDto, tenantId: number, userId: number, transaction?: EntityManager) {
+    const work = async (manager: EntityManager) => {
       const seed = await manager.getRepository(PriceListItemDiscount).findOneBy({ priceListItemDiscountId: discountId, tenantId });
       if (!seed) throw new NotFoundException('Discount not found for this tenant.');
       const parent = await lockedParent(manager, Number(seed.priceListItemId), tenantId);
@@ -149,7 +151,8 @@ export class PriceListItemDiscountService {
       if (row.effectiveTo && end > row.effectiveTo) throw new BadRequestException('Ending a discount cannot extend its published validity.');
       await manager.getRepository(PriceListItemDiscount).update({ priceListItemDiscountId: discountId, tenantId }, { effectiveTo: end, endedBy: userId });
       return manager.getRepository(PriceListItemDiscount).findOneByOrFail({ priceListItemDiscountId: discountId, tenantId });
-    });
+    };
+    return transaction ? work(transaction) : this.dataSource.transaction(work);
   }
 
   async findActiveDiscount(priceListItemId: number, tenantId: number, at = new Date(), manager: EntityManager = this.dataSource.manager) {

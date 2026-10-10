@@ -42,6 +42,7 @@ const tenantGroups = [
     title: "Product Master",
     items: [
       ["Products", "/products"],
+      ["Product Bulk Import", "/product-bulk-import"],
       ["Categories", "/categories"],
       ["Brands", "/brands"],
       ["Units", "/units"],
@@ -119,6 +120,7 @@ const moduleForPath: Record<string, string> = {
   "/user-roles": "USER_MANAGEMENT",
   "/role-permissions": "USER_MANAGEMENT",
   "/products": "PRODUCT",
+  "/product-bulk-import": "PRODUCT",
   "/product-units": "PRODUCT",
   "/product-identifiers": "PRODUCT",
   "/product-attributes": "PRODUCT",
@@ -156,6 +158,7 @@ const viewPermissionForPath: Record<string, string> = {
   "/user-roles": "USER_VIEW",
   "/role-permissions": "ROLE_PERMISSION_VIEW",
   "/products": "PRODUCT_VIEW",
+  "/product-bulk-import": "PRODUCT_VIEW",
   "/product-units": "PRODUCT_UNIT_VIEW",
   "/product-identifiers": "PRODUCT_IDENTIFIER_VIEW",
   "/product-attributes": "PRODUCT_ATTRIBUTE_VIEW",
