@@ -57,6 +57,7 @@ import { QuotationsModule } from './features/quotations/quotations.module';
 import { InventoryAgingModule } from './features/inventory-aging/inventory-aging.module';
 import { StockTransfersModule } from './features/stock-transfers/stock-transfers.module';
 import { ReferenceImportModule } from './features/reference-imports/reference-import.module';
+import { ProductImportModule } from './features/product-imports/product-import.module';
 
 
 @Module({
@@ -93,6 +94,7 @@ import { ReferenceImportModule } from './features/reference-imports/reference-im
     InventoryAgingModule,
     StockTransfersModule,
     ReferenceImportModule,
+    ProductImportModule,
     AuthModule,
     TenantsModule,
     UsersModule,
