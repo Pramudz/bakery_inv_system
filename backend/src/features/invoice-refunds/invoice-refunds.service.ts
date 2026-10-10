@@ -61,6 +61,16 @@ export class InvoiceRefundsService {
     return row;
   }
 
+  async outcomeByKey(invoiceId: number, refundKey: string, user: TenantPrincipal) {
+    const invoice = await this.dataSource.getRepository(Invoice).findOneBy({ invoiceId, tenantId: user.tenantId });
+    if (!invoice) throw new NotFoundException('Invoice not found.');
+    this.assertLocationAccess(invoice.locationId, user);
+    const refund = await this.dataSource.getRepository(InvoiceRefund).findOneBy({ tenantId: user.tenantId, refundKey });
+    if (!refund) throw new NotFoundException('Refund outcome not found.');
+    if (Number(refund.invoiceId) !== Number(invoiceId)) throw new ConflictException('This refund key belongs to another invoice.');
+    return this.get(refund.invoiceRefundId, user);
+  }
+
   listAdjustments(user: TenantPrincipal) {
     return this.dataSource.getRepository(InvoiceAdjustment).find({ where: { tenantId: user.tenantId, ...(user.accessScope === 'LOCATION' ? { invoice: { locationId: In(user.assignedLocationIds) } } : {}) }, relations: { invoice: { customer: true }, invoiceDetail: { product: true }, paymentMethod: true }, order: { invoiceAdjustmentId: 'DESC' } });
   }
@@ -134,7 +144,7 @@ export class InvoiceRefundsService {
       const prior = await manager.getRepository(InvoiceRefund).findOneBy({ tenantId: user.tenantId, refundKey });
       if (prior) {
         this.assertLocationAccess(prior.locationId, user);
-        if (prior.refundFingerprint && prior.refundFingerprint !== refundFingerprint) throw new ConflictException('This refund key was already used for different refund data.');
+        if (prior.refundFingerprint !== refundFingerprint) throw new ConflictException('This refund key was already used for different refund data.');
         return this.getWithManager(manager, prior.invoiceRefundId, user.tenantId);
       }
       const invoice = await manager.getRepository(Invoice).findOne({ where: { invoiceId: dto.invoiceId, tenantId: user.tenantId }, relations: { details: { product: true } }, lock: { mode: 'pessimistic_write' } });

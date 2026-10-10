@@ -15,4 +15,5 @@ export const invoiceRefundsApi = {
   get: (id: number) => apiClient.get<any>(`/invoice-refunds/${id}`),
   reprint: (id: number) => apiClient.post<{ copy: boolean }>(`/invoice-refunds/${id}/reprint`, {}),
   create: (data: CreateInvoiceRefundInput) => apiClient.post<any>('/invoice-refunds', data),
+  outcome: (invoiceId: number, key: string) => apiClient.get<any>(`/invoice-refunds/by-key/${encodeURIComponent(key)}?invoiceId=${invoiceId}`),
 };

@@ -10,6 +10,12 @@ import { paymentChannelsApi } from '../api/paymentChannelsApi';
 import { SalesBadge } from './SalesUi';
 import { RefundReceiptContent } from './RefundReceiptContent';
 import { requestCompletionPrint } from './completionPrint';
+import { useAuth } from '../../auth/AuthContext';
+import { ApiError } from '../../../services/apiClient';
+import { clearRecoveryIntent, listRecoveryIntents, markRecoveryUncertain, newRecoveryIntent, saveRecoveryIntent, withRecoveryLock, type RecoveryIntent } from '../transactionRecoveryStorage';
+import type { CreateInvoiceRefundInput } from '../api/invoiceRefundsApi';
+import { posRegistersApi } from '../../pos-registers/api/posRegistersApi';
+import { recoverySubmissionMessage } from '../transactionRecoveryError';
 import './sales-history.css';
 
 type CorrectionMode = 'ITEM' | 'DISCOUNT';
@@ -20,6 +26,7 @@ const saleReference = (sale: any) => sale?.billNo == null ? 'Legacy sale' : `${s
 const refundReference = (refund: any) => refund.refundNo == null ? 'Legacy refund' : `${refund.businessDate} / ${refund.printedLocationCode} / ${String(refund.refundNo).padStart(4, '0')}`;
 
 export function RefundsPage() {
+  const { tenant, tenantUser } = useAuth();
   const queryClient = useQueryClient();
   const [params] = useSearchParams();
   const [receiptDate, setReceiptDate] = useState('');
@@ -43,7 +50,11 @@ export function RefundsPage() {
   const [limit, setLimit] = useState(20);
   const [historyMode, setHistoryMode] = useState<'REFUNDS' | 'ADJUSTMENTS'>('REFUNDS');
   const [historySearch, setHistorySearch] = useState('');
-  const [refundKey, setRefundKey] = useState(() => crypto.randomUUID());
+  const [unresolved, setUnresolved] = useState<RecoveryIntent<CreateInvoiceRefundInput>[]>([]);
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [storageError, setStorageError] = useState('');
+  const recovering = useRef(new Set<string>());
+  const refundSubmitting = useRef(false);
   const [completedRefund, setCompletedRefund] = useState<any>(null);
   const [printingRefundId, setPrintingRefundId] = useState<number | null>(null);
   const [requestedRefundId, setRequestedRefundId] = useState<number | null>(null);
@@ -128,14 +139,14 @@ export function RefundsPage() {
   useEffect(() => setSettlementAmount(settlementLimit > 0 ? settlementLimit.toFixed(2) : ''), [settlementLimit]);
 
   const resetWork = () => {
-    setQuantities({}); setStockReturns({}); setSelectedLineId(null); setCorrectedPercentage(''); setCorrectedAmount(''); setMessage(''); setRefundKey(crypto.randomUUID());
+    setQuantities({}); setStockReturns({}); setSelectedLineId(null); setCorrectedPercentage(''); setCorrectedAmount(''); setMessage('');
   };
   const loadInvoice = async () => {
     setMessage('');
     try {
       const match = await invoiceRefundsApi.lookupSale({ businessDate: receiptDate, locationCode, registerCode, billNo: Number(billNo) });
       if (match.invoiceStatus === 'FULLY_REFUNDED') { setMessage('This sale is already fully refunded.'); return; }
-      setSelectedId(match.invoiceId); resetWork();
+      setSelectedId(Number(match.invoiceId)); resetWork();
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Sale receipt was not found.'); }
   };
   const selectDiscountLine = (line: any) => {
@@ -152,13 +163,73 @@ export function RefundsPage() {
     setCorrectedPercentage(selectedLine && Number(selectedLine.grossTotal) > 0 ? (Number(value || 0) / Number(selectedLine.grossTotal) * 100).toFixed(4) : '0');
   };
 
+  const reloadIntents = () => {
+    if (!tenant?.tenantId || !tenantUser?.userId) return;
+    try {
+      setUnresolved(listRecoveryIntents<CreateInvoiceRefundInput>(localStorage, 'refund', tenant.tenantId, tenantUser.userId));
+      setStorageError('');
+    } catch (error) { setStorageError((error as Error).message); }
+  };
+  const completeIntent = (intent: RecoveryIntent<CreateInvoiceRefundInput>, result: any) => {
+    const details = result?.details ?? [];
+    const payments = result?.payments ?? [];
+    const matches = Number(result?.invoiceId) === intent.invoiceId && result?.refundKey === intent.key
+      && (intent.cashierSessionId === null || Number(result?.posCashierSessionId) === intent.cashierSessionId)
+      && (intent.registerSessionId === null || Number(result?.posRegisterSessionId) === intent.registerSessionId)
+      && String(result?.reason).trim() === intent.payload.reason.trim()
+      && details.length === intent.payload.details.length
+      && intent.payload.details.every((line) => details.some((saved: any) => Number(saved.invoiceDetailId) === line.invoiceDetailId && Number(saved.quantity) === line.quantity && Boolean(saved.returnToStock) === line.returnToStock))
+      && payments.length === intent.payload.payments.length
+      && intent.payload.payments.every((row) => payments.some((saved: any) => Number(saved.paymentMethodId) === row.paymentMethodId && Number(saved.amount) === row.amount && Number(saved.paymentChannelId ?? 0) === Number(row.paymentChannelId ?? 0) && (saved.referenceNumber ?? null) === (row.referenceNumber?.trim() || null)));
+    if (!matches) { setRecoveryMessage('The saved request does not match the server refund. Ask an authorized manager to reconcile it.'); return; }
+    clearRecoveryIntent(localStorage, intent);
+    reloadIntents();
+    setCompletedRefund(result);
+    setSelectedId(intent.invoiceId);
+    resetWork();
+    setMode('ITEM'); setReason(''); setPaymentMethodId(''); setSettlementAmount(''); setPaymentChannelId(''); setPaymentReference(''); setPrintError(''); setPrintNotice(''); setRequestedRefundId(null);
+    setRecoveryMessage('Completed refund recovered. No new payout or stock return was posted.');
+    refreshData();
+  };
+  const recoverIntent = async (intent: RecoveryIntent<CreateInvoiceRefundInput>, submittedError?: string) => {
+    if (recovering.current.has(intent.key)) return;
+    recovering.current.add(intent.key);
+    try { completeIntent(intent, await invoiceRefundsApi.outcome(intent.invoiceId, intent.key)); }
+    catch (error) {
+      setRecoveryMessage(error instanceof ApiError && error.status === 404
+        ? `${submittedError ? `${submittedError} ` : ''}The original refund is not confirmed yet. Keep its UUID and retry the original request when ready.`
+        : error instanceof ApiError && (error.status === 401 || error.status === 403)
+          ? 'Sign in with refund permission to verify this request. Its original UUID is preserved.'
+          : 'Transaction status is being verified. Please do not submit another refund until verification is complete.');
+    } finally { recovering.current.delete(intent.key); }
+  };
+  useEffect(() => {
+    if (!tenant?.tenantId || !tenantUser?.userId) return;
+    try {
+      const intents = listRecoveryIntents<CreateInvoiceRefundInput>(localStorage, 'refund', tenant.tenantId, tenantUser.userId);
+      setUnresolved(intents); setStorageError('');
+      for (const intent of intents) void recoverIntent(intent);
+    } catch (error) { setStorageError((error as Error).message); }
+    const changed = () => reloadIntents();
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, [tenant?.tenantId, tenantUser?.userId]);
+
   const createRefund = useMutation({
-    mutationFn: () => invoiceRefundsApi.create({
-      refundKey, invoiceId: selectedId!, reason,
-      details: (invoice.data?.details ?? []).filter((line: any) => (quantities[line.invoiceDetailId] ?? 0) > 0).map((line: any) => ({ invoiceDetailId: line.invoiceDetailId, quantity: quantities[line.invoiceDetailId], returnToStock: line.product.isStockItem && stockReturns[line.invoiceDetailId] !== false })),
-      payments: paymentMethodId && Number(settlementAmount) > 0 ? [{ paymentMethodId: Number(paymentMethodId), amount: Number(settlementAmount), paymentChannelId: paymentChannelId ? Number(paymentChannelId) : undefined, referenceNumber: paymentReference.trim() || undefined }] : [],
-    }),
-    onSuccess: (result) => { setCompletedRefund(result); resetWork(); setMode('ITEM'); setReason(''); setPaymentMethodId(''); setSettlementAmount(''); setPaymentChannelId(''); setPaymentReference(''); setPrintError(''); setPrintNotice(''); setRequestedRefundId(null); refreshData(); },
+    mutationFn: async (intent: RecoveryIntent<CreateInvoiceRefundInput>) => {
+      await invoiceRefundsApi.create(intent.payload);
+      return invoiceRefundsApi.outcome(intent.invoiceId, intent.key);
+    },
+    retry: false,
+    onSuccess: (result, intent) => completeIntent(intent, result),
+    onError: async (error, intent) => {
+      try { markRecoveryUncertain(localStorage, intent); reloadIntents(); }
+      catch (storageFailure) { setStorageError((storageFailure as Error).message); }
+      const message = recoverySubmissionMessage(error, 'refund');
+      setRecoveryMessage(message);
+      await recoverIntent(intent, message);
+    },
+    onSettled: () => { refundSubmitting.current = false; },
   });
   const createAdjustment = useMutation({
     mutationFn: () => invoiceAdjustmentsApi.create({ invoiceId: selectedId, invoiceDetailId: selectedLineId, reason, correctedDiscountAmount: Number(correctedAmount), paymentMethodId: paymentMethodId ? Number(paymentMethodId) : undefined }),
@@ -168,16 +239,44 @@ export function RefundsPage() {
     queryClient.invalidateQueries({ queryKey: ['invoices'] }); queryClient.invalidateQueries({ queryKey: ['refundable-invoice', selectedId] }); queryClient.invalidateQueries({ queryKey: ['invoice-refunds'] }); queryClient.invalidateQueries({ queryKey: ['invoice-adjustments'] });
   };
   const submit = () => {
-    if (pending) return;
+    if (pending || refundSubmitting.current) return;
     if (mode === 'ITEM') {
+      if (!selectedId || !tenant?.tenantId || !tenantUser?.userId || storageError) { setMessage('The original refund request cannot be verified. Do not submit a new refund.'); return; }
+      try {
+        if (listRecoveryIntents<CreateInvoiceRefundInput>(localStorage, 'refund', tenant.tenantId, tenantUser.userId).length) {
+          setMessage('Recover the unresolved refund before starting another.'); return;
+        }
+      } catch (error) { setStorageError((error as Error).message); return; }
       const payout = paymentMethodId ? Number(settlementAmount) : 0;
       if (!Number.isFinite(payout) || payout < 0 || payout > settlementLimit) {
         setMessage(`Settlement must be between 0 and LKR ${money(settlementLimit)}.`);
         return;
       }
       if (fullRefund && !window.confirm(`Fully refund all remaining items on Bill No ${invoice.data?.billNo == null ? 'legacy sale' : String(invoice.data.billNo).padStart(4, '0')}?\nItem refund total: LKR ${money(correctionTotal)}\nMoney returned now: LKR ${money(payout)}\nStock will be restored only for checked Return Stock items.`)) return;
-      createRefund.mutate();
+      refundSubmitting.current = true;
+      void withRecoveryLock('refund', tenant.tenantId, tenantUser.userId, async () => {
+        if (listRecoveryIntents<CreateInvoiceRefundInput>(localStorage, 'refund', tenant.tenantId, tenantUser.userId).length) throw new Error('Recover the unresolved refund before submitting another.');
+        const context = selectedMethod?.paymentMethodType === 'CASH' && payout > 0 ? await posRegistersApi.sessionContext(Number(invoice.data?.locationId)) : null;
+        const payload: CreateInvoiceRefundInput = {
+          refundKey: crypto.randomUUID(), invoiceId: Number(selectedId), reason,
+          details: (invoice.data?.details ?? []).filter((line: any) => (quantities[line.invoiceDetailId] ?? 0) > 0).map((line: any) => ({ invoiceDetailId: Number(line.invoiceDetailId), quantity: quantities[line.invoiceDetailId], returnToStock: line.product.isStockItem && stockReturns[line.invoiceDetailId] !== false })),
+          payments: paymentMethodId && payout > 0 ? [{ paymentMethodId: Number(paymentMethodId), amount: payout, paymentChannelId: paymentChannelId ? Number(paymentChannelId) : undefined, referenceNumber: paymentReference.trim() || undefined }] : [],
+        };
+        const intent = newRecoveryIntent('refund', tenant.tenantId, tenantUser.userId, selectedId, Number(invoice.data?.locationId), payload, { registerSessionId: context?.registerSession?.posRegisterSessionId, cashierSessionId: context?.cashierSession?.posCashierSessionId });
+        saveRecoveryIntent(localStorage, intent);
+        reloadIntents();
+        createRefund.mutate(intent);
+      }).catch((error) => { refundSubmitting.current = false; setMessage((error as Error).message); reloadIntents(); });
     } else createAdjustment.mutate();
+  };
+  const retryOriginal = (intent: RecoveryIntent<CreateInvoiceRefundInput>) => {
+    if (pending || refundSubmitting.current) return;
+    try {
+      const saved = listRecoveryIntents<CreateInvoiceRefundInput>(localStorage, 'refund', intent.tenantId, intent.userId).find((row) => row.key === intent.key);
+      if (!saved) throw new Error('The original refund request is unavailable. Reconcile refund history before proceeding.');
+      refundSubmitting.current = true;
+      createRefund.mutate(saved);
+    } catch (error) { setRecoveryMessage((error as Error).message); }
   };
   const pending = createRefund.isPending || createAdjustment.isPending;
   const error = createRefund.error || createAdjustment.error;
@@ -265,6 +364,13 @@ export function RefundsPage() {
   return <div>
 {completedRefund && <div className="modal-bg"><div className="modal pos-success" role="dialog" aria-modal="true" aria-label="Refund completed"><button className="receipt-close" aria-label="Close refund receipt" onClick={closeCompletedRefund}>×</button><span>✓</span><h2>Refund completed</h2><p>{refundReference(completedRefund)} · LKR {money(completedRefund.refundTotal)}</p><RefundReceiptContent refund={completedRefund}/>{printError && <div className="error-box" role="alert">{printError}</div>}<div className="modal-foot receipt-actions"><button className="btn btn-secondary" disabled={printingRefundId !== null || !completedRefund.receiptSnapshot} onClick={() => void printRefund(completedRefund.invoiceRefundId)}>{printingRefundId !== null ? 'Sending to printer...' : 'Print'}</button><button className="btn btn-secondary" onClick={closeCompletedRefund}>Close</button></div></div></div>}
     <div className="page-head"><div><div className="eyebrow">SALES / CORRECTIONS</div><h1>Invoice Correction</h1><p>Load one invoice and correct its items, quantities or discounts.</p></div></div>
+    {storageError && <div className="error-box" role="alert">{storageError} No new refund can be submitted until its status is reconciled.</div>}
+    {unresolved.map((intent) => <div className="error-box" role="status" key={intent.key}>
+      <strong>Unresolved refund for invoice {intent.invoiceId}</strong>
+      <p>{recoveryMessage || 'Transaction status is being verified. Please do not submit another refund until verification is complete.'}</p>
+      <button className="btn btn-secondary" disabled={pending} onClick={() => void recoverIntent(intent)}>Verify status</button>{' '}
+      <button className="btn btn-primary" disabled={pending} onClick={() => retryOriginal(intent)}>Retry original request</button>
+    </div>)}
     <div className="card correction-workbench">
       <div className="correction-load">
         <label className="field"><span>Date</span><input className="control" type="date" value={receiptDate} onChange={(event) => setReceiptDate(event.target.value)}/></label>

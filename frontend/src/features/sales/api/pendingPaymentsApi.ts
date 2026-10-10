@@ -21,6 +21,11 @@ export type PendingInvoice = {
 export type PaymentReceipt = {
   invoicePaymentId: number;
   invoiceId: number;
+  collectionKey?: string | null;
+  paymentMethodId?: number;
+  paymentChannelId?: number | null;
+  posRegisterSessionId?: number | null;
+  posCashierSessionId?: number | null;
   paidAt: string;
   amount: string;
   tenderedAmount: string;
@@ -49,4 +54,5 @@ export const pendingPaymentsApi = {
   historyPage: (page: number, limit: number, search: string) => apiClient.get<{ items: PaymentReceipt[]; total: number; stats: { received: number } }>(`/invoices/payment-receipts/page?${new URLSearchParams({ page: String(page), limit: String(limit), search })}`),
   receive: (id: number, data: ReceivePaymentInput) =>
     apiClient.post<Omit<PaymentReceipt, 'invoice' | 'paymentMethod'>>(`/invoices/${id}/payments`, data),
+  outcome: (id: number, key: string) => apiClient.get<PaymentReceipt>(`/invoices/${id}/payments/by-key/${encodeURIComponent(key)}`),
 };

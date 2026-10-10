@@ -10,6 +10,10 @@ import './sales-history.css';
 import { PaymentReceiptContent, receiptNumber } from './PaymentReceipt';
 import { paymentChannelsApi } from '../api/paymentChannelsApi';
 import { saleBillReference } from './saleBillReference';
+import { ApiError } from '../../../services/apiClient';
+import { clearRecoveryIntent, listRecoveryIntents, markRecoveryUncertain, newRecoveryIntent, saveRecoveryIntent, withRecoveryLock, type RecoveryIntent } from '../transactionRecoveryStorage';
+import { posRegistersApi } from '../../pos-registers/api/posRegistersApi';
+import { recoverySubmissionMessage } from '../transactionRecoveryError';
 
 const money = (value: string | number) => Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const customerName = (invoice: PendingInvoice) => invoice.customer?.customerName ?? 'Historical anonymous sale';
@@ -30,8 +34,11 @@ export function PendingPaymentsPage() {
   const [reference, setReference] = useState('');
   const [paymentChannelId, setPaymentChannelId] = useState('');
   const [validation, setValidation] = useState('');
-  const requestKey = useRef('');
   const submitting = useRef(false);
+  const recovering = useRef(new Set<string>());
+  const [unresolved, setUnresolved] = useState<RecoveryIntent<ReceivePaymentInput>[]>([]);
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [storageError, setStorageError] = useState('');
   const dialog = useRef<HTMLDialogElement>(null);
   const pending = useQuery({ queryKey: ['pending-payments', page, limit, query, status, ...queryScope], queryFn: () => pendingPaymentsApi.page(page, limit, query, status) });
   const history = useQuery({ queryKey: ['payment-receipts', page, limit, query, ...queryScope], queryFn: () => pendingPaymentsApi.historyPage(page, limit, query) });
@@ -51,21 +58,77 @@ export function PendingPaymentsPage() {
       void client.invalidateQueries({ queryKey: [key] });
     }
   };
+  const reloadIntents = () => {
+    if (!tenant?.tenantId || !tenantUser?.userId) return;
+    try {
+      setUnresolved(listRecoveryIntents<ReceivePaymentInput>(localStorage, 'collection', tenant.tenantId, tenantUser.userId));
+      setStorageError('');
+    } catch (error) { setStorageError((error as Error).message); }
+  };
+  const completeIntent = (intent: RecoveryIntent<ReceivePaymentInput>, payment: PaymentReceipt) => {
+    if (Number(payment.invoiceId) !== intent.invoiceId || payment.collectionKey !== intent.key
+      || Number(payment.tenderedAmount) !== intent.payload.amount
+      || Number(payment.paymentMethodId) !== intent.payload.paymentMethodId
+      || Number(payment.paymentChannelId ?? 0) !== Number(intent.payload.paymentChannelId ?? 0)
+      || (intent.cashierSessionId !== null && Number(payment.posCashierSessionId) !== intent.cashierSessionId)
+      || (intent.registerSessionId !== null && Number(payment.posRegisterSessionId) !== intent.registerSessionId)
+      || (payment.referenceNumber ?? null) !== (intent.payload.referenceNumber?.trim() || null)) {
+      setRecoveryMessage('The saved request does not match the server receipt. Ask an authorized manager to reconcile it.');
+      return;
+    }
+    clearRecoveryIntent(localStorage, intent);
+    reloadIntents();
+    setReceipt(payment);
+    setSelected(null);
+    setRecoveryMessage('Completed transaction recovered. No new payment was posted.');
+    refresh();
+  };
+  const recoverIntent = async (intent: RecoveryIntent<ReceivePaymentInput>, submittedError?: string) => {
+    if (recovering.current.has(intent.key)) return;
+    recovering.current.add(intent.key);
+    try {
+      const payment = await pendingPaymentsApi.outcome(intent.invoiceId, intent.key);
+      completeIntent(intent, payment);
+    } catch (error) {
+      setRecoveryMessage(error instanceof ApiError && error.status === 404
+        ? `${submittedError ? `${submittedError} ` : ''}The original request is not confirmed yet. Keep its UUID and retry the original request when ready.`
+        : error instanceof ApiError && (error.status === 401 || error.status === 403)
+          ? 'Sign in with collection permission to verify this request. Its original UUID is preserved.'
+          : 'Transaction status is being verified. Please do not submit another payment until verification is complete.');
+    } finally { recovering.current.delete(intent.key); }
+  };
+  useEffect(() => {
+    if (!tenant?.tenantId || !tenantUser?.userId) return;
+    try {
+      const intents = listRecoveryIntents<ReceivePaymentInput>(localStorage, 'collection', tenant.tenantId, tenantUser.userId);
+      setUnresolved(intents);
+      setStorageError('');
+      for (const intent of intents) void recoverIntent(intent);
+    } catch (error) { setStorageError((error as Error).message); }
+    const changed = () => reloadIntents();
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, [tenant?.tenantId, tenantUser?.userId]);
   const receive = useMutation({
-    mutationFn: ({ invoice, data }: { invoice: PendingInvoice; data: ReceivePaymentInput }) => pendingPaymentsApi.receive(invoice.invoiceId, data),
-    retry: false,
-    onSuccess: (payment, { invoice, data }) => {
-      const method = activeMethods.find((row) => Number(row.paymentMethodId) === data.paymentMethodId);
-      setReceipt({ ...payment, invoice, paymentMethod: { paymentMethodName: method?.paymentMethodName ?? 'Payment', paymentMethodType: method?.paymentMethodType }, paymentChannel: (channels.data ?? []).find((row) => Number(row.paymentChannelId) === Number(data.paymentChannelId)) ?? null });
-      setSelected(null);
-      refresh();
+    mutationFn: async (intent: RecoveryIntent<ReceivePaymentInput>) => {
+      await pendingPaymentsApi.receive(intent.invoiceId, intent.payload);
+      return pendingPaymentsApi.outcome(intent.invoiceId, intent.key);
     },
-    onError: refresh,
+    retry: false,
+    onSuccess: (payment, intent) => completeIntent(intent, payment),
+    onError: async (error, intent) => {
+      try { markRecoveryUncertain(localStorage, intent); reloadIntents(); }
+      catch (storageFailure) { setStorageError((storageFailure as Error).message); }
+      const message = recoverySubmissionMessage(error, 'payment');
+      setRecoveryMessage(message);
+      await recoverIntent(intent, message);
+    },
     onSettled: () => { submitting.current = false; },
   });
 
   const begin = (invoice: PendingInvoice) => {
     if (!(invoice.collectionEligible ?? Boolean(invoice.customer))) return;
+    if (unresolved.length || storageError) { setRecoveryMessage('Recover the unresolved payment before starting another.'); return; }
     receive.reset();
     setValidation('');
     setSelected(invoice);
@@ -74,10 +137,8 @@ export function PendingPaymentsPage() {
     setMethodId(activeMethods[0] ? String(activeMethods[0].paymentMethodId) : '');
     setReference('');
     setPaymentChannelId('');
-    requestKey.current = crypto.randomUUID();
   };
   const changed = () => {
-    requestKey.current = crypto.randomUUID();
     setValidation('');
     receive.reset();
   };
@@ -96,8 +157,26 @@ export function PendingPaymentsPage() {
     if (selectedMethod?.paymentMethodType !== 'CASH' && value > Number(selected.balanceAmount)) { setValidation('Only cash can be tendered above the remaining balance.'); return; }
     if (selectedMethod?.paymentMethodType === 'CARD' && !paymentChannelId) { setValidation('Select the card channel used for this payment.'); return; }
     if (selectedMethod?.paymentMethodType === 'CARD' && !reference.trim()) { setValidation('Enter the external card-machine approval or transaction reference.'); return; }
+    if (!tenant?.tenantId || !tenantUser?.userId || unresolved.length || storageError) { setValidation('Recover the unresolved payment before submitting another.'); return; }
     submitting.current = true;
-    receive.mutate({ invoice: selected, data: { amount: value, paymentMethodId: Number(methodId), paymentChannelId: paymentChannelId ? Number(paymentChannelId) : undefined, referenceNumber: reference.trim() || undefined, collectionKey: requestKey.current } });
+    void withRecoveryLock('collection', tenant.tenantId, tenantUser.userId, async () => {
+      if (listRecoveryIntents<ReceivePaymentInput>(localStorage, 'collection', tenant.tenantId, tenantUser.userId).length) throw new Error('Recover the unresolved payment before submitting another.');
+      const session = await posRegistersApi.sessionContext(Number(selected.location.locationId));
+      const data: ReceivePaymentInput = { amount: value, paymentMethodId: Number(methodId), paymentChannelId: paymentChannelId ? Number(paymentChannelId) : undefined, referenceNumber: reference.trim() || undefined, collectionKey: crypto.randomUUID() };
+      const intent = newRecoveryIntent('collection', tenant.tenantId, tenantUser.userId, selected.invoiceId, Number(selected.location.locationId), data, { registerSessionId: session.registerSession?.posRegisterSessionId, cashierSessionId: session.cashierSession?.posCashierSessionId });
+      saveRecoveryIntent(localStorage, intent);
+      reloadIntents();
+      receive.mutate(intent);
+    }).catch((error) => { submitting.current = false; setValidation((error as Error).message); reloadIntents(); });
+  };
+  const retryOriginal = (intent: RecoveryIntent<ReceivePaymentInput>) => {
+    if (receive.isPending || submitting.current) return;
+    try {
+      const saved = listRecoveryIntents<ReceivePaymentInput>(localStorage, 'collection', intent.tenantId, intent.userId).find((row) => row.key === intent.key);
+      if (!saved) throw new Error('The original request is unavailable. Reconcile payment history before proceeding.');
+      submitting.current = true;
+      receive.mutate(saved);
+    } catch (error) { setRecoveryMessage((error as Error).message); }
   };
   const close = () => {
     if (submitting.current) return;
@@ -120,6 +199,13 @@ export function PendingPaymentsPage() {
 
   return <div className="pending-payments-page">
     <div className="page-head"><div><div className="eyebrow">SALES</div><h1>Pending Payments</h1><p>Receive outstanding invoice payments and print a payment receipt.</p></div><button className="btn btn-secondary" onClick={refresh}>Refresh</button></div>
+    {storageError && <div className="error-box" role="alert">{storageError} No new collection can be submitted until its status is reconciled.</div>}
+    {unresolved.map((intent) => <div className="error-box" role="status" key={intent.key}>
+      <strong>Unresolved collection for invoice {intent.invoiceId}: LKR {money(intent.payload.amount)}</strong>
+      <p>{recoveryMessage || 'Transaction status is being verified. Please do not submit another payment until verification is complete.'}</p>
+      <button className="btn btn-secondary" disabled={receive.isPending} onClick={() => void recoverIntent(intent)}>Verify status</button>{' '}
+      <button className="btn btn-primary" disabled={receive.isPending} onClick={() => retryOriginal(intent)}>Retry original request</button>
+    </div>)}
     <div className="sales-stats">
       <SalesStat label="Outstanding balance" value={pending.isPending ? '—' : `LKR ${money(pending.data?.stats.outstanding ?? 0)}`} note="Invoices awaiting payment" tone="amber" />
       <SalesStat label="Partially paid" value={String(pending.data?.stats.partiallyPaid ?? 0)} note="Collect the remaining balance" tone="blue" />
@@ -141,7 +227,7 @@ export function PendingPaymentsPage() {
             <td><strong className="sales-id">{saleBillReference(invoice)}</strong><small className="refund-code">{new Date(invoice.invoiceDate).toLocaleDateString()}</small></td>
             <td><strong>{customerName(invoice)}</strong><small className="refund-code">{invoice.customer?.mobile || invoice.customer?.phone || 'No phone recorded'}</small></td><td>{invoice.location?.name}</td>
             <td><SalesBadge status={invoice.paymentStatus === 'UNPAID' ? 'Unpaid' : 'Partially Paid'} /></td><td className="right">{money(invoice.grandTotal)}</td><td className="right">{money(invoice.paidAmount)}</td><td className="right pending-balance">LKR {money(invoice.balanceAmount)}</td>
-            <td className="right"><button className="btn btn-primary" disabled={!(invoice.collectionEligible ?? Boolean(invoice.customer))} title={!invoice.customer ? 'Historical anonymous balances are readable but cannot receive a customer collection.' : undefined} onClick={() => begin(invoice)}>{invoice.customer ? 'Receive Payment' : 'Read only'}</button></td>
+            <td className="right"><button className="btn btn-primary" disabled={Boolean(unresolved.length || storageError) || !(invoice.collectionEligible ?? Boolean(invoice.customer))} title={!invoice.customer ? 'Historical anonymous balances are readable but cannot receive a customer collection.' : undefined} onClick={() => begin(invoice)}>{invoice.customer ? 'Receive Payment' : 'Read only'}</button></td>
           </tr>)}</tbody></table></div> :
         <div className="sales-table-wrap"><table className="table"><thead><tr><th>Receipt / date</th><th>Invoice</th><th>Customer</th><th>Method</th><th className="right">Received</th><th>Status</th><th /></tr></thead>
           <tbody>{history.isPending ? <tr><td colSpan={7}>Loading payment history…</td></tr> : !receipts.length ? <tr><td colSpan={7} className="pending-empty">No payment receipts {query ? 'match your search' : 'recorded yet'}.</td></tr> : pagedReceipts.map((payment) => <tr key={payment.invoicePaymentId}>
