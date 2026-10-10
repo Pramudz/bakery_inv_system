@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { DataSource, EntityManager } from 'typeorm';
 import { tenantBusinessClock } from '../../common/business-date';
 import { loadDocumentHeader } from '../../common/document-header';
-import { baseQuantity, checked, units } from '../../common/inventory-decimal';
+import { baseQuantity, checked, hasExactBaseQuantity, units } from '../../common/inventory-decimal';
 import { InventoryAgeLayer } from '../inventory-age-layers/inventory-age-layer.entity';
 import { InventoryAgeLayerService } from '../inventory-age-layers/inventory-age-layer.service';
 import { TenantPrincipal } from '../auth/auth.types';
@@ -23,6 +23,7 @@ import { InventoryAdjustmentLine } from './inventory-adjustment-line.entity';
 import { InventoryAdjustmentReason } from './inventory-adjustment-reason.entity';
 import { InventoryAdjustment } from './inventory-adjustment.entity';
 import { InventoryAdjustmentReasonsService } from './inventory-adjustment-reasons.service';
+import { lockOpeningTarget, saveOpeningClaim } from './inventory-opening-guard';
 
 export type InventoryAdjustmentListItem = InventoryAdjustment & {
   createdByName: string | null;
@@ -150,8 +151,12 @@ export class InventoryAdjustmentsService {
   }
 
   async create(dto: CreateInventoryAdjustmentDto, user: TenantPrincipal) {
-    return this.dataSource.transaction(async manager => {
-      const clock = await tenantBusinessClock(manager, user.tenantId);
+    return this.dataSource.transaction(manager => this.createWithManager(manager, dto, user));
+  }
+
+  async createWithManager(manager: EntityManager, dto: CreateInventoryAdjustmentDto, user: TenantPrincipal,
+    postingClock?: Awaited<ReturnType<typeof tenantBusinessClock>>) {
+      const clock = postingClock ?? await tenantBusinessClock(manager, user.tenantId);
       await this.assertLocationAccess(manager, user, Number(dto.locationId), true);
       const reason = await this.assertReason(manager, user.tenantId, Number(dto.reasonId), dto.movementType);
       this.assertRemarks(reason, dto.remarks);
@@ -159,7 +164,6 @@ export class InventoryAdjustmentsService {
       const adjustment = await repository.save(repository.create({ tenantId: user.tenantId, locationId: Number(dto.locationId), movementType: dto.movementType, reasonId: Number(dto.reasonId), adjustmentDate: clock.businessDate, referenceNumber: dto.referenceNumber?.trim() || null, remarks: dto.remarks?.trim() || null, status: 'DRAFT', createdByUserId: user.userId, postedByUserId: null, postedAt: null, cancelledByUserId: null, cancelledAt: null, isActive: true }));
       await this.saveLines(manager, adjustment, dto.lines, reason);
       return adjustment;
-    });
   }
 
   async update(id: number, dto: UpdateInventoryAdjustmentDto, user: TenantPrincipal) {
@@ -198,8 +202,13 @@ export class InventoryAdjustmentsService {
   }
 
   async post(id: number, dto: PostInventoryAdjustmentDto, user: TenantPrincipal) {
-    return this.dataSource.transaction(async manager => {
-      const clock = await tenantBusinessClock(manager, user.tenantId);
+    return this.dataSource.transaction(manager => this.postWithManager(manager, id, dto, user));
+  }
+
+  async postWithManager(manager: EntityManager, id: number, dto: PostInventoryAdjustmentDto,
+    user: TenantPrincipal, sourceImportBatchId: number | null = null,
+    postingClock?: Awaited<ReturnType<typeof tenantBusinessClock>>) {
+      const clock = postingClock ?? await tenantBusinessClock(manager, user.tenantId);
       const adjustment = await this.lock(manager, id, user.tenantId);
       await this.assertLocationAccess(manager, user, Number(adjustment.locationId), true);
       if (adjustment.status !== 'DRAFT') throw new BadRequestException('Only draft inventory adjustments can be posted.');
@@ -212,12 +221,39 @@ export class InventoryAdjustmentsService {
       lines.sort((a, b) => Number(a.productId) - Number(b.productId) || Number(a.inventoryAdjustmentLineId) - Number(b.inventoryAdjustmentLineId));
       if (!lines.length) throw new BadRequestException('Inventory adjustment requires at least one line.');
       this.assertStoredLines(lines, reason);
+      if (reason.code === 'OPENING_INVENTORY') {
+        for (const productId of [...new Set(lines.map(line => Number(line.productId)))]) {
+          const product = await manager.getRepository(Product).createQueryBuilder('product').setLock('pessimistic_write')
+            .where('product.productId = :productId AND product.tenantId = :tenantId', { productId, tenantId: user.tenantId }).getOne();
+          if (!product?.isActive || !product.isStockItem || product.trackBatch || product.trackExpiry || product.trackSerial)
+            throw new BadRequestException('Opening inventory requires an active, untracked stock product.');
+        }
+        const location = await manager.getRepository(Location).createQueryBuilder('location').setLock('pessimistic_write')
+          .where('location.locationId = :locationId AND location.tenantId = :tenantId',
+            { locationId: adjustment.locationId, tenantId: user.tenantId }).getOne();
+        if (!location?.isActive) throw new BadRequestException('Opening inventory location is inactive.');
+        for (const line of [...lines].sort((a, b) => Number(a.productUnitId) - Number(b.productUnitId))) {
+          const productUnit = await manager.getRepository(ProductUnit).createQueryBuilder('productUnit').setLock('pessimistic_write')
+            .where('productUnit.productUnitId = :productUnitId AND productUnit.productId = :productId',
+              { productUnitId: line.productUnitId, productId: line.productId }).getOne();
+          if (!productUnit?.isActive || String(productUnit.conversionFactor) !== String(line.conversionFactorSnapshot))
+            throw new BadRequestException('Opening inventory Product Unit changed or is inactive.');
+        }
+      }
 
       const plans: Array<{ line: InventoryAdjustmentLine; balance: InventoryBalance | null; layers: InventoryAgeLayer[]; snapshot: ReturnType<InventoryBalanceService['adjustmentSnapshot']>; unitCost: string }> = [];
       for (const line of lines) {
-        await this.validateStoredLine(manager, adjustment, line);
-        await this.lockProductLocation(manager, Number(adjustment.locationId), Number(line.productId));
-        const balance = await this.balances.lock(manager, user.tenantId, Number(adjustment.locationId), Number(line.productId));
+        await this.validateStoredLine(manager, adjustment, line, reason);
+        if (reason.code === 'OPENING_INVENTORY' && units(line.unitCost ?? '0') <= 0n)
+          throw new BadRequestException('Opening inventory requires a positive base-unit cost.');
+        let balance: InventoryBalance | null;
+        if (reason.code === 'OPENING_INVENTORY') {
+          balance = await lockOpeningTarget(manager, this.balances, { tenantId: user.tenantId,
+            locationId: Number(adjustment.locationId), productId: Number(line.productId) });
+        } else {
+          await this.lockProductLocation(manager, Number(adjustment.locationId), Number(line.productId));
+          balance = await this.balances.lock(manager, user.tenantId, Number(adjustment.locationId), Number(line.productId));
+        }
         const unitCost = this.postingUnitCost(adjustment, reason, balance, line);
         const snapshot = this.balances.adjustmentSnapshot(balance, line.baseQuantity, unitCost, adjustment.movementType === 'ADJI' ? 'IN' : 'OUT');
         const layers = adjustment.movementType === 'ADJO' ? await manager.getRepository(InventoryAgeLayer).createQueryBuilder('layer').setLock('pessimistic_write')
@@ -253,10 +289,14 @@ export class InventoryAdjustmentsService {
         });
         Object.assign(line, { unitCost, inventoryValue: snapshot.movementValue, quantityBefore: snapshot.quantityBefore, quantityAfter: snapshot.quantityAfter });
         await manager.getRepository(InventoryAdjustmentLine).save(line);
+        if (reason.code === 'OPENING_INVENTORY') await saveOpeningClaim(manager, {
+          tenantId: user.tenantId, locationId: Number(adjustment.locationId), productId: Number(line.productId),
+          sourceImportBatchId, sourceAdjustmentId: adjustment.inventoryAdjustmentId,
+          sourceAdjustmentLineId: line.inventoryAdjustmentLineId, createdByUserId: user.userId,
+        });
       }
       Object.assign(adjustment, { status: 'POSTED', postedByUserId: user.userId, postedAt: clock.now });
       return manager.getRepository(InventoryAdjustment).save(adjustment);
-    });
   }
 
   private async saveLines(manager: EntityManager, adjustment: InventoryAdjustment, rows: InventoryAdjustmentLineDto[], reason: InventoryAdjustmentReason) {
@@ -267,13 +307,18 @@ export class InventoryAdjustmentsService {
       if (products.has(productId)) throw new BadRequestException('A product can appear only once in an inventory adjustment.');
       products.add(productId);
       const { productUnit } = await this.validateProductUnit(manager, adjustment.tenantId, Number(adjustment.locationId), productId, productUnitId);
+      if (reason.code === 'OPENING_INVENTORY') await this.assertUntrackedOpeningProduct(manager, adjustment.tenantId, productId);
       const quantity = checked(units(row.quantity));
       if (units(quantity) <= 0n) throw new BadRequestException('Adjustment quantity must be greater than zero.');
       const converted = baseQuantity(quantity, productUnit.conversionFactor);
       if (units(converted) <= 0n) throw new BadRequestException('Adjustment base quantity must be greater than zero.');
+      if (reason.code === 'OPENING_INVENTORY' && !hasExactBaseQuantity(quantity, productUnit.conversionFactor))
+        throw new BadRequestException('Opening inventory conversion would round the base quantity.');
       const unitCost = row.unitCost === undefined ? null : checked(units(row.unitCost));
       if (unitCost !== null && units(unitCost) < 0n) throw new BadRequestException('Unit cost cannot be negative.');
       if (reason.costingPolicy === 'MANUAL_REQUIRED' && unitCost === null) throw new BadRequestException('A manual base-unit cost is required for this adjustment reason.');
+      if (reason.code === 'OPENING_INVENTORY' && (unitCost === null || units(unitCost) <= 0n))
+        throw new BadRequestException('Opening inventory requires a positive base-unit cost.');
       const repository = manager.getRepository(InventoryAdjustmentLine);
       await repository.save(repository.create({ inventoryAdjustmentId: adjustment.inventoryAdjustmentId, productId, productUnitId, conversionFactorSnapshot: String(productUnit.conversionFactor), quantity, baseQuantity: converted, unitCost: reason.costingPolicy === 'MANUAL_REQUIRED' ? unitCost : null, inventoryValue: null, quantityBefore: null, quantityAfter: null, remarks: row.remarks?.trim() || null }));
     }
@@ -294,10 +339,19 @@ export class InventoryAdjustmentsService {
     return checked(units(balance?.averageCost ?? '0'));
   }
 
-  private async validateStoredLine(manager: EntityManager, adjustment: InventoryAdjustment, line: InventoryAdjustmentLine) {
+  private async validateStoredLine(manager: EntityManager, adjustment: InventoryAdjustment,
+    line: InventoryAdjustmentLine, reason: InventoryAdjustmentReason) {
     const { productUnit } = await this.validateProductUnit(manager, adjustment.tenantId, Number(adjustment.locationId), Number(line.productId), Number(line.productUnitId));
+    if (reason.code === 'OPENING_INVENTORY' && !hasExactBaseQuantity(line.quantity, line.conversionFactorSnapshot))
+      throw new BadRequestException('Opening inventory conversion would round the base quantity.');
     if (String(productUnit.conversionFactor) !== String(line.conversionFactorSnapshot) || baseQuantity(line.quantity, line.conversionFactorSnapshot) !== checked(units(line.baseQuantity)))
       throw new BadRequestException('Adjustment line product-unit conversion snapshot is invalid or has changed; edit the draft before posting.');
+  }
+
+  private async assertUntrackedOpeningProduct(manager: EntityManager, tenantId: number, productId: number) {
+    const product = await manager.getRepository(Product).findOneBy({ tenantId, productId });
+    if (!product || product.trackBatch || product.trackExpiry || product.trackSerial)
+      throw new BadRequestException('Batch, expiry or serial tracked products cannot receive opening inventory in this release.');
   }
 
   private async validateProductUnit(manager: EntityManager, tenantId: number, locationId: number, productId: number, productUnitId: number) {

@@ -69,7 +69,7 @@ test('opening inventory establishes WAVG from required manual base-unit cost', (
   assert.equal(row.movementValue, '45000.0000');
 });
 
-test('an explicitly supplied manual zero cost remains an intentional supported valuation', () => {
+test('the generic manual-cost arithmetic supports zero; opening posting adds a stricter positive-cost rule', () => {
   const service = serviceWith();
   const unitCost = (service as any).postingUnitCost({ movementType: 'ADJI' }, { costingPolicy: 'MANUAL_REQUIRED' }, null, { unitCost: '0' });
   const row = balances.adjustmentSnapshot(null, '5', unitCost, 'IN');
@@ -79,7 +79,7 @@ test('an explicitly supplied manual zero cost remains an intentional supported v
   assert.equal(row.movementValue, '0.0000');
 });
 
-test('opening inventory combines with existing inventory using the existing weighted-average algorithm', () => {
+test('generic inbound adjustment arithmetic blends with existing inventory', () => {
   const row = balances.adjustmentSnapshot({ quantityOnHand: '100', averageCost: '500' }, '100', '400', 'IN');
   assert.equal(row.averageCostAfter, '450.0000');
 });
