@@ -41,7 +41,7 @@ export class PosCashReconciliationService {
 
   async submit(dto: SubmitCashCountDto, credential: string | undefined, user: TenantPrincipal) {
     this.assertAmount(dto.countedCash, 'Counted cash');
-    return this.dataSource.transaction(async (manager) => {
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
       const prior = await manager.getRepository(PosCashReconciliation).findOneBy({ tenantId: user.tenantId, submissionKey: dto.submissionKey });
       if (prior) {
         const fingerprint = this.submissionFingerprint(PosCashReconciliationType.TERMINAL_CASH_COUNT, prior.posCashierSessionId, dto.countedCash);
@@ -73,7 +73,7 @@ export class PosCashReconciliationService {
   }
 
   async submitMasterBatch(dto: SubmitMasterCashBatchDto, credential: string | undefined, user: TenantPrincipal) {
-    return this.dataSource.transaction(async (manager) => {
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
       const prior = await manager.getRepository(PosCashReconciliation).findOneBy({ tenantId: user.tenantId, submissionKey: dto.submissionKey });
       if (prior) {
         const fingerprint = this.submissionFingerprint(PosCashReconciliationType.MASTER_CASH_BATCH, prior.posCashierSessionId);

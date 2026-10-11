@@ -25,7 +25,10 @@ export class RoleService {
   }
 
   async create(dto: CreateRoleDto, tenantId: number) {
-    const payload: any = { ...dto, tenantId };
+    if (dto.isSystemRole || dto.code.trim().toUpperCase() === 'TENANT_ADMIN') {
+      throw new ConflictException('System roles cannot be created through tenant role management.');
+    }
+    const payload: any = { ...dto, tenantId, isSystemRole: false };
     const existing = await this.repo.findOne({
       where: {
         tenantId,
@@ -40,6 +43,13 @@ export class RoleService {
     const role = await this.findOne(id, tenantId);
     const payload: any = { ...dto };
     delete payload.tenantId;
+    delete payload.isSystemRole;
+    if (payload.code && payload.code.trim().toUpperCase() === 'TENANT_ADMIN' && role.code !== 'TENANT_ADMIN') {
+      throw new ConflictException('TENANT_ADMIN is reserved for the system role.');
+    }
+    if (role.isSystemRole && payload.code && payload.code !== role.code) {
+      throw new ConflictException('System role codes cannot be changed.');
+    }
     if (role.isSystemRole && role.code === 'TENANT_ADMIN' && payload.accessScope && payload.accessScope !== 'TENANT') {
       throw new ConflictException('The TENANT_ADMIN system role must keep tenant-wide access.');
     }
@@ -56,8 +66,15 @@ export class RoleService {
   }
 
   async deactivate(id: number, tenantId: number) {
-    await this.findOne(id, tenantId);
+    const role = await this.findOne(id, tenantId);
+    if (role.isSystemRole && role.code === 'TENANT_ADMIN') throw new ConflictException('The tenant administrator role cannot be deactivated.');
     await this.repo.update({ roleId: id, tenantId } as any, { isActive: false } as any);
+    return this.findOne(id, tenantId);
+  }
+
+  async activate(id: number, tenantId: number) {
+    await this.findOne(id, tenantId);
+    await this.repo.update({ roleId: id, tenantId } as any, { isActive: true } as any);
     return this.findOne(id, tenantId);
   }
 }

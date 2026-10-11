@@ -40,6 +40,9 @@ export function RolesPage() {
       for (const permissionId of selected.filter(permissionId => !assigned.has(permissionId))) {
         await rolePermissionsApi.create({ roleId, permissionId, assignedAt: new Date().toISOString() });
       }
+      for (const assignment of (assignments.data ?? []).filter((item: any) => Number(item.roleId) === roleId && !selected.includes(Number(item.permissionId)))) {
+        await rolePermissionsApi.remove(Number(assignment.rolePermissionId));
+      }
     },
     onSuccess: async () => {
       await Promise.all([
@@ -65,7 +68,7 @@ export function RolesPage() {
   return <div>
     <div className="page-head"><div><div className="eyebrow">ACCESS MANAGEMENT</div><h1>Roles</h1><p>Tenant roles and access profiles.</p></div><button className="btn btn-primary" onClick={startCreate}>＋ New role</button></div>
     <div className="card"><table className="table"><thead><tr><th>Code</th><th>Name</th><th>Access Scope</th><th>System Role</th><th>Status</th><th className="right">Actions</th></tr></thead><tbody>
-      {roles.isLoading ? <tr><td colSpan={6}>Loading...</td></tr> : (roles.data ?? []).map((role: any) => <tr key={roleIdOf(role)}><td><span className="code-chip">{role.code}</span></td><td>{role.name}</td><td>{role.accessScope === 'LOCATION' ? 'Location-based' : 'Tenant-wide'}</td><td>{role.isSystemRole ? 'Yes' : 'No'}</td><td><span className={role.isActive !== false ? 'status status-on' : 'status status-off'}><i /> {role.isActive !== false ? 'Active' : 'Inactive'}</span></td><td className="right"><button className="btn btn-ghost" onClick={() => startEdit(role)}>Edit</button>{role.isActive !== false && <button className="btn btn-danger-soft" onClick={() => rolesApi.deactivate(roleIdOf(role)).then(() => queryClient.invalidateQueries({ queryKey: ['roles'] }))}>Deactivate</button>}</td></tr>)}
+      {roles.isLoading ? <tr><td colSpan={6}>Loading...</td></tr> : (roles.data ?? []).map((role: any) => <tr key={roleIdOf(role)}><td><span className="code-chip">{role.code}</span></td><td>{role.name}</td><td>{role.accessScope === 'LOCATION' ? 'Location-based' : 'Tenant-wide'}</td><td>{role.isSystemRole ? 'Yes' : 'No'}</td><td><span className={role.isActive !== false ? 'status status-on' : 'status status-off'}><i /> {role.isActive !== false ? 'Active' : 'Inactive'}</span></td><td className="right"><button className="btn btn-ghost" onClick={() => startEdit(role)}>Edit</button>{role.isActive !== false ? <button className="btn btn-danger-soft" disabled={role.code === 'TENANT_ADMIN'} onClick={() => rolesApi.deactivate(roleIdOf(role)).then(() => queryClient.invalidateQueries({ queryKey: ['roles'] }))}>Deactivate</button> : <button className="btn btn-secondary" onClick={() => rolesApi.activate(roleIdOf(role)).then(() => queryClient.invalidateQueries({ queryKey: ['roles'] }))}>Activate</button>}</td></tr>)}
     </tbody></table></div>
     <Modal open={open} onClose={() => !save.isPending && setOpen(false)} title={editing ? 'Edit role' : 'Create role'} subtitle="Permissions are available only from modules enabled for this tenant." wide>
       <form onSubmit={event => { event.preventDefault(); save.mutate(); }}><div className="modal-body"><div className="form-grid">

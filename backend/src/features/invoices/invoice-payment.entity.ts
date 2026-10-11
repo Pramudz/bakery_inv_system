@@ -5,14 +5,18 @@ import { PaymentMethodType } from '../payment-methods/payment-methods.entity';
 import { PaymentChannel } from '../payment-channels/payment-channel.entity';
 import { User } from '../users/user.entity';
 import { Invoice } from './invoice.entity';
+import { Tenant } from '../tenants/tenant.entity';
 import { PosTerminal } from '../pos-registers/pos-terminal.entity';
 import { PosRegisterSession } from '../pos-registers/pos-register-session.entity';
 import { PosCashierSession } from '../pos-registers/pos-cashier-session.entity';
 
 @Entity('tbl_invoice_payment')
 @Index('uq_invoice_payment_collection', ['invoiceId', 'collectionKey'], { unique: true })
+@Index('uq_invoice_payment_tenant_collection', ['tenantId', 'collectionKey'], { unique: true })
 export class InvoicePayment extends AuditEntity {
   @PrimaryGeneratedColumn({ name: 'invoice_payment_id', type: 'bigint' }) invoicePaymentId!: number;
+  @Column({ name: 'tenant_id', type: 'bigint' }) tenantId!: number;
+  @ManyToOne(() => Tenant, { nullable: false, onDelete: 'RESTRICT' }) @JoinColumn({ name: 'tenant_id' }) tenant!: Tenant;
   @Column({ name: 'invoice_id', type: 'bigint' }) invoiceId!: number;
   @ManyToOne(() => Invoice, (invoice) => invoice.payments, { nullable: false, onDelete: 'CASCADE' }) @JoinColumn({ name: 'invoice_id' }) invoice!: Invoice;
   @Column({ name: 'pos_terminal_id', type: 'bigint', nullable: true }) posTerminalId!: number | null;

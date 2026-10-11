@@ -237,6 +237,10 @@ test('master-funded refund payout creates one nullable-cashier movement and is i
   assert.equal(first.fundingSource, PosCashFundingSource.MASTER_REGISTER);
   assert.equal(first.sourceType, 'INVOICE_REFUND_PAYMENT');
   assert.equal(first.physicalPayerIdentity, 'Master cashier A');
+  assert.equal((await f.service.masterPayoutOutcome(dto.payoutKey, f.user)).posCashMovementId, first.posCashMovementId);
+  await assert.rejects(f.service.masterPayoutOutcome(dto.payoutKey, { ...f.user, tenantId: 2 }), /not found/i);
+  await assert.rejects(f.service.masterPayoutOutcome(dto.payoutKey, { ...f.user, accessScope: 'LOCATION', assignedLocationIds: [99] }), ForbiddenException);
+  assert.equal(f.cashMovements.length, 1, 'outcome lookup is read-only');
   await assert.rejects(f.service.recordMasterRefundPayout(9, { ...dto, amount: 11 }, f.user), /different data/i);
 });
 

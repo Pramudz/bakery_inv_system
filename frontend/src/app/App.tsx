@@ -6,7 +6,7 @@ import { useAuth } from "../features/auth/AuthContext";
 
 const platformGroups = [
   { title: "Overview", items: [["Dashboard", "/"]] },
-  { title: "Platform", items: [["Tenants", "/tenants"]] },
+  { title: "Platform", items: [["Tenants", "/tenants"], ["Modules", "/platform/modules"], ["Identifier Types", "/platform/identifier-types"], ["Sessions", "/platform/sessions"]] },
 ] as const;
 
 const tenantGroups = [
@@ -46,7 +46,6 @@ const tenantGroups = [
       ["Categories", "/categories"],
       ["Brands", "/brands"],
       ["Units", "/units"],
-      ["Identifiers", "/identifier-types"],
       ["Price Lists", "/price-lists"],
       ["Attributes", "/attributes"],
     ],
@@ -95,10 +94,8 @@ const tenantGroups = [
   {
     title: "System",
     items: [
-      ["Modules", "/modules"],
       ["User Roles", "/user-roles"],
       ["Role Permissions", "/role-permissions"],
-      ["Sessions", "/user-sessions"],
     ],
   },
 ] as const;
@@ -285,11 +282,10 @@ export default function App() {
     scope === "TENANT"
       ? `${tenant?.tenantCode ?? ""} · ${tenant?.tenantName ?? "Tenant"}`
       : "Platform administration";
-  const signOut = () => {
-    logout();
-    navigate(scope === "TENANT" ? "/tenant-login" : "/login", {
-      replace: true,
-    });
+  const signOut = async () => {
+    try { await logout(); }
+    catch { /* Local credentials have already been cleared. */ }
+    finally { navigate(scope === "TENANT" ? "/tenant-login" : "/login", { replace: true }); }
   };
 
   return (

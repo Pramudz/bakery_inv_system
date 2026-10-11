@@ -196,6 +196,26 @@ export function RefundsPage() {
     recovering.current.add(intent.key);
     try { completeIntent(intent, await invoiceRefundsApi.outcome(intent.invoiceId, intent.key)); }
     catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        try {
+          const current = await invoicesApi.refundable(intent.invoiceId);
+          if (current.invoiceStatus === 'FULLY_REFUNDED') {
+            const completed = (current.previousRefunds ?? []).filter((row: any) => row.status === 'COMPLETED');
+            const original = completed.find((row: any) => row.refundKey === intent.key);
+            if (original) {
+              completeIntent(intent, await invoiceRefundsApi.get(original.invoiceRefundId));
+              return;
+            }
+            if (completed.length) {
+              clearRecoveryIntent(localStorage, intent);
+              reloadIntents();
+              setRecoveryMessage(`Refund request ${intent.key} was not posted. Invoice ${intent.invoiceId} was already fully refunded under ${completed.map((row: any) => row.refundNumber).join(', ')}. The rejected browser request was cleared; review the completed refund and its payout separately.`);
+              refreshData();
+              return;
+            }
+          }
+        } catch { /* A failed reconciliation must keep the original request. */ }
+      }
       setRecoveryMessage(error instanceof ApiError && error.status === 404
         ? `${submittedError ? `${submittedError} ` : ''}The original refund is not confirmed yet. Keep its UUID and retry the original request when ready.`
         : error instanceof ApiError && (error.status === 401 || error.status === 403)
@@ -365,6 +385,7 @@ export function RefundsPage() {
 {completedRefund && <div className="modal-bg"><div className="modal pos-success" role="dialog" aria-modal="true" aria-label="Refund completed"><button className="receipt-close" aria-label="Close refund receipt" onClick={closeCompletedRefund}>×</button><span>✓</span><h2>Refund completed</h2><p>{refundReference(completedRefund)} · LKR {money(completedRefund.refundTotal)}</p><RefundReceiptContent refund={completedRefund}/>{printError && <div className="error-box" role="alert">{printError}</div>}<div className="modal-foot receipt-actions"><button className="btn btn-secondary" disabled={printingRefundId !== null || !completedRefund.receiptSnapshot} onClick={() => void printRefund(completedRefund.invoiceRefundId)}>{printingRefundId !== null ? 'Sending to printer...' : 'Print'}</button><button className="btn btn-secondary" onClick={closeCompletedRefund}>Close</button></div></div></div>}
     <div className="page-head"><div><div className="eyebrow">SALES / CORRECTIONS</div><h1>Invoice Correction</h1><p>Load one invoice and correct its items, quantities or discounts.</p></div></div>
     {storageError && <div className="error-box" role="alert">{storageError} No new refund can be submitted until its status is reconciled.</div>}
+    {!unresolved.length && recoveryMessage && <div className={recoveryMessage.includes('was not posted') ? 'error-box' : 'success-box'} role="status">{recoveryMessage}</div>}
     {unresolved.map((intent) => <div className="error-box" role="status" key={intent.key}>
       <strong>Unresolved refund for invoice {intent.invoiceId}</strong>
       <p>{recoveryMessage || 'Transaction status is being verified. Please do not submit another refund until verification is complete.'}</p>

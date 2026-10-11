@@ -108,7 +108,8 @@ export class InvoicesService {
     if (!Number.isFinite(dto.amount) || dto.amount <= 0 || money(dto.amount) !== dto.amount) {
       throw new BadRequestException('Payment amount must be positive with at most two decimal places.');
     }
-    return this.dataSource.transaction(async (manager) => {
+    try {
+    return await this.dataSource.transaction(async (manager) => {
       const invoiceRepo = manager.getRepository(Invoice);
       const invoice = await invoiceRepo.findOne({ where: { invoiceId: id, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } });
       if (!invoice) throw new NotFoundException('Invoice not found.');
@@ -133,7 +134,7 @@ export class InvoicesService {
       const [prepared] = await this.paymentProcessing.prepare(manager, user.tenantId, [dto], before);
       const after = money(before - prepared.applied);
       const payment = await repo.save(repo.create({
-        invoiceId: invoice.invoiceId, paymentMethodId: prepared.method.paymentMethodId, paymentMethodTypeSnapshot: prepared.method.paymentMethodType,
+        tenantId: user.tenantId, invoiceId: invoice.invoiceId, paymentMethodId: prepared.method.paymentMethodId, paymentMethodTypeSnapshot: prepared.method.paymentMethodType,
         paymentChannelId: prepared.channel?.paymentChannelId ?? null, paymentChannelCodeSnapshot: prepared.channel?.code ?? null,
         paymentChannelNameSnapshot: prepared.channel?.name ?? null,
         amount: prepared.applied.toFixed(2), tenderedAmount: prepared.tendered.toFixed(2), changeAmount: prepared.change.toFixed(2), referenceNumber: prepared.referenceNumber,
@@ -151,6 +152,17 @@ export class InvoicesService {
       await invoiceRepo.save(invoice);
       return payment;
     });
+    } catch (error) {
+      const driverError = error as { driverError?: { code?: string; sqlMessage?: string; message?: string }; code?: string; message?: string };
+      const duplicateKey = `${driverError.driverError?.sqlMessage ?? ''} ${driverError.driverError?.message ?? ''} ${driverError.message ?? ''}`;
+      if ((driverError.driverError?.code ?? driverError.code) !== 'ER_DUP_ENTRY'
+        || !/uq_invoice_payment_(tenant_collection|collection)/.test(duplicateKey)) throw error;
+      const existing = await this.dataSource.getRepository(InvoicePayment).findOneBy({ tenantId: user.tenantId, collectionKey: dto.collectionKey });
+      if (!existing) throw error;
+      if (Number(existing.invoiceId) !== Number(id)) throw new ConflictException('This collection key was already used for another invoice.');
+      this.assertCollectionRetry(existing, dto, user);
+      return existing;
+    }
   }
 
   async collectionOutcome(id: number, key: string, user: TenantPrincipal) {
@@ -435,7 +447,7 @@ export class InvoicesService {
 
       for (const payment of preparedPayments) {
         await manager.getRepository(InvoicePayment).save(manager.getRepository(InvoicePayment).create({
-          invoiceId: invoice.invoiceId, paymentMethodId: payment.method.paymentMethodId, paymentMethodTypeSnapshot: payment.method.paymentMethodType,
+          tenantId: user.tenantId, invoiceId: invoice.invoiceId, paymentMethodId: payment.method.paymentMethodId, paymentMethodTypeSnapshot: payment.method.paymentMethodType,
           paymentChannelId: payment.channel?.paymentChannelId ?? null, paymentChannelCodeSnapshot: payment.channel?.code ?? null,
           paymentChannelNameSnapshot: payment.channel?.name ?? null,
           amount: payment.applied.toFixed(2), tenderedAmount: payment.tendered.toFixed(2), changeAmount: payment.change.toFixed(2),

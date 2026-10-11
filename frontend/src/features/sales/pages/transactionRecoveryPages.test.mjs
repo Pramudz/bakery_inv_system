@@ -167,6 +167,38 @@ test('refund page keeps the original request after NOT FOUND and retries once wi
   } finally { await env.close(); }
 });
 
+test('refund page clears a rejected second-login intent after another refund fully refunded the invoice', async () => {
+  const env = browser();
+  const key = '8b12abde-7891-4891-9b12-156b87e53e31';
+  const completedKey = '530a2655-96dd-455b-b73f-cf40e58a470c';
+  saveRecoveryIntent(localStorage, newRecoveryIntent('refund', 5, 17, 52, 179, {
+    refundKey: key, invoiceId: 52, reason: 'Second login test',
+    details: [{ invoiceDetailId: 60, quantity: 100, returnToStock: true }], payments: [],
+  }));
+  const calls = [];
+  globalThis.__recoveryPageTest = {
+    auth: { tenant: { tenantId: 5 }, tenantUser: { userId: 17 }, role: null, accessScope: 'TENANT', assignedLocations: [] },
+    get: async (url) => {
+      calls.push(url);
+      if (url.includes('/invoice-refunds/by-key/')) throw new globalThis.__recoveryPageTest.ApiError(404, 'Refund outcome not found.');
+      if (url.includes('/invoices/52/refundable')) return { invoiceId: 52, invoiceStatus: 'FULLY_REFUNDED', previousRefunds: [{ invoiceRefundId: 20, refundKey: completedKey, refundNumber: 'REF-20261010-000020', status: 'COMPLETED' }], details: [] };
+      if (url.includes('/invoice-refunds/page')) return { items: [], total: 0 };
+      if (url.includes('/invoice-adjustments')) return [];
+      return [];
+    },
+    post: async () => { throw Error('A fully refunded invoice must not be posted again'); },
+  };
+  try {
+    const Page = await loadPage('RefundsPage.tsx');
+    await renderPage(Page, env.root);
+    assert.ok(calls.some((url) => url.includes(`/invoice-refunds/by-key/${key}?invoiceId=52`)));
+    assert.ok(calls.some((url) => url.includes('/invoices/52/refundable')));
+    assert.equal(localStorage.getItem(recoveryStorageKey('refund', 5, 17, 52)), null);
+    assert.doesNotMatch(document.body.textContent, /Unresolved refund for invoice 52/);
+    assert.match(document.body.textContent, /already fully refunded under REF-20261010-000020/);
+  } finally { await env.close(); }
+});
+
 test('collection page saves the new UUID and payload before POST and keeps them after a lost response', async () => {
   const env = browser();
   const posts = [];

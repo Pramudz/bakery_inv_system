@@ -112,11 +112,11 @@ test('disposable MySQL: migrated report sources reconcile across views, payments
         [cardId, 'CARD', channelA, 'A', 'Card A', 30],
         [cardId, 'CARD', channelB, 'B', 'Card B', 40],
       ] as const) await insert(`INSERT INTO tbl_invoice_payment
-        (invoice_id, payment_method_id, payment_method_type_snapshot, payment_channel_id,
+        (tenant_id, invoice_id, payment_method_id, payment_method_type_snapshot, payment_channel_id,
          payment_channel_code_snapshot, payment_channel_name_snapshot, amount, tendered_amount,
          paid_at, created_by_user_id, is_reversed)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, '2026-10-01 12:00:00', ?, 0)`,
-      [invoiceId, methodId, type, channelId, code, name, amount, amount, userId]);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '2026-10-01 12:00:00', ?, 0)`,
+      [tenantId, invoiceId, methodId, type, channelId, code, name, amount, amount, userId]);
       const transferId = await insert(`INSERT INTO tbl_stock_transfer
         (tenant_id, transfer_number, source_location_id, destination_location_id,
          status, transfer_date, created_by_user_id)

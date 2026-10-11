@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 
 import { UserSession } from '../user-sessions/user-sessions.entity';
 import { AuthenticatedRequest } from './auth.types';
@@ -61,8 +61,11 @@ export class TenantAuthGuard implements CanActivate {
       throw new UnauthorizedException('Tenant is inactive.');
     }
 
-    session.lastActivityAt = new Date();
-    await this.userSessionRepository.save(session);
+    const activity = await this.userSessionRepository.update(
+      { userSessionId: session.userSessionId, revokedAt: IsNull() },
+      { lastActivityAt: new Date() },
+    );
+    if (!activity.affected) throw new UnauthorizedException('Session has been revoked.');
 
     const role = session.user.userRoles.find((userRole) => userRole.role?.isActive)?.role;
     if (!role) throw new UnauthorizedException('User has no active role.');

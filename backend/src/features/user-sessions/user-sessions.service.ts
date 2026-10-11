@@ -1,25 +1,44 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { UserSession } from './user-sessions.entity';
-import { CreateUserSessionDto } from './dto/create-user-sessions.dto';
-import { UpdateUserSessionDto } from './dto/update-user-sessions.dto';
+
 @Injectable()
 export class UserSessionService {
-  constructor(@InjectRepository(UserSession) private readonly repo:Repository<UserSession> ) {}
-  findAll() { return this.repo.find({order:{userSessionId:'ASC'}}); }
-  async findOne(id:number) {
-    const row=await this.repo.findOneBy({userSessionId:id} as any);
-    if(!row) throw new NotFoundException('UserSession not found');
-    return row;
+  constructor(@InjectRepository(UserSession) private readonly repo: Repository<UserSession>) {}
+
+  private view(row: UserSession) {
+    return {
+      userSessionId: row.userSessionId,
+      userId: row.userId,
+      tenantId: row.user?.tenantId,
+      username: row.user?.username,
+      ipAddress: row.ipAddress,
+      userAgent: row.userAgent,
+      expiresAt: row.expiresAt,
+      lastActivityAt: row.lastActivityAt,
+      revokedAt: row.revokedAt,
+      createdAt: row.createdAt,
+    };
   }
-  async create(dto:CreateUserSessionDto) {
-    return this.repo.save(this.repo.create(dto as any));
+
+  async findAll() {
+    const rows = await this.repo.find({ relations: { user: true }, order: { userSessionId: 'DESC' } });
+    return rows.map((row) => this.view(row));
   }
-  async update(id:number,dto:UpdateUserSessionDto) {
-    await this.findOne(id); await this.repo.update(id,dto as any); return this.findOne(id);
+
+  async findOne(id: number) {
+    const row = await this.repo.findOne({ where: { userSessionId: id }, relations: { user: true } });
+    if (!row) throw new NotFoundException('User session not found.');
+    return this.view(row);
   }
-  async deactivate(id:number) {
-    await this.findOne(id); await this.repo.update(id,{isActive:false} as any); return this.findOne(id);
+
+  async deactivate(id: number) {
+    const row = await this.repo.findOneBy({ userSessionId: id });
+    if (!row) throw new NotFoundException('User session not found.');
+    if (!row.revokedAt) {
+      await this.repo.update({ userSessionId: id, revokedAt: IsNull() }, { revokedAt: new Date() });
+    }
+    return this.findOne(id);
   }
 }
