@@ -1,13 +1,13 @@
 import { CrudPage } from '../../../components/ui/CrudPage';
-import { identifierTypesApi } from '../api/identifier-typesApi';
+import { platformIdentifierTypesApi } from '../api/identifier-typesApi';
 
 export function IdentifierTypesPage() {
   return (
     <CrudPage
       title="Identifier Types"
       subtitle="Barcode and other product identifier types."
-      queryKey="identifier-types"
-      api={identifierTypesApi}
+      queryKey="platform-identifier-types"
+      api={platformIdentifierTypesApi}
       columns={[
         { key: 'id', label: 'ID' },
         { key: 'code', label: 'Code' },

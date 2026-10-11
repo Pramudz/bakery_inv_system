@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { createHash, randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 
@@ -49,6 +49,18 @@ export class AuthService {
 
   private readonly platformUsersService: PlatformUsersService,
 ) {}
+
+  async logout(authorization: string | undefined, scope: 'PLATFORM' | 'TENANT') {
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : '';
+    if (!token) throw new UnauthorizedException('Authentication token is required.');
+    const sessionTokenHash = createHash('sha256').update(token).digest('hex');
+    if (scope === 'PLATFORM') {
+      await this.platformSessionRepository.update({ sessionTokenHash, revokedAt: IsNull() }, { revokedAt: new Date() });
+    } else {
+      await this.userSessionRepository.update({ sessionTokenHash, revokedAt: IsNull() }, { revokedAt: new Date() });
+    }
+    return { revoked: true };
+  }
 
   async bootstrap(dto: BootstrapDto) {
     const existingUser =

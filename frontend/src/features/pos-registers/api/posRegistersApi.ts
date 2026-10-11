@@ -337,4 +337,5 @@ export const posRegistersApi = {
   decideMasterReconciliation: (id: number, data: { verificationKey: string; decision: "APPROVE" | "REJECT"; verifiedCountedCash: number; rejectionReason?: string }) => apiClient.post<MasterReconciliation>(`/pos-master-closing/verification-queue/${id}/decision`, data),
   recordMasterRefundPayout: (refundId: number, data: { payoutKey: string; locationId: number; posRegisterSessionId: number; paymentMethodId: number; amount: number; reason: string; physicalPayerIdentity: string }) => apiClient.post(`/invoice-refunds/${refundId}/master-payout`, data),
   recordMasterReversalPayout: (reversalId: number, data: { payoutKey: string; locationId: number; posRegisterSessionId: number; amount: number; reason: string; physicalPayerIdentity: string }) => apiClient.post(`/invoice-payment-reversals/${reversalId}/master-payout`, data),
+  masterPayoutOutcome: (key: string) => apiClient.get<{ posCashMovementId: number; amount: string; payoutKey: string; locationId: number }>(`/pos-master-payouts/by-key/${encodeURIComponent(key)}`),
 };

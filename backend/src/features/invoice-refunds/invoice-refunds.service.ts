@@ -346,7 +346,7 @@ export class InvoiceRefundsService {
         const [replacement] = await this.paymentProcessing.prepare(manager, user.tenantId, [{ paymentMethodId: dto.replacementPaymentMethodId, paymentChannelId: dto.replacementPaymentChannelId, amount: dto.replacementAmount, referenceNumber: dto.referenceNumber }], remaining);
         const replacementBalance = money(remaining - replacement.applied);
         await manager.getRepository(InvoicePayment).save(manager.getRepository(InvoicePayment).create({
-          invoiceId, paymentMethodId: replacement.method.paymentMethodId, paymentMethodTypeSnapshot: replacement.method.paymentMethodType,
+          tenantId: user.tenantId, invoiceId, paymentMethodId: replacement.method.paymentMethodId, paymentMethodTypeSnapshot: replacement.method.paymentMethodType,
           paymentChannelId: replacement.channel?.paymentChannelId ?? null, paymentChannelCodeSnapshot: replacement.channel?.code ?? null,
           paymentChannelNameSnapshot: replacement.channel?.name ?? null,
           amount: replacement.applied.toFixed(2), tenderedAmount: replacement.tendered.toFixed(2), changeAmount: replacement.change.toFixed(2),
@@ -402,6 +402,13 @@ export class InvoiceRefundsService {
       await this.recalculateInvoicePayments(manager, invoice);
       return movement;
     });
+  }
+
+  async masterPayoutOutcome(key: string, user: TenantPrincipal) {
+    const movement = await this.dataSource.getRepository(PosCashMovement).findOneBy({ tenantId: user.tenantId, payoutKey: key });
+    if (!movement || movement.fundingSource !== PosCashFundingSource.MASTER_REGISTER) throw new NotFoundException('Master payout outcome not found.');
+    this.assertLocationAccess(movement.locationId, user);
+    return movement;
   }
 
   async recordMasterReversalPayout(reversalId: number, dto: MasterReversalPayoutDto, user: TenantPrincipal) {

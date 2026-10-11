@@ -13,6 +13,7 @@ import { TenantModule } from '../tenant-modules/tenant-modules.entity';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthGuard } from './auth-guard';
+import { TenantAuthGuard } from './tenant-auth.guard';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { AuthGuard } from './auth-guard';
   providers: [
     AuthService,
     AuthGuard,
+    TenantAuthGuard,
   ],
 
   exports: [

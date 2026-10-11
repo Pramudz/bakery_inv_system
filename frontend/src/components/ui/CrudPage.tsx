@@ -25,6 +25,7 @@ type Props = {
     create: (x: any) => Promise<any>;
     update?: (id: number, x: any) => Promise<any>;
     deactivate?: (id: number) => Promise<any>;
+    remove?: (id: number) => Promise<any>;
   };
   columns: { key: string; label: string }[];
   fields: Field[];
@@ -57,10 +58,16 @@ export function CrudPage({
     mutationFn: (id: number) => api.deactivate!(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: [queryKey] }),
   });
+  const remove = useMutation({
+    mutationFn: (id: number) => api.remove!(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [queryKey] }),
+  });
   const idOf = (row: any) =>
     row.id ??
     row.customerId ??
     row.tenantId ??
+    row.userRoleId ??
+    row.rolePermissionId ??
     row.userId ??
     row.categoryId ??
     row.brandId ??
@@ -171,6 +178,11 @@ export function CrudPage({
                         disabled={deactivate.isPending}
                       >
                         Deactivate
+                      </button>
+                    )}
+                    {api.remove && (
+                      <button className="btn btn-danger-soft" onClick={() => remove.mutate(idOf(r))} disabled={remove.isPending}>
+                        Remove
                       </button>
                     )}
                   </td>

@@ -73,15 +73,27 @@ function fixture(serializeTransactions = false, mode = PosRegisterMode.TERMINAL_
     requireMasterClosingSession: async () => active,
   };
   let transactionQueue = Promise.resolve();
-  const transaction = async (work: any) => {
+  const isolationLevels: string[] = [];
+  const transaction = async (isolationOrWork: any, maybeWork?: any) => {
+    const work = maybeWork ?? isolationOrWork;
+    if (maybeWork) isolationLevels.push(isolationOrWork);
     if (!serializeTransactions) return work(manager);
     const result = transactionQueue.then(() => work(manager));
     transactionQueue = result.then(() => undefined, () => undefined);
     return result;
   };
   const dataSource: any = { manager, getRepository: repo, transaction };
-  return { service: new PosCashReconciliationService(dataSource, posSessions), registerSession, cashierSession, reconciliations, coverage, payments, movements };
+  return { service: new PosCashReconciliationService(dataSource, posSessions), registerSession, cashierSession, reconciliations, coverage, payments, movements, isolationLevels };
 }
+
+test('cashier count and master batch read committed receipts after acquiring the session lock', async () => {
+  const terminal = fixture();
+  await terminal.service.submit({ submissionKey: '11111111-1111-4111-8111-111111111111', countedCash: 210 }, 'credential', cashier);
+  assert.deepEqual(terminal.isolationLevels, ['READ COMMITTED']);
+  const master = fixture(false, PosRegisterMode.MASTER_REGISTER);
+  await master.service.submitMasterBatch({ submissionKey: '22222222-2222-4222-8222-222222222222' }, 'credential', cashier);
+  assert.deepEqual(master.isolationLevels, ['READ COMMITTED']);
+});
 
 test('cash summary separates sale, collection, tender, change and noncash totals', async () => {
   const f = fixture();

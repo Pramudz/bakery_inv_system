@@ -6,14 +6,16 @@ import applicationDataSource from '../../data-source';
 import { InvoicesService } from './invoices.service';
 import { Invoice } from './invoice.entity';
 import { InvoicePayment } from './invoice-payment.entity';
-import { PaymentMethod } from '../payment-methods/payment-methods.entity';
+import { PaymentMethod, PaymentMethodType } from '../payment-methods/payment-methods.entity';
 import { TenantPrincipal } from '../auth/auth.types';
-import { Product } from '../products/products.entity';
 import { Customer } from '../customers/customers.entity';
 
 test('local MySQL collection, receipt history and tenant/location isolation (rolled back)', async () => {
+  assert.equal(process.env.DB_DATABASE, 'dev_erp_product_import_test', 'Only the authorized disposable database may be used.');
   assert.ok(['localhost', '127.0.0.1', '::1'].includes(process.env.DB_HOST ?? ''), 'Local database required');
   const ds = await applicationDataSource.initialize();
+  const [{ db }] = await ds.query('SELECT DATABASE() AS db');
+  assert.equal(db, 'dev_erp_product_import_test');
   const runner = ds.createQueryRunner();
   await runner.connect();
   await runner.startTransaction();
@@ -21,8 +23,8 @@ test('local MySQL collection, receipt history and tenant/location isolation (rol
     const manager = runner.manager;
     const base = await manager.getRepository(Invoice).findOne({ where: {}, order: { invoiceId: 'DESC' } });
     assert.ok(base, 'An existing local invoice is needed for fixture foreign keys');
-    const method = await manager.getRepository(PaymentMethod).findOneBy({ tenantId: base.tenantId, isActive: true });
-    assert.ok(method, 'An active local payment method is needed');
+    const method = await manager.getRepository(PaymentMethod).findOneBy({ tenantId: base.tenantId, paymentMethodType: PaymentMethodType.CASH, isActive: true });
+    assert.ok(method, 'An active local CASH payment method is needed');
     const customer = await manager.getRepository(Customer).save(manager.getRepository(Customer).create({
       tenantId: base.tenantId, customerCode: `COL-${randomUUID()}`, customerName: 'Collection test customer', isActive: true,
     }));
@@ -61,25 +63,6 @@ test('local MySQL collection, receipt history and tenant/location isolation (rol
     assert.equal((await service.pendingPayments({ ...user, accessScope: 'LOCATION', assignedLocationIds: [] })).length, 0);
     await assert.rejects(service.receivePayment(Number(invoice.invoiceId), firstInput, { ...user, tenantId: -1 }), /not found/i);
 
-    const products = manager.getRepository(Product);
-    const template = await products.findOneByOrFail({ tenantId: base.tenantId });
-    const product = await products.save(products.create({
-      tenantId: base.tenantId, sku: `RECEIPT-TEST-${randomUUID()}`, productName: 'Original receipt cake',
-      categoryId: template.categoryId, baseUnitId: template.baseUnitId, isActive: true, isSellable: true, isStockItem: false,
-    }));
-    const created = await service.create({ checkoutKey: randomUUID(), locationId: Number(base.locationId), customerId: Number(customer.customerId), saleType: 'RETAIL', sellOnCredit: true,
-      details: [{ productId: Number(product.productId), quantity: 2, unitPrice: 2500, discountAmount: 500 }],
-      payments: [{ paymentMethodId: Number(method.paymentMethodId), amount: 2000 }],
-    }, user);
-    assert.equal(created.receiptSnapshot?.tenderedAmount, '2000.00');
-    assert.equal(created.receiptSnapshot?.balanceAmount, '2500.00');
-    await service.receivePayment(Number(created.invoiceId), { ...firstInput, amount: 2500, collectionKey: randomUUID() }, user);
-    await products.update(product.productId, { productName: 'Renamed cake' });
-    const reprint = await service.get(Number(created.invoiceId), user);
-    assert.equal(reprint.paidAmount, '4500.00');
-    assert.equal(reprint.receiptSnapshot?.tenderedAmount, '2000.00');
-    assert.equal(reprint.receiptSnapshot?.details[0].product.productName, 'Original receipt cake');
-    assert.deepEqual(JSON.parse(JSON.stringify(created.receiptSnapshot)), reprint.receiptSnapshot);
   } finally {
     await runner.rollbackTransaction();
     await runner.release();

@@ -42,4 +42,10 @@ export class RoleController {
   deactivate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthPrincipal) {
     return this.service.deactivate(id, user.tenantId);
   }
+
+  @Patch(':id/activate')
+  @RequirePermission('ROLE_UPDATE')
+  activate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthPrincipal) {
+    return this.service.activate(id, user.tenantId);
+  }
 }

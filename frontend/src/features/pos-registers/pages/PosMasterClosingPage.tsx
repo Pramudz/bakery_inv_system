@@ -5,6 +5,9 @@ import { paymentMethodsApi } from "../../sales/api/paymentMethodsApi";
 import { posRegistersApi } from "../api/posRegistersApi";
 import { PosPagination, PosSearch, useDebouncedValue } from "../components/PosListControls";
 import { invalidateVerificationQueries } from "../verificationQueries";
+import { ApiError } from "../../../services/apiClient";
+import { clearMasterPayoutIntent, readMasterPayoutIntent, saveMasterPayoutIntent } from "../masterPayoutRecovery";
+import type { MasterPayoutIntent } from "../masterPayoutRecovery";
 
 const money = (value: unknown) => Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -41,17 +44,64 @@ export function PosMasterClosingPage({ embedded = false, selectedLocationId }: {
   const [paymentMethodId, setPaymentMethodId] = useState("");
   const [payoutReason, setPayoutReason] = useState("");
   const [payerIdentity, setPayerIdentity] = useState("");
-  const [payoutKey, setPayoutKey] = useState(() => crypto.randomUUID());
+  const [unresolvedPayout, setUnresolvedPayout] = useState<MasterPayoutIntent | null>(null);
+  const [payoutRecoveryMessage, setPayoutRecoveryMessage] = useState("");
+  const [payoutRecoveryBlocked, setPayoutRecoveryBlocked] = useState(false);
+  const verifyPayout = async (intent: MasterPayoutIntent) => {
+    try {
+      const result = await posRegistersApi.masterPayoutOutcome(intent.payload.payoutKey);
+      clearMasterPayoutIntent(localStorage, intent);
+      setUnresolvedPayout(null);
+      setPayoutRecoveryMessage(`Previously posted payout #${result.posCashMovementId} verified. Amount LKR ${money(result.amount)}.`);
+      void summary.refetch();
+    } catch (error) {
+      setUnresolvedPayout(intent);
+      setPayoutRecoveryMessage(error instanceof ApiError && error.status === 404
+        ? "Payout is not yet confirmed. A request may still be processing. Retry the saved request with its original UUID."
+        : "Payout status is uncertain. Do not start another payout; verify status or retry the saved request.");
+    }
+  };
+  useEffect(() => {
+    if (!auth.tenant?.tenantId || !auth.tenantUser?.userId) return;
+    try {
+      const saved = readMasterPayoutIntent(localStorage, auth.tenant.tenantId, auth.tenantUser.userId);
+      setUnresolvedPayout(saved);
+      setPayoutRecoveryBlocked(false);
+      if (saved) { setPayoutRecoveryMessage("Checking a previously submitted master payout."); void verifyPayout(saved); }
+    } catch (error) {
+      setPayoutRecoveryBlocked(true);
+      setPayoutRecoveryMessage((error as Error).message);
+    }
+  }, [auth.tenant?.tenantId, auth.tenantUser?.userId]);
   const payout = useMutation({
-    mutationFn: () => {
-      const base = { payoutKey, locationId, posRegisterSessionId: summary.data!.posRegisterSessionId, amount: Number(payoutAmount), reason: payoutReason.trim(), physicalPayerIdentity: payerIdentity.trim() };
-      return payoutType === "REFUND"
-        ? posRegistersApi.recordMasterRefundPayout(Number(sourceId), { ...base, paymentMethodId: Number(paymentMethodId) })
-        : posRegistersApi.recordMasterReversalPayout(Number(sourceId), base);
+    mutationFn: (intent: MasterPayoutIntent) => {
+      const { paymentMethodId, ...base } = intent.payload;
+      return intent.kind === "REFUND"
+        ? posRegistersApi.recordMasterRefundPayout(intent.sourceId, { ...base, paymentMethodId: Number(paymentMethodId) })
+        : posRegistersApi.recordMasterReversalPayout(intent.sourceId, base);
     },
-    onSuccess: () => { setSourceId(""); setPayoutAmount(""); setPayoutReason(""); setPayerIdentity(""); setPayoutKey(crypto.randomUUID()); void summary.refetch(); },
+    onSuccess: (_result, intent) => { clearMasterPayoutIntent(localStorage, intent); setUnresolvedPayout(null); setPayoutRecoveryMessage(`Master-funded payout ${intent.payload.payoutKey} recorded.`); setSourceId(""); setPayoutAmount(""); setPayoutReason(""); setPayerIdentity(""); void summary.refetch(); },
+    onError: (_error, intent) => { setUnresolvedPayout(intent); setPayoutRecoveryMessage("Payout status is being verified. Do not submit another payout until verification is complete."); void verifyPayout(intent); },
   });
-  const sendPayout = (event: FormEvent) => { event.preventDefault(); payout.mutate(); };
+  const sendPayout = (event: FormEvent) => {
+    event.preventDefault();
+    if (payout.isPending || payoutRecoveryBlocked || !auth.tenant?.tenantId || !auth.tenantUser?.userId || !summary.data) return;
+    try {
+      const prior = readMasterPayoutIntent(localStorage, auth.tenant.tenantId, auth.tenantUser.userId);
+      if (prior) { setUnresolvedPayout(prior); setPayoutRecoveryMessage("Resolve the saved payout before starting another."); return; }
+      const intent: MasterPayoutIntent = {
+        version: 1, tenantId: String(auth.tenant.tenantId), userId: String(auth.tenantUser.userId), kind: payoutType,
+        sourceId: Number(sourceId), createdAt: new Date().toISOString(),
+        payload: { payoutKey: crypto.randomUUID(), locationId, posRegisterSessionId: summary.data.posRegisterSessionId,
+          ...(payoutType === "REFUND" ? { paymentMethodId: Number(paymentMethodId) } : {}), amount: Number(payoutAmount),
+          reason: payoutReason.trim(), physicalPayerIdentity: payerIdentity.trim() },
+      };
+      saveMasterPayoutIntent(localStorage, intent);
+      setUnresolvedPayout(intent);
+      setPayoutRecoveryMessage("Submitting payout; its original UUID is saved for recovery.");
+      payout.mutate(intent);
+    } catch (error) { setPayoutRecoveryMessage((error as Error).message); }
+  };
   const s = summary.data;
   const validCount = countedCash !== "" && Number.isFinite(Number(countedCash)) && Number(countedCash) >= 0 && Boolean(masterIdentity.trim());
 
@@ -80,8 +130,9 @@ export function PosMasterClosingPage({ embedded = false, selectedLocationId }: {
       </div>
       {canPayout && <form className="card" onSubmit={sendPayout}><div className="sales-card-head"><div><h2>Record master-funded payout</h2><p>No terminal pairing is used. The source document and open funding register are locked before posting.</p></div></div>
         <div className="form-grid"><label className="field"><span>Source type</span><select className="control" value={payoutType} onChange={(event) => { setPayoutType(event.target.value as "REFUND" | "REVERSAL"); payout.reset(); }}><option value="REFUND">Completed invoice refund</option><option value="REVERSAL">Payment reversal</option></select></label><label className="field"><span>{payoutType === "REFUND" ? "Refund ID" : "Payment reversal ID"}</span><input required className="control" type="number" min="1" value={sourceId} onChange={(event) => setSourceId(event.target.value)} /></label>{payoutType === "REFUND" && <label className="field"><span>Cash payment method</span><select required className="control" value={paymentMethodId} onChange={(event) => setPaymentMethodId(event.target.value)}><option value="">Choose cash method</option>{(methods.data ?? []).filter((method) => method.isActive && method.paymentMethodType === "CASH").map((method) => <option key={method.paymentMethodId} value={method.paymentMethodId}>{method.paymentMethodName}</option>)}</select></label>}<label className="field"><span>Actual payout</span><input required className="control" type="number" min="0.01" step="0.01" value={payoutAmount} onChange={(event) => setPayoutAmount(event.target.value)} /></label><label className="field"><span>Physical payer identity</span><input required className="control" maxLength={150} value={payerIdentity} onChange={(event) => setPayerIdentity(event.target.value)} /></label><label className="field full"><span>Reason</span><input required className="control" maxLength={255} value={payoutReason} onChange={(event) => setPayoutReason(event.target.value)} /></label></div>
-        {payout.isError && <div className="error-box">{payout.error.message}</div>} {payout.isSuccess && <div className="success-box">Master-funded payout recorded.</div>}
-        <button className="btn btn-primary" disabled={payout.isPending || s.registerStatus !== "OPEN"}>{payout.isPending ? "Posting..." : "Post physical payout"}</button>
+        {payoutRecoveryMessage && <div className={unresolvedPayout || payoutRecoveryBlocked ? "error-box" : "success-box"} role="status">{payoutRecoveryMessage}{unresolvedPayout && <p>Original {unresolvedPayout.kind.toLowerCase()} payout: source #{unresolvedPayout.sourceId}, LKR {money(unresolvedPayout.payload.amount)}, UUID {unresolvedPayout.payload.payoutKey}.</p>}</div>}
+        {unresolvedPayout && <div className="toolbar"><button type="button" className="btn btn-secondary" disabled={payout.isPending} onClick={() => void verifyPayout(unresolvedPayout)}>Verify saved payout</button><button type="button" className="btn btn-secondary" disabled={payout.isPending || s.registerStatus !== "OPEN"} onClick={() => payout.mutate(unresolvedPayout)}>Retry original request</button></div>}
+        <button className="btn btn-primary" disabled={payout.isPending || !!unresolvedPayout || payoutRecoveryBlocked || s.registerStatus !== "OPEN"}>{payout.isPending ? "Posting..." : "Post physical payout"}</button>
       </form>}
       <div className="card"><div className="sales-card-head"><div><h2>Submit physical count</h2><p>Submission freezes cashier starts, receipts, and payouts until independent approval or audited recount.</p></div></div>
         <div className="form-grid"><label className="field"><span>Master cashier identity</span><input className="control" maxLength={150} value={masterIdentity} onChange={(event) => setMasterIdentity(event.target.value)} /></label><label className="field"><span>Physical counted cash</span><input className="control" type="number" min="0" step="0.01" value={countedCash} onChange={(event) => { setCountedCash(event.target.value); submit.reset(); }} /></label></div>

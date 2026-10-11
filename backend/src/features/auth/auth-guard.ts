@@ -7,7 +7,7 @@ import {
 import { AuthenticatedRequest } from './auth.types';
 import { createHash } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 
 import { PlatformSession } from '../platform-sessions/platform-sessions.entity';
 import { AuthPrincipal } from './auth.types';
@@ -88,8 +88,11 @@ export class AuthGuard implements CanActivate {
       );
     }
 
-    session.lastActivityAt = new Date();
-    await this.platformSessionRepository.save(session);
+    const activity = await this.platformSessionRepository.update(
+      { platformSessionId: session.platformSessionId, revokedAt: IsNull() },
+      { lastActivityAt: new Date() },
+    );
+    if (!activity.affected) throw new UnauthorizedException('Session has been revoked.');
 
     request.user = {
       scope: 'PLATFORM',

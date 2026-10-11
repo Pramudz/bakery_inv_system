@@ -47,4 +47,10 @@ export class UserRoleService {
     await this.repo.update(id,dto as any);
     return this.findOne(id,tenantId);
   }
+
+  async remove(id: number, tenantId: number) {
+    await this.findOne(id, tenantId);
+    await this.repo.delete(id);
+    return { removed: true };
+  }
 }

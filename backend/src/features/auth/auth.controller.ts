@@ -1,10 +1,12 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Headers, Post, UseGuards } from '@nestjs/common';
 
 import { AuthService } from './auth.service';
 import { BootstrapDto } from './dto/bootstrap.dto';
 import { LoginDto } from './dto/login.dto';
 import { TenantLoginDto } from './dto/tenant-login.dto';
 import { assertDevelopmentBootstrapEnabled } from './development-bootstrap';
+import { AuthGuard } from './auth-guard';
+import { TenantAuthGuard } from './tenant-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -24,5 +26,17 @@ export class AuthController {
   @Post('tenant-login')
   async tenantLogin(@Body() dto: TenantLoginDto) {
     return this.authService.tenantLogin(dto);
+  }
+
+  @Post('logout')
+  @UseGuards(AuthGuard)
+  logoutPlatform(@Headers('authorization') authorization: string | undefined) {
+    return this.authService.logout(authorization, 'PLATFORM');
+  }
+
+  @Post('tenant-logout')
+  @UseGuards(TenantAuthGuard)
+  logoutTenant(@Headers('authorization') authorization: string | undefined) {
+    return this.authService.logout(authorization, 'TENANT');
   }
 }
