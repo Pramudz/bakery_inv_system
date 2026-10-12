@@ -1,11 +1,32 @@
 
-import { readFile, writeFile, rename } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readFile, writeFile, rename, access } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { isSea } from 'node:sea';
+import { agentPaths } from './runtime-paths.mjs';
 import { renderEscPos } from './receipt.mjs';
 import { deliver } from './transports.mjs';
 import { agentRequest } from './http.mjs';
 
-const configPath = resolve(process.argv[2] ?? 'agent-config.json');
+async function main() {
+const paths = agentPaths();
+const configPath = paths.configPath;
+const version = typeof __AGENT_VERSION__ === 'undefined' ? 'development' : __AGENT_VERSION__;
+if (process.argv.includes('--version')) {
+  console.log(version);
+  return;
+}
+if (process.argv.includes('--self-test')) {
+  await access(paths.windowsPrintScript);
+  const receipt = { documentType: 'SALE', billNo: 1, header: { companyName: 'Bakery' },
+    details: [{ quantity: 2, unitPrice: 100, discountAmount: 0, netTotal: 200,
+      product: { sku: 'TEST', productName: 'Test item' } }], grandTotal: 200 };
+  const bytes = renderEscPos(receipt, { paperWidth: 80, encoding: 'CP437', cutEnabled: true });
+  console.log(JSON.stringify({ version, mode: isSea() ? 'exe' : 'node',
+    receiptSha256: createHash('sha256').update(bytes).digest('hex'),
+    configPath, statePath: paths.statePath({}), logPath: paths.logPath({}) }));
+  return;
+}
 
 let config;
 
@@ -51,9 +72,17 @@ if (
   throw new Error('A profileId and agent credential are required.');
 }
 
-const statePath = resolve(
-  config.statePath ?? `${configPath}.state.json`
-);
+const statePath = paths.statePath(config);
+const logStream = createWriteStream(paths.logPath(config), { flags: 'a' });
+logStream.on('error', (error) => console.error(`Print Agent log failed: ${error.message}`));
+const log = (...parts) => {
+  console.log(...parts);
+  logStream.write(`${new Date().toISOString()} ${parts.join(' ')}\n`);
+};
+const logError = (...parts) => {
+  console.error(...parts);
+  logStream.write(`${new Date().toISOString()} ERROR ${parts.join(' ')}\n`);
+};
 
 let completed = new Set();
 
@@ -86,7 +115,7 @@ async function remember(jobId, attempt) {
 const sleep = (ms) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-console.log(
+log(
   `Bakery POS print agent running for profile ${config.profileId}.`
 );
 
@@ -107,13 +136,13 @@ for (;;) {
           ? {
               ...job.printer,
               transport: 'FILE',
-              target: resolve(config.testOutputDir),
+              target: paths.dataPath(config.testOutputDir),
               documentType: job.receipt?.documentType
             }
           : job.printer;
 
         // Diagnostic: display the actual print destination.
-        console.log(
+        log(
           'PRINT DESTINATION:',
           printer.transport,
           '| TARGET:',
@@ -136,12 +165,12 @@ for (;;) {
         }
       );
 
-      console.log(
+      log(
         `Print job ${job.jobId} accepted by printer transport.`
       );
 
     } catch (error) {
-      console.error(
+      logError(
         `Print job ${job.jobId} failed: ${error.message}`
       );
 
@@ -155,13 +184,19 @@ for (;;) {
           }
         );
       } catch (ackError) {
-        console.error(
+        logError(
           `Could not report print failure: ${ackError.message}`
         );
       }
     }
   } catch (error) {
-    console.error(`Agent poll failed: ${error.message}`);
+    logError(`Agent poll failed: ${error.message}`);
     await sleep(5000);
   }
 }
+}
+
+main().catch((error) => {
+  console.error(`Print Agent stopped: ${error.stack ?? error.message}`);
+  process.exitCode = 1;
+});
