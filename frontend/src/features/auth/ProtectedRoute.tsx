@@ -8,7 +8,7 @@ export function ProtectedRoute() {
   if (!isAuthenticated) {
     return (
       <Navigate
-        to="/login"
+        to="/tenant-login"
         replace
         state={{ from: location.pathname }}
       />

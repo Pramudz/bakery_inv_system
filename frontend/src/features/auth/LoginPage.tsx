@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 
 import { useAuth } from './AuthContext';
 
@@ -138,8 +138,6 @@ export function LoginPage() {
             {submitting ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
-
-        <div className="login-switch"><Link to="/tenant-login">Tenant administrator login</Link></div>
 
         <div className="login-footer">
           Platform access is restricted to authorized

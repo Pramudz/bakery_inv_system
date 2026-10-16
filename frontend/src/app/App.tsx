@@ -36,7 +36,6 @@ const tenantGroups = [
     items: [
       ["Users", "/users"],
       ["Roles", "/roles"],
-      ["Permissions", "/permissions"],
     ],
   },
   {
@@ -91,13 +90,6 @@ const tenantGroups = [
   {
     title: "Company Details",
     items: [["Company Details", "/company-details"]],
-  },
-  {
-    title: "System",
-    items: [
-      ["User Roles", "/user-roles"],
-      ["Role Permissions", "/role-permissions"],
-    ],
   },
 ] as const;
 
