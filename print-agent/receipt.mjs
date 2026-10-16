@@ -100,14 +100,18 @@ function layout(receipt, width, copy) {
   const documentLabel = receipt.documentType === 'REFUND' ? 'Refund No' : 'Bill No';
   if (receipt.documentType !== 'TEST') {
     paired(documentLabel, number == null ? 'Legacy' : String(number).padStart(4, '0'), 'Date', dateTime);
+    rows.push({ feedDots: 12 });
     paired('Location', receipt.printedLocationCode ?? '-', 'POS/Register', receipt.printedRegisterCode ?? '-');
-    const cashier = [header.cashierCode, header.cashierName].filter(Boolean).join(' / ');
+    rows.push({ feedDots: 12 });
+    const cashier = [header.cashierName].filter(Boolean).join(' / ');
     if (cashier) field(receipt.documentType === 'REFUND' ? 'Processed by' : 'Cashier', cashier);
+    rows.push({ feedDots: 12 });
     field('Customer', receipt.customer?.customerName ?? 'No customer selected');
+    rows.push({ feedDots: 12 });
   }
   if (receipt.documentType === 'SALE') {
     field('Sale Type', receipt.saleType === 'WHOLESALE' ? 'Wholesale' : 'Retail');
-    field('Payment', paymentSummary(receipt.payments, 'Unpaid'));
+    //field('Payment', paymentSummary(receipt.payments, 'Unpaid'));
   }
   if (receipt.documentType === 'REFUND') {
     separator();
@@ -128,7 +132,8 @@ function layout(receipt, width, copy) {
       ? cells.map((cell, index) => cell.padStart(widths[index])).join('') : null;
     add(numeric(['QTY', 'RATE', 'DISCOUNT', 'AMOUNT']), { bold: true });
     separator();
-    for (const [index, item] of (receipt.details ?? []).entries()) {
+    const details = receipt.details ?? [];
+    for (const [index, item] of details.entries()) {
       const serial = Number.isSafeInteger(Number(item.lineNumber)) && Number(item.lineNumber) > 0 ? item.lineNumber : index + 1;
       const sku = safe(item.product?.sku);
       const prefix = `${serial}. ${sku ? `${sku}  ` : ''}`;
@@ -138,13 +143,18 @@ function layout(receipt, width, copy) {
       const numericLine = numeric(cells);
       if (numericLine) add(numericLine);
       else { rightRow('Qty', cells[0]); rightRow('Rate', cells[1]); rightRow('Discount', cells[2]); rightRow('Amount', cells[3]); }
+      if (index < details.length - 1) {
+        rows.push({ feedDots: 12 });
+      }
     }
     separator();
   }
 
   if (receipt.documentType === 'SALE') {
     const itemCount = (receipt.details ?? []).reduce((sum, item) => sum + Number(item.quantity ?? 0), 0);
-    rightRow('Items count', count(itemCount));
+    const lineCount = (receipt.details ?? []).length;
+    rightRow('Line count', String(lineCount));
+    rightRow('Total Quantity', count(itemCount));
     amount('Subtotal', receipt.subtotal);
     rightRow('Total discount', `- LKR ${money(receipt.discountTotal)}`);
     separator();
@@ -186,7 +196,9 @@ function layout(receipt, width, copy) {
 }
 
 export function receiptLines(receipt, width, copy = false) {
-  return layout(receipt, width, copy).map((row) => row.text);
+  return layout(receipt, width, copy)
+    .filter((row) => row.feedDots == null)
+    .map((row) => row.text);
 }
 
 export function renderEscPos(receipt, printer, copy = false) {
@@ -198,6 +210,10 @@ export function renderEscPos(receipt, printer, copy = false) {
   let bold = false;
   let wide = false;
   for (const row of layout(receipt, printer.paperWidth, copy)) {
+    if (row.feedDots != null) {
+      bytes.push(Buffer.from([0x1b, 0x4a, row.feedDots]));
+      continue;
+    }
     if (row.align !== align) { align = row.align; bytes.push(Buffer.from([0x1b, 0x61, align === 'center' ? 1 : 0])); }
     if (row.bold !== bold || row.wide !== wide) {
       bold = row.bold; wide = row.wide;

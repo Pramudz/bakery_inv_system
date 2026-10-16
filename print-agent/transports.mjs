@@ -2,8 +2,8 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { writeFile, unlink, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { agentPaths } from './runtime-paths.mjs';
 import { randomUUID } from 'node:crypto';
 
 export function tcpPrint(printer, bytes) {
@@ -23,7 +23,7 @@ export async function windowsQueuePrint(printer, bytes) {
   await writeFile(path, bytes, { flag: 'wx' });
   try {
     await new Promise((resolve, reject) => {
-      const script = join(dirname(fileURLToPath(import.meta.url)), 'windows-raw-print.ps1');
+      const script = agentPaths().windowsPrintScript;
       const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', script, '-Queue', printer.target, '-File', path], { windowsHide: true });
       let errors = '';
       child.stderr.on('data', (chunk) => { errors += chunk.toString(); });

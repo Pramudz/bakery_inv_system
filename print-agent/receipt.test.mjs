@@ -42,10 +42,10 @@ test('80 mm sale follows preview hierarchy, fixed columns, and new Prosinc foote
   assert.ok(lines.indexOf('PRAMUD KUMARAGE') < lines.indexOf('SALE RECEIPT - COPY'));
   assert.ok(lines.some((line) => line.includes('Bill No: 0001') && line.includes('Date: 08/10/2026 05:34')));
   assert.ok(lines.some((line) => line.includes('Location: 105') && line.includes('POS/Register: POS-01')));
-  for (const label of ['Cashier: 001 / Administrator', 'Customer: No customer selected', 'Sale Type: Retail', 'Payment: CASH', 'S/N CODE  ITEM NAME']) assert.ok(lines.includes(label), label);
+  for (const label of ['Cashier: Administrator', 'Customer: No customer selected', 'Sale Type: Retail', 'S/N CODE  ITEM NAME']) assert.ok(lines.includes(label), label);
   assert.ok(lines.some((line) => line.startsWith('1. SKU-000013  Astra Margarin 500G Tub')));
   assert.ok(lines.some((line) => /5\.000\s+200\.00\s+0\.00\s+1,000\.00$/.test(line)));
-  for (const label of ['Items count', 'Subtotal', 'Total discount', 'Original Total', 'Tendered', 'Paid Amount', 'Outstanding Balance', 'Change Given', 'Payment method', 'CASH', 'Payment status']) assert.ok(row(lines, label), label);
+  for (const label of ['Line count', 'Total Quantity', 'Subtotal', 'Total discount', 'Original Total', 'Tendered', 'Paid Amount', 'Outstanding Balance', 'Change Given', 'Payment method', 'CASH', 'Payment status']) assert.ok(row(lines, label), label);
   assert.equal(row(lines, 'Payment status').trimEnd().split(/\s+/).slice(-2).join(' '), 'FULL PAID');
   assert.ok(lines.includes('Thank you for shopping with us!'));
   assert.ok(lines.includes('Software by Prosinc :'));
@@ -102,7 +102,7 @@ test('split payment channels, references and long metadata remain readable', () 
   const lines = receiptLines(split, 80);
   assert.ok(lines.every((line) => line.length <= 48));
   assert.ok(lines.some((line) => line.includes('Customer: A customer with a long name')));
-  assert.ok(lines.some((line) => line.includes('Payment: CASH + CARD / VISA')));
+  assert.ok(lines.some((line) => line.includes('Payment method') && line.includes('CASH + CARD / VISA')));
   assert.ok(lines.some((line) => line.includes('Reference: APPROVED-123')));
   assert.ok(lines.some((line) => line.startsWith('CARD / VISA') && line.endsWith('LKR 500.00')));
 });
@@ -116,7 +116,7 @@ test('original and copy headings differ; refund shares layout and original-sale 
   assert.ok(lines.includes('Original sale'));
   assert.ok(lines.some((line) => line.includes('Refund No: 0002') && line.includes('Date:')));
   assert.ok(lines.some((line) => line.includes('Bill No: 0001') && line.includes('Date: 08/10/2026')));
-  for (const label of ['Processed by: 001 / Administrator', 'S/N CODE  ITEM NAME', 'Subtotal', 'Total discount', 'Refund Total', 'Refund method', 'CARD / VISA', 'Reference: CARD-77', 'Reason: Customer return']) assert.ok(row(lines, label), label);
+  for (const label of ['Processed by: Administrator', 'S/N CODE  ITEM NAME', 'Subtotal', 'Total discount', 'Refund Total', 'Refund method', 'CARD / VISA', 'Reference: CARD-77', 'Reason: Customer return']) assert.ok(row(lines, label), label);
   assert.ok(lines.some((line) => line.startsWith('1. SKU-000013  Astra Margarin')));
   assert.ok(lines.some((line) => /1\.000\s+100\.00\s+5\.00\s+95\.00$/.test(line)));
   assert.equal(row(lines, 'Refund Total').length, 48);

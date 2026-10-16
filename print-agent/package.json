@@ -3,6 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node agent.mjs", "test": "node --test *.test.mjs" },
-  "dependencies": { "iconv-lite": "^0.6.3" }
+  "scripts": {
+    "start": "node agent.mjs",
+    "test": "node --test *.test.mjs",
+    "build:windows": "node scripts/build-windows.mjs",
+    "test:windows": "node scripts/test-windows.mjs"
+  },
+  "dependencies": {
+    "iconv-lite": "^0.6.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6"
+  }
 }
