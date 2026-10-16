@@ -352,7 +352,7 @@ export class InvoicesService {
         user.tenantId,
         dto.locationId,
         dto.saleType as PosSaleType,
-        dto.details.map((line) => ({ productId: line.productId, quantity: line.quantity })),
+        dto.details.map((line) => ({ productId: line.productId, quantity: line.quantity, retailDiscount: line.retailDiscount })),
       );
       const priceChanges = sourceQuotation ? [] : dto.details.flatMap((request, index) => {
         const current = quote.lines[index];
@@ -501,6 +501,32 @@ export class InvoicesService {
     }
   }
 
+  async billingShortcuts(locationId: number, user: TenantPrincipal) {
+    await this.validateLocation(locationId, user);
+    const now = new Date();
+    const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const source = `
+      FROM tbl_invoice_detail detail
+      INNER JOIN tbl_invoice invoice ON invoice.invoice_id = detail.invoice_id
+      INNER JOIN tbl_product product ON product.product_id = detail.product_id AND product.tenant_id = invoice.tenant_id
+      INNER JOIN tbl_product_location assignment ON assignment.product_id = product.product_id
+        AND assignment.location_id = invoice.location_id AND assignment.is_active = 1 AND assignment.is_sellable = 1
+      LEFT JOIN tbl_category category ON category.category_id = product.category_id AND category.tenant_id = invoice.tenant_id
+      WHERE invoice.tenant_id = ? AND invoice.location_id = ?
+        AND invoice.invoice_date >= ? AND invoice.invoice_date <= ?
+        AND invoice.invoice_status IN ('COMPLETED', 'PARTIALLY_REFUNDED')
+        AND product.is_active = 1 AND product.is_sellable = 1`;
+    const params = [user.tenantId, locationId, since, now];
+    const [items, categories] = await Promise.all([
+      this.dataSource.query(`SELECT product.product_id AS productId ${source}
+        GROUP BY product.product_id ORDER BY COUNT(DISTINCT invoice.invoice_id) DESC, SUM(detail.quantity) DESC, product.product_id ASC`, params),
+      this.dataSource.query(`SELECT COALESCE(category.category_name, 'Uncategorized') AS category ${source}
+        GROUP BY COALESCE(category.category_name, 'Uncategorized') ORDER BY COUNT(DISTINCT invoice.invoice_id) DESC, SUM(detail.quantity) DESC, category ASC`, params),
+    ]);
+    return { productIds: items.map((row: { productId: string | number }) => Number(row.productId)),
+      categories: categories.map((row: { category: string }) => row.category), periodDays: 30 };
+  }
+
   async catalog(locationId: number, saleType: PosSaleType, user: TenantPrincipal) {
     await this.validateLocation(locationId, user);
     const products: Array<{ productId: number; code: string; name: string; category: string; stock: string; isStockItem: number }> = await this.dataSource.query(`
@@ -558,11 +584,12 @@ export class InvoicesService {
     return Number(request.quotedPriceListItemId) !== current.priceListItemId
       || Number(request.quotedPriceListItemDiscountId ?? 0) !== Number(current.priceListItemDiscountId ?? 0)
       || money(Number(request.quotedUnitPrice)) !== current.unitPrice
+      || (request.quotedPricingUnitPrice !== undefined && Number(request.quotedPricingUnitPrice) !== (current.pricingUnitPrice ?? current.unitPrice))
       || money(Number(request.quotedDiscountAmount)) !== current.discountAmount;
   }
 
   private checkoutFingerprint(dto: CreateInvoiceDto) {
-    const details = dto.details.map((line) => ({ productId: Number(line.productId), quantity: Number(line.quantity) }))
+    const details = dto.details.map((line) => ({ productId: Number(line.productId), quantity: Number(line.quantity), ...(line.retailDiscount ? { retailDiscount: { type: line.retailDiscount.type, value: Number(line.retailDiscount.value) } } : {}) }))
       .sort((a, b) => a.productId - b.productId || a.quantity - b.quantity);
     const payments = (dto.payments ?? []).map((payment) => ({
       paymentMethodId: Number(payment.paymentMethodId),
@@ -595,6 +622,7 @@ export class InvoicesService {
     if (dto.details.length !== lines.length) throw new ConflictException('Quotation items cannot be changed in POS.');
     for (const [index, line] of lines.entries()) {
       const request = dto.details[index];
+      if (request.retailDiscount) throw new ConflictException('Quotation discounts cannot be changed in POS.');
       if (Number(request.productId) !== Number(line.productId) || Number(request.quantity) !== Number(line.quantity)) throw new ConflictException('Quotation items and quantities cannot be changed in POS.');
       const product = await manager.getRepository(Product).findOneBy({ productId: line.productId, tenantId: user.tenantId, isActive: true, isSellable: true });
       const assignment = await manager.getRepository(ProductLocation).findOneBy({ productId: line.productId, locationId: quotation.locationId, isActive: true, isSellable: true });

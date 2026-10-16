@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { PlatformUser } from '../platform-users/platform-users.entity';
 import { AuthorizationCatalogService } from './authorization-catalog.service';
 import { ModuleEntity } from '../modules/modules.entity';
 import { Permission } from '../permissions/permissions.entity';
@@ -33,8 +34,15 @@ test('production HTTP bootstrap routes reject requests before service calls', as
 test('platform login needs no tenant records and creates a hashed session token', async () => {
   const hash = await bcrypt.hash('StrongPlatform9!', 4);
   let tokenHash = '';
+  const account = { platformUserId: 1, username: 'Platform', passwordHash: hash, isActive: true };
+  const manager: any = {
+    getRepository: (entity: any) => entity === PlatformUser
+      ? { findOne: async () => account }
+      : { create: (row: any) => row, save: async (row: any) => { tokenHash = row.sessionTokenHash; return row; } },
+    transaction: async (work: any) => work(manager),
+  };
   const service = new AuthService(
-    { findOne: async () => ({ platformUserId: 1, username: 'Platform', passwordHash: hash, isActive: true }) } as any,
+    { manager, findOne: async () => account } as any,
     { create: (row: any) => row, save: async (row: any) => { tokenHash = row.sessionTokenHash; return row; } } as any,
     {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
   );

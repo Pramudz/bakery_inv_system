@@ -119,6 +119,28 @@ test('normal platform and My Tenant updates reject timezone changes', async () =
   assert.ok((await validate(self)).some((error) => error.property === 'timeZone'));
 });
 
+test('validated tenant profile updates allow an omitted timezone and preserve the existing timezone', async () => {
+  const tenant = { tenantId: 7, name: 'Original', timeZone: 'Asia/Colombo' };
+  const writes: any[] = [];
+  const service = new TenantsService({
+    findOne: async () => tenant,
+    update: async (id: number, payload: any) => { writes.push({ id, payload }); Object.assign(tenant, payload); },
+  } as any, {} as any, {} as any);
+  for (const [Dto, save] of [
+    [UpdateMyTenantDto, (dto: any) => service.updateMyTenant(7, dto)],
+    [UpdateTenantDto, (dto: any) => service.update(7, dto)],
+  ] as const) {
+    const dto = plainToInstance(Dto as any, { name: 'Updated company', phone: '0771234567' }) as any;
+    assert.deepEqual(await validate(dto), []);
+    assert.equal(dto.timeZone, undefined);
+    const result = await save(dto);
+    assert.equal(result.name, 'Updated company');
+    assert.equal(result.timeZone, 'Asia/Colombo');
+  }
+  assert.equal(writes.length, 2);
+  assert.ok(writes.every(write => write.id === 7 && !('timeZone' in write.payload)));
+});
+
 test('tenant service blocks timezone changes even when called without the HTTP validation pipe', async () => {
   const service = new TenantsService({} as any, {} as any, {} as any);
   await assert.rejects(() => service.update(7, { timeZone: 'America/New_York' } as any), BadRequestException);

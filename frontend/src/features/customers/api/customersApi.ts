@@ -3,6 +3,7 @@ import { apiClient } from '../../../services/apiClient';
 export interface Customer {
   customerId: number; tenantId?: number; customerCode: string; customerName: string; isActive: boolean;
   contactName?: string | null; phone?: string | null; mobile?: string | null; email?: string | null;
+  nic?: string | null;
   addressLine1?: string | null; addressLine2?: string | null; city?: string | null;
   districtOrState?: string | null;
   createdAt?: string; updatedAt?: string | null;

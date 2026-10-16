@@ -36,8 +36,9 @@ export class ProductController {
     @Query("limit") limit?: string,
     @Query("search") search?: string,
     @Query("status") status?: string,
+    @Query("categoryId") categoryId?: string,
   ) {
-    if (!page && !limit && search === undefined && status === undefined)
+    if (!page && !limit && search === undefined && status === undefined && !categoryId)
       return this.service.findAll(user.tenantId);
     return this.service.findPage(
       user.tenantId,
@@ -45,6 +46,7 @@ export class ProductController {
       Number(limit || 20),
       search || "",
       status || "",
+      categoryId ? Number(categoryId) : undefined,
     );
   }
 

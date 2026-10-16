@@ -19,6 +19,7 @@ export class InvoicesController {
   constructor(private readonly service: InvoicesService) {}
   @Get() @RequirePermission('SALES_INVOICE_VIEW') list(@CurrentUser() user: TenantPrincipal) { return this.service.list(user); }
   @Get('locations') @RequirePermission('SALES_BILLING') billingLocations(@CurrentUser() user: TenantPrincipal) { return this.service.billingLocations(user); }
+  @Get('billing-shortcuts') @RequirePermission('SALES_BILLING') billingShortcuts(@Query('locationId', ParseIntPipe) locationId: number, @CurrentUser() user: TenantPrincipal) { return this.service.billingShortcuts(locationId, user); }
   @Get('catalog') @RequirePermission('SALES_BILLING') catalog(@Query('locationId', ParseIntPipe) locationId: number, @Query('saleType', new ParseEnumPipe(PosSaleTypeParam)) saleType: PosSaleTypeParam, @CurrentUser() user: TenantPrincipal) { return this.service.catalog(locationId, saleType, user); }
   @Post('quote') @RequirePermission('SALES_BILLING') quote(@Body() dto: QuoteInvoiceDto, @CurrentUser() user: TenantPrincipal) { return this.service.quote(dto, user); }
   @Get('pending-payments') @RequirePermission('SALES_PAYMENT_COLLECT') pendingPayments(@CurrentUser() user: TenantPrincipal) { return this.service.pendingPayments(user); }

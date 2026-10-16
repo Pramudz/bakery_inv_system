@@ -3,6 +3,7 @@ import { readSidebarPreference, saveSidebarPreference } from "./sidebarPreferenc
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import "./app.css";
 import { useAuth } from "../features/auth/AuthContext";
+import { AccountMenu } from '../features/auth/AccountMenu';
 
 const platformGroups = [
   { title: "Overview", items: [["Dashboard", "/"]] },
@@ -289,16 +290,16 @@ export default function App() {
   };
 
   return (
-    <div className={`shell${sidebarCollapsed ? ' shell-sidebar-collapsed' : ''}${location.pathname === '/goods-receipts/reverse' ? ' shell-grn-reversal' : ''}`}>
+    <div className={`shell${sidebarCollapsed ? ' shell-sidebar-collapsed' : ''}${location.pathname === '/billing' ? ' shell-billing' : ''}${location.pathname === '/goods-receipts/reverse' ? ' shell-grn-reversal' : ''}`}>
       <aside id="app-sidebar" className="sidebar" aria-label="Main navigation" aria-hidden={sidebarCollapsed} inert={sidebarCollapsed}>
         <div className="sidebar-inner">
         <div className="brand">
-          <div className="brand-mark">E</div>
+          <div className="brand-mark">PS</div>
           <div>
             <b>
-              ERP<span>Core</span>
+              PROSINC<span>Software</span>
             </b>
-            <small>Enterprise Resource Platform</small>
+            <small>Your Vision. Our Innovation.</small>
           </div>
         </div>
         <div className="tenant-pill">
@@ -370,32 +371,17 @@ export default function App() {
               </svg>
             </button>
           <div className="crumb">
-            <span>ERP Core</span>
+            <span>PROSINCSoftware</span>
             <b>/</b>
             <strong>{title}</strong>
           </div>
           </div>
+          {location.pathname === '/billing' && <div id="billing-header-slot" className="billing-header-slot" />}
           <div className="top-actions">
             <button className="icon-btn" type="button">
               ⌕
             </button>
-            <div className="profile">
-              <span className="avatar user-avatar">
-                {displayName.slice(0, 1).toUpperCase()}
-              </span>
-              <div>
-                <strong>{displayName}</strong>
-                <small>{roleName}</small>
-              </div>
-              <button
-                className="icon-btn"
-                type="button"
-                onClick={signOut}
-                title="Sign out"
-              >
-                ↪
-              </button>
-            </div>
+            <AccountMenu displayName={displayName} roleName={roleName} onSignOut={signOut} />
           </div>
         </header>
         <section className="content">

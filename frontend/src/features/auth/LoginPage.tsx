@@ -62,10 +62,10 @@ export function LoginPage() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-brand">
-          <div className="login-brand-mark">E</div>
+          <div className="login-brand-mark">PS</div>
           <div>
-            <strong>ERPCore</strong>
-            <small>Enterprise Resource Platform</small>
+            <strong>PROSINCSoftware</strong>
+            <small>Your Vision. Our Innovation.</small>
           </div>
         </div>
 
@@ -77,6 +77,9 @@ export function LoginPage() {
           </p>
         </div>
 
+        {(location.state as { passwordChanged?: boolean } | null)?.passwordChanged && (
+          <div className="success-box" role="status">Password changed successfully. Please sign in with your new password.</div>
+        )}
         <form className="login-form" onSubmit={submit}>
           <div className="field">
             <label htmlFor="login-username">Username</label>

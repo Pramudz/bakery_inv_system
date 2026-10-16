@@ -1,3 +1,4 @@
+import type { RetailDiscount } from "./retailCartEditing";
 import type { CreateInvoiceInput, InvoiceQuoteLine } from "../api/invoicesApi";
 
 export function billingCheckoutDetail(
@@ -6,8 +7,10 @@ export function billingCheckoutDetail(
   unitPrice: number,
   price: InvoiceQuoteLine | undefined,
   sourceQuotationId: number,
+  retailDiscount?: RetailDiscount,
 ): CreateInvoiceInput["details"][number] {
   return {
+    ...(!sourceQuotationId && retailDiscount ? { retailDiscount } : {}),
     productId,
     quantity,
     unitPrice,
@@ -21,6 +24,7 @@ export function billingCheckoutDetail(
         }
       : {}),
     quotedUnitPrice: price?.unitPrice,
+    quotedPricingUnitPrice: price?.pricingUnitPrice,
     quotedDiscountAmount: price?.discountAmount,
   };
 }

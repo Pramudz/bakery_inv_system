@@ -1,7 +1,11 @@
+import { linkedRetailDiscount, cartFocusTarget, cartLineGross } from "./retailCartEditing";
+import type { InvoiceQuoteLine } from "../api/invoicesApi";
+import type { RetailDiscount } from "./retailCartEditing";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { customersApi } from "../../customers/api/customersApi";
+import { QuickCreateCustomerDialog } from '../../customers/components/QuickCreateCustomerDialog';
 import { InvoiceQuote, invoicesApi } from "../api/invoicesApi";
 import { InvoiceReceiptContent } from "./InvoiceReceiptContent";
 import { requestCompletionPrint } from "./completionPrint";
@@ -12,6 +16,9 @@ import { PaymentMethod, paymentMethodsApi } from "../api/paymentMethodsApi";
 import { ApiError } from "../../../services/apiClient";
 import { paymentChannelsApi } from "../api/paymentChannelsApi";
 import { BillingLoyaltyArea } from "../components/BillingLoyaltyArea";
+import { BillingIcon } from '../components/BillingIcon';
+import { BillingHeader } from '../components/BillingHeader';
+import { selectBillingShortcuts } from '../billingShortcuts';
 import {
   PosPaymentEntry,
   summarizePaymentEntries,
@@ -27,6 +34,7 @@ import { canCompleteSale, conversionMatchesCheckout } from "./billingCheckoutEli
 import { billingCheckoutDetail } from "./billingCheckoutDetails";
 import "./billing-register-session.css";
 import "./quotations.css";
+import './billing-page.css';
 
 type SaleType = "Retail" | "Wholesale";
 type Product = {
@@ -37,11 +45,13 @@ type Product = {
   retailPrice: number;
   wholesalePrice: number;
   stock: number;
+  pricing?: InvoiceQuoteLine;
 };
 type CartLine = Product & {
   qty: number;
   discountPct: number;
   discountRs: number;
+  retailDiscount?: RetailDiscount;
 };
 
 type CustomerOption = {
@@ -67,6 +77,8 @@ export function BillingPage() {
   const customerSection = useRef<HTMLDivElement>(null);
   const paymentSection = useRef<HTMLDivElement>(null);
   const paymentMethodSection = useRef<HTMLDivElement>(null);
+  const completeSaleButton = useRef<HTMLButtonElement>(null);
+  const clearCartButton = useRef<HTMLButtonElement>(null);
   const receiptModal = useRef<HTMLDivElement>(null);
   const [saleType, setSaleType] = useState<SaleType>("Retail");
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -172,6 +184,8 @@ export function BillingPage() {
     setCheckoutKey(crypto.randomUUID());
     setPaymentEntries([]);
   }, [conversion]);
+  const lastPricing = useRef(new Map<string, InvoiceQuoteLine>());
+  const retailEditable = saleType === "Retail" && !sourceQuotationId;
   const saleTypeCode = saleType.toUpperCase() as "RETAIL" | "WHOLESALE";
   const catalogQuery = useQuery({
     queryKey: ["invoice-catalog", locationId, saleTypeCode],
@@ -190,8 +204,21 @@ export function BillingPage() {
       customerId: Number(x.customerId),
       code: x.customerCode,
       name: x.customerName,
-      phone: x.phone ?? "",
+      phone: x.mobile || x.phone || "",
     }));
+  const shortcutsQuery = useQuery({ queryKey: ['billing-shortcuts', locationId],
+    queryFn: () => invoicesApi.billingShortcuts(locationId), enabled: locationId > 0 && !sourceQuotationId,
+    staleTime: 60000, retry: false });
+  const quickShortcuts = selectBillingShortcuts(products,
+    shortcutsQuery.data && Array.isArray(shortcutsQuery.data.productIds) ? shortcutsQuery.data : undefined);
+  const categoryOptions = useMemo(() => [...new Set((catalogQuery.data ?? []).map(product => product.category).filter(Boolean))].sort(), [catalogQuery.data]);
+  const visibleProducts = filterPosProducts(products, query, category);
+  const visibleQuickItems = selectBillingShortcuts(visibleProducts,
+    shortcutsQuery.data && Array.isArray(shortcutsQuery.data.productIds) ? shortcutsQuery.data : undefined).items;
+  useEffect(() => { setCategory('All categories'); }, [locationId, saleTypeCode]);
+  useEffect(() => {
+    if (catalogQuery.isSuccess && category !== 'All categories' && !categoryOptions.includes(category)) setCategory('All categories');
+  }, [catalogQuery.isSuccess, categoryOptions, category]);
   const paymentMethods = (methodsQuery.data ?? []).filter(
     (x) => x.isActive && x.paymentMethodType,
   );
@@ -204,7 +231,7 @@ export function BillingPage() {
       "invoice-quote",
       locationId,
       saleTypeCode,
-      cart.map((line) => [line.productId, line.qty]),
+      cart.map((line) => [line.productId, line.qty, retailEditable ? line.retailDiscount : undefined]),
     ],
     queryFn: () =>
       invoicesApi.quote({
@@ -213,6 +240,7 @@ export function BillingPage() {
         details: cart.map((line) => ({
           productId: line.productId,
           quantity: line.qty,
+          ...(retailEditable && line.retailDiscount ? { retailDiscount: line.retailDiscount } : {}),
         })),
       }),
     enabled:
@@ -226,6 +254,10 @@ export function BillingPage() {
   const activeQuote = sourceQuotationId > 0
     ? conversionPrice
     : priceChangeQuote ?? quoteQuery.data;
+  useEffect(() => {
+    if (sourceQuotationId) return;
+    for (const line of activeQuote?.lines ?? []) lastPricing.current.set(`${locationId}:${saleTypeCode}:${line.productId}`, line);
+  }, [activeQuote, locationId, saleTypeCode, sourceQuotationId]);
   const conversionReady = conversionMatchesCheckout(
     conversion,
     sourceQuotationId,
@@ -238,25 +270,26 @@ export function BillingPage() {
     activeQuote?.lines.find(
       (line) => Number(line.productId) === Number(x.productId),
     );
+  const pricingForLine = (x: Product) => quotedLine(x)
+    ?? lastPricing.current.get(`${locationId}:${saleTypeCode}:${x.productId}`)
+    ?? products.find(product => product.productId === x.productId)?.pricing
+    ?? x.pricing;
   const unitPrice = (x: Product) =>
-    quotedLine(x)?.unitPrice ??
+    pricingForLine(x)?.unitPrice ??
     (saleType === "Retail" ? x.retailPrice : x.wholesalePrice);
   const lineGross = (x: CartLine) =>
-    quotedLine(x)?.grossTotal ?? x.qty * unitPrice(x);
-  const lineDiscount = (x: CartLine) => quotedLine(x)?.discountAmount ?? 0;
+    retailEditable ? cartLineGross(x.qty, unitPrice(x), pricingForLine(x)) : quotedLine(x)?.grossTotal ?? x.qty * unitPrice(x);
+  const lineDiscount = (x: CartLine) => retailEditable && x.retailDiscount
+    ? linkedRetailDiscount(lineGross(x), x.retailDiscount).discountRs
+    : quotedLine(x)?.discountAmount ?? 0;
+  const lineDiscountPct = (x: CartLine) => retailEditable && x.retailDiscount
+    ? linkedRetailDiscount(lineGross(x), x.retailDiscount).discountPct
+    : quotedLine(x)?.discountPercentage ?? 0;
   const lineNet = (x: CartLine) =>
-    quotedLine(x)?.netTotal ?? Math.max(0, lineGross(x) - lineDiscount(x));
-  const subtotal = useMemo(
-    () => activeQuote?.subtotal ?? cart.reduce((n, x) => n + lineGross(x), 0),
-    [cart, saleType, activeQuote],
-  );
-  const discount = useMemo(
-    () =>
-      activeQuote?.discountTotal ??
-      cart.reduce((n, x) => n + lineDiscount(x), 0),
-    [cart, saleType, activeQuote],
-  );
-  const total = Math.max(0, subtotal - discount);
+    retailEditable ? Math.max(0, lineGross(x) - lineDiscount(x)) : quotedLine(x)?.netTotal ?? Math.max(0, lineGross(x) - lineDiscount(x));
+  const subtotal = retailEditable ? Math.round(cart.reduce((n, x) => n + lineGross(x), 0) * 100) / 100 : activeQuote?.subtotal ?? cart.reduce((n, x) => n + lineGross(x), 0);
+  const discount = Math.round((retailEditable ? cart.reduce((n, x) => n + lineDiscount(x), 0) : activeQuote?.discountTotal ?? cart.reduce((n, x) => n + lineDiscount(x), 0)) * 100) / 100;
+  const total = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
   const currentMethod = paymentMethods.find(
     (x) => x.paymentMethodId === paymentMethodId,
   );
@@ -303,7 +336,7 @@ export function BillingPage() {
             (candidate) => Number(candidate.productId) === Number(x.productId),
           );
           return billingCheckoutDetail(
-            x.productId, x.qty, unitPrice(x), line, sourceQuotationId,
+            x.productId, x.qty, unitPrice(x), line, sourceQuotationId, retailEditable ? x.retailDiscount : undefined,
           );
         }),
         payments: paymentEntries.map((x) => ({
@@ -321,6 +354,7 @@ export function BillingPage() {
       setPriceChangeQuote(null);
       setCompletedInvoice(invoice);
       setComplete(true);
+      void shortcutsQuery.refetch();
     },
     onError: (error) => {
       const details = (error as ApiError).details as
@@ -338,7 +372,7 @@ export function BillingPage() {
     cartReady: cart.length > 0,
     locationReady: locationId > 0,
     checkoutPending: invoiceMutation.isPending,
-    quotePending: quoteQuery.isPending,
+    quotePending: quoteQuery.isPending || quoteQuery.isFetching,
     quoteError: quoteQuery.isError,
     hasActiveQuote: Boolean(activeQuote),
     creditReady,
@@ -426,7 +460,7 @@ export function BillingPage() {
   const submitSale = (
     options: { acceptPriceChanges?: boolean; quote?: InvoiceQuote } = {},
   ) => {
-    if (submitGuard.current || invoiceMutation.isPending || (sourceQuotationId > 0 && !conversion)) return;
+    if ((!sourceQuotationId && (quoteQuery.isFetching || quoteQuery.isError || !activeQuote)) || submitGuard.current || invoiceMutation.isPending || (sourceQuotationId > 0 && !conversion)) return;
     if (editingPaymentId || paid.trim()) {
       setPaymentValidation({
         form: "Add or cancel the payment being edited before completing the sale.",
@@ -470,6 +504,8 @@ export function BillingPage() {
           ...x,
           discountPct: 0,
           discountRs: 0,
+          retailDiscount: undefined,
+          pricing: undefined,
         };
       }),
     );
@@ -507,6 +543,7 @@ export function BillingPage() {
           discountRs: Number(
             ((qty * unitPrice(found) * found.discountPct) / 100).toFixed(2),
           ),
+          ...(retailEditable && found.retailDiscount ? linkedRetailDiscount(cartLineGross(qty, unitPrice(found), pricingForLine(found)), found.retailDiscount) : {}),
         };
         return [updated, ...v.filter((x) => x.code !== p.code)];
       }
@@ -541,6 +578,7 @@ export function BillingPage() {
             discountRs: Number(
               ((qty * unitPrice(x) * x.discountPct) / 100).toFixed(2),
             ),
+            ...(retailEditable && x.retailDiscount ? linkedRetailDiscount(cartLineGross(qty, unitPrice(x), pricingForLine(x)), x.retailDiscount) : {}),
           },
         ];
       }),
@@ -551,6 +589,7 @@ export function BillingPage() {
     key: "qty" | "discountPct" | "discountRs",
     value: number,
   ) => {
+    if (sourceQuotationId || (key !== "qty" && !retailEditable)) return;
     clearPaymentDraft();
     setPaymentEntries([]);
     setCart((v) =>
@@ -565,30 +604,16 @@ export function BillingPage() {
             discountRs: Number(
               ((qty * unitPrice(x) * x.discountPct) / 100).toFixed(2),
             ),
+            ...(retailEditable && x.retailDiscount ? linkedRetailDiscount(cartLineGross(qty, unitPrice(x), pricingForLine(x)), x.retailDiscount) : {}),
           };
         }
-        const gross = lineGross(x);
-        if (key === "discountPct") {
-          const discountPct = Math.min(100, safe);
-          return {
-            ...x,
-            discountPct,
-            discountRs: Number(((gross * discountPct) / 100).toFixed(2)),
-          };
-        }
-        const discountRs = Math.min(gross, safe);
-        return {
-          ...x,
-          discountRs,
-          discountPct: gross
-            ? Number(((discountRs / gross) * 100).toFixed(2))
-            : 0,
-        };
+        if (!retailEditable) return x;
+        return { ...x, ...linkedRetailDiscount(lineGross(x), { type: key === "discountPct" ? "PERCENTAGE" : "AMOUNT", value: safe }) };
       }),
     );
   };
   const focusFirst = (section: HTMLDivElement | null) =>
-    section?.querySelector<HTMLElement>("button,input,select")?.focus();
+    section?.querySelector<HTMLElement>(section === productSection.current ? 'input[data-flow-order="0"]' : "button,input,select")?.focus();
   const keepEnterInSection = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Enter") return;
     event.preventDefault();
@@ -616,33 +641,17 @@ export function BillingPage() {
     if (!target) return;
     const row = Number(target.dataset.cartRow),
       column = Number(target.dataset.cartColumn);
-    const focusCell = (nextRow: number, nextColumn: number) =>
-      cartSection.current
-        ?.querySelector<HTMLElement>(
-          `[data-cart-row="${nextRow}"][data-cart-column="${nextColumn}"]`,
-        )
-        ?.focus();
-    if (event.key === "ArrowRight" || event.key === "Enter") {
-      event.preventDefault();
-      focusCell(
-        column === 3 ? Math.min(row + 1, cart.length - 1) : row,
-        column === 3 ? 0 : column + 1,
-      );
-    }
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      focusCell(
-        column === 0 ? Math.max(row - 1, 0) : row,
-        column === 0 ? 3 : column - 1,
-      );
-    }
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      focusCell(Math.min(row + 1, cart.length - 1), column);
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      focusCell(Math.max(row - 1, 0), column);
+    if (["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp", "Enter"].includes(event.key)) {
+      if (event.key === "Enter" && target instanceof HTMLButtonElement) return;
+      const controls = Array.from(cartSection.current?.querySelectorAll<HTMLElement>("[data-cart-cell]:not(:disabled)") ?? []);
+      const next = cartFocusTarget(controls.map(control => ({ row: Number(control.dataset.cartRow), column: Number(control.dataset.cartColumn) })), { row, column }, event.key);
+      if (next) {
+        event.preventDefault();
+        const control = controls.find(control => Number(control.dataset.cartRow) === next.row && Number(control.dataset.cartColumn) === next.column);
+        control?.focus();
+        if (control instanceof HTMLInputElement) control.select();
+      }
+      return;
     }
     if (
       event.key === "+" ||
@@ -660,7 +669,7 @@ export function BillingPage() {
       }
       const key =
         column === 0 ? "qty" : column === 1 ? "discountPct" : "discountRs";
-      const current = line[key];
+      const current = key === "discountPct" ? lineDiscountPct(line) : key === "discountRs" ? lineDiscount(line) : line.qty;
       const direction = event.key === "+" || event.key === "Add" ? 1 : -1;
       update(
         line.code,
@@ -673,6 +682,13 @@ export function BillingPage() {
   };
   useEffect(() => {
     const shortcuts = (event: KeyboardEvent) => {
+      if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || document.querySelector('.modal-bg, dialog[open]')) return;
+      if (event.key === 'Delete') {
+        const focused = document.activeElement;
+        if (focused instanceof HTMLElement && (focused.isContentEditable || focused.closest('input, textarea, select, [contenteditable="true"]'))) return;
+        event.preventDefault();
+        clearCartButton.current?.click();
+      }
       if (event.key === "F1") {
         event.preventDefault();
         focusFirst(productSection.current);
@@ -684,7 +700,7 @@ export function BillingPage() {
       if (event.key === "F3") {
         event.preventDefault();
         cartSection.current
-          ?.querySelector<HTMLElement>("[data-cart-cell]")
+          ?.querySelector<HTMLElement>("[data-cart-cell]:not(:disabled)")
           ?.focus();
       }
       if (event.key === "F4") {
@@ -699,7 +715,7 @@ export function BillingPage() {
       }
       if (event.key === "F6") {
         event.preventDefault();
-        focusFirst(paymentSection.current);
+        completeSaleButton.current?.click();
       }
     };
     window.addEventListener("keydown", shortcuts);
@@ -758,101 +774,48 @@ export function BillingPage() {
   };
 
   return (
-    <div className={`pos-page${sourceQuotationId ? ' quotation-conversion' : ''}`}>
+    <div className={`pos-page billing-redesign${sourceQuotationId ? ' quotation-conversion' : ''}`}>
       {sourceQuotationId > 0 && <div className="card quotation-conversion-banner"><div><strong>{conversion ? `Converting ${conversion.quotationNumber}` : 'Loading quotation…'}</strong><p>{conversion ? `${conversion.customerNameSnapshot} · ${conversion.locationNameSnapshot}. Quoted items, quantities and prices are locked. Complete payment through this POS checkout.` : conversionQuery.error?.message || 'Preparing accepted quotation.'}</p></div><button className="btn btn-secondary" onClick={() => navigate(conversion ? `/quotations/${conversion.quotationId}` : '/quotations')}>Cancel conversion</button></div>}
-      <div className="page-head">
-        <div>
+      <nav className="billing-breadcrumb" aria-label="Breadcrumb"><span>PROSINCSoftware</span><span aria-hidden="true">›</span><strong>Billing</strong></nav>
+      <BillingHeader><div className="page-head billing-header">
+        <div className="billing-header-title">
+          <span className="billing-header-icon"><BillingIcon name="cart" /></span>
+          <div>
           <div className="eyebrow">SALES / POINT OF SALE</div>
-          <h1>Billing</h1>
+          <h1>Sales Point of Sale</h1>
           <p>
-            Create a retail or wholesale bill, receive payment and complete the
-            sale.
+            Billing system · {saleType} sale
           </p>
+          </div>
+        </div>
+        <div className="billing-header-context">
+          <div><BillingIcon name="location" /><span><strong>{sessionQuery.data?.location.name ?? 'Select location'}</strong><small>Location</small></span></div>
+          <div><BillingIcon name="terminal" /><span><strong>{sessionQuery.data?.terminal?.displayName ?? 'Not paired'}</strong><small>Terminal</small></span></div>
+          <div><span className={`billing-live-dot${sessionReady ? ' ready' : ''}`} /><span><strong>{sessionQuery.data?.registerSession ? `${sessionQuery.data.registerSession.status} · ${sessionQuery.data.registerSession.businessDate}` : 'Not open'}</strong><small>Register</small></span></div>
+          <div><BillingIcon name="session" /><span><strong>{sessionQuery.data?.cashierSession?.status ?? 'Not active'}</strong><small>Cashier session</small></span></div>
+          <button type="button" className="btn btn-secondary billing-manage-register" disabled={!locationId}
+            onClick={() => navigate(`/pos-register-management?locationId=${locationId}&tab=overview`)}>
+            <BillingIcon name="terminal" /> Manage Register
+          </button>
         </div>
         <div className="pos-bill-number">
           <small>Current bill</small>
           <strong>{completedInvoice ? saleBillReference(completedInvoice) : "New bill"}</strong>
         </div>
-      </div>
+      </div></BillingHeader>
+      {locationId > 0 && !sessionReady && (
+        <div className="billing-register-warning" role={sessionQuery.isPending ? 'status' : 'alert'}>
+          <BillingIcon name="session" />
+          <div><strong>{sessionQuery.isPending ? 'Checking register status…' : 'Billing blocked'}</strong>
+            <span>{sessionQuery.isPending ? 'Verifying this device and cashier session.' : sessionQuery.data?.blockedReason || sessionQuery.error?.message || 'Open a register and start a cashier session to continue.'}</span>
+          </div>
+        </div>
+      )}
       {printNotice && <div className="success-box" role="status">{printNotice}</div>}
       <div className="pos-layout">
         <section className="pos-workspace">
-          <div className="card billing-location-section">
-            <div>
-              <h2>Location</h2>
-              <p>Select the stock location used for this invoice.</p>
-            </div>
-            <select
-              className="control"
-              disabled={sourceQuotationId > 0}
-              value={locationId || ""}
-              onChange={(event) => {
-                setLocationId(Number(event.target.value));
-              }}
-            >
-              <option value="">Select location</option>
-              {(locationsQuery.data ?? [])
-                .filter((x: any) => x.isActive !== false)
-                .map((x: any) => (
-                  <option key={x.locationId} value={x.locationId}>
-                    {x.name}
-                  </option>
-                ))}
-            </select>
-          </div>
-          {locationId > 0 && (
-            <div className={`card pos-session-card ${sessionReady ? "ready" : "blocked"}`}>
-              <div className="pos-session-summary">
-                <div><small>Location / mode</small><strong>{sessionQuery.data?.location.name ?? "Checking location"} · {sessionQuery.data?.config?.registerMode === "MASTER_REGISTER" ? "Master register" : sessionQuery.data?.config?.registerMode === "TERMINAL_REGISTER" ? "Terminal register" : "Unconfigured"}</strong></div>
-                <div><small>Paired terminal</small><strong>{sessionQuery.data?.terminal ? `${sessionQuery.data.terminal.displayName} (${sessionQuery.data.terminal.terminalCode})` : "Not paired"}</strong></div>
-                <div><small>Register</small><strong>{sessionQuery.data?.registerSession ? `${sessionQuery.data.registerSession.status} · ${sessionQuery.data.registerSession.businessDate}` : "Not open"}</strong></div>
-                <div><small>Cashier session</small><strong>{sessionQuery.data?.cashierSession?.status ?? "Not active"}</strong></div>
-              </div>
-              <div className="pos-session-action">
-                <div><strong>{sessionReady ? "Ready for billing" : "Billing blocked"}</strong><p>{sessionReady ? "This device and signed-in cashier have an active session." : sessionQuery.data?.blockedReason ?? (sessionQuery.isPending ? "Checking register status…" : sessionQuery.error?.message)}</p></div>
-                <button className="btn btn-secondary" onClick={() => navigate(`/pos-register-management?locationId=${locationId}&tab=overview`)}>Manage register</button>
-              </div>
-            </div>
-          )}
-          <div
-            ref={saleTypeSection}
-            onKeyDown={keepEnterInSection}
-            className="card sale-type-section"
-          >
-            <div className="sale-type-heading">
-              <span>F2</span>
-              <div>
-                <h2>Sale Type</h2>
-                <p>Enter moves focus · Press + to select the focused type.</p>
-              </div>
-            </div>
-            <div className="sale-type-options">
-              <button
-                className={saleType === "Retail" ? "active" : ""}
-                disabled={sourceQuotationId > 0}
-                onKeyDown={(event) => selectTypeWithPlus(event, "Retail")}
-                onClick={() => changeType("Retail")}
-              >
-                <span>▤</span>
-                <b>Retail</b>
-                <small>Standard selling price</small>
-              </button>
-              <button
-                className={saleType === "Wholesale" ? "active" : ""}
-                disabled={sourceQuotationId > 0}
-                onKeyDown={(event) => selectTypeWithPlus(event, "Wholesale")}
-                onClick={() => changeType("Wholesale")}
-              >
-                <span>▦</span>
-                <b>Wholesale</b>
-                <small>Wholesale price + default discount</small>
-              </button>
-            </div>
-            <div className="sale-type-current">
-              <small>Selected</small>
-              <strong>{saleType} Sale</strong>
-            </div>
-          </div>
+      <div className="billing-selection-layout">
+        <section className="billing-product-area">
           {!sourceQuotationId && <div
             ref={productSection}
             onKeyDown={keepEnterInSection}
@@ -861,12 +824,8 @@ export function BillingPage() {
             <div className="sales-card-head">
               <div>
                 <h2>
-                  <span className="section-number">F1</span> Add products
+                  <span className="billing-section-icon"><BillingIcon name="barcode" /></span> Add products <kbd className="billing-heading-shortcut">F1</kbd>
                 </h2>
-                <p>
-                  Press F1 to search · Enter moves directly through the products
-                  below.
-                </p>
               </div>
             </div>
             <div className="pos-search-row">
@@ -878,26 +837,26 @@ export function BillingPage() {
                   data-flow-order="0"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Enter item code or product name..."
+                  placeholder="Enter item code, barcode or product name..."
+                  aria-label="Search billing products"
                 />
               </div>
               <select
                 data-enter-flow
                 data-flow-order="1000"
                 className="control"
+                aria-label="Filter billing products by category"
+                disabled={catalogQuery.isPending || catalogQuery.isError}
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
               >
-                <option>All categories</option>
-                <option>Bread</option>
-                <option>Pastry</option>
-                <option>Cake</option>
-                <option>Buns</option>
+                <option value="All categories">All categories</option>
+                {categoryOptions.map(name => <option key={name} value={name}>{name}</option>)}
               </select>
               <button
                 data-enter-flow
                 data-flow-order="1001"
-                className="btn btn-secondary"
+                className="btn btn-secondary billing-clear-button"
                 onClick={() => {
                   setQuery("");
                   setCategory("All categories");
@@ -906,9 +865,28 @@ export function BillingPage() {
                 Clear
               </button>
             </div>
+            <div className="billing-category-chips" aria-label="Quick categories" onKeyDown={event => { if (event.key === 'Enter') event.stopPropagation(); }}>
+              <span>Quick categories:</span>
+              <button type="button" className={category === 'All categories' ? 'active' : ''} aria-pressed={category === 'All categories'} onClick={() => setCategory('All categories')}>All categories</button>
+              {quickShortcuts.categories.map(name => (
+                <button type="button" key={name} className={category === name ? 'active' : ''} aria-pressed={category === name} onClick={() => setCategory(name)}>{name}</button>
+              ))}
+            </div>
+            <div className="billing-quick-items" aria-label="Quick items" onKeyDown={event => { if (event.key === 'Enter') event.stopPropagation(); }}>
+              <div className="billing-quick-items-label"><span>Quick items:</span><small>{quickShortcuts.hasHistory ? 'Most used · last 30 days' : 'Available items'}</small></div>
+              <div className="billing-quick-items-list">
+                {visibleQuickItems.map(item => {
+                  const available = Math.max(0, item.stock - (cart.find(line => line.productId === item.productId)?.qty ?? 0));
+                  return <button type="button" key={item.productId} disabled={available < 1} onClick={() => add(item)} title={`${item.code} · ${available} available`}>
+                    <strong>{item.name}</strong><span>LKR {unitPrice(item).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </button>;
+                })}
+                {!visibleQuickItems.length && <span className="billing-quick-items-empty">{products.length ? 'No matching quick items.' : 'No items available at this location.'}</span>}
+              </div>
+            </div>
             {query.trim() || category !== "All categories" ? (
               <div className="pos-product-results">
-                {filterPosProducts(products, query, category)
+                {visibleProducts
                   .map((p, index) => {
                     const quantity =
                       cart.find((x) => x.code === p.code)?.qty ?? 0;
@@ -954,6 +932,7 @@ export function BillingPage() {
                       </div>
                     );
                   })}
+                {!visibleProducts.length && <div className="billing-no-products" role="status"><strong>No matching products</strong><span>Try another category or search, or use Clear to reset the filters.</span></div>}
               </div>
             ) : (
               <div className="product-search-empty">
@@ -965,6 +944,164 @@ export function BillingPage() {
               </div>
             )}
           </div>}
+        </section>
+        <aside className="billing-context-area">
+          <div className="card billing-location-section">
+            <span className="billing-section-icon"><BillingIcon name="location" /></span>
+            <div>
+              <h2>Location</h2>
+            </div>
+            <select
+              className="control"
+              disabled={sourceQuotationId > 0}
+              value={locationId || ""}
+              onChange={(event) => {
+                setLocationId(Number(event.target.value));
+              }}
+            >
+              <option value="">Select location</option>
+              {(locationsQuery.data ?? [])
+                .filter((x: any) => x.isActive !== false)
+                .map((x: any) => (
+                  <option key={x.locationId} value={x.locationId}>
+                    {x.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div
+            ref={saleTypeSection}
+            onKeyDown={keepEnterInSection}
+            className="card sale-type-section"
+          >
+            <div className="sale-type-heading">
+              <span className="billing-section-icon"><BillingIcon name="tag" /></span>
+              <div>
+                <h2>Sale Type <kbd className="billing-heading-shortcut">F2</kbd></h2>
+              </div>
+            </div>
+            <div className="sale-type-options">
+              <button
+                className={saleType === "Retail" ? "active" : ""}
+                title="Standard selling price"
+                disabled={sourceQuotationId > 0}
+                onKeyDown={(event) => selectTypeWithPlus(event, "Retail")}
+                onClick={() => changeType("Retail")}
+              >
+                <span><BillingIcon name="cart" /></span>
+                <b>Retail</b>
+                <small>Standard selling price</small>
+              </button>
+              <button
+                className={saleType === "Wholesale" ? "active" : ""}
+                title="Wholesale price + default discount"
+                disabled={sourceQuotationId > 0}
+                onKeyDown={(event) => selectTypeWithPlus(event, "Wholesale")}
+                onClick={() => changeType("Wholesale")}
+              >
+                <span><BillingIcon name="terminal" /></span>
+                <b>Wholesale</b>
+                <small>Wholesale price + default discount</small>
+              </button>
+            </div>
+            <div className="sale-type-current">
+              <small>Selected</small>
+              <strong>{saleType} Sale</strong>
+            </div>
+          </div>
+          <div
+            ref={customerSection}
+            onKeyDown={keepEnterInSection}
+            className="card pos-customer"
+          >
+            <div className="pos-panel-title">
+              <h2>
+                <span className="billing-section-icon"><BillingIcon name="customer" /></span> Customer <kbd className="billing-heading-shortcut">F4</kbd>
+              </h2>
+              <div className="customer-actions">
+                <button
+                  className="btn btn-secondary billing-new-customer"
+                  disabled={sourceQuotationId > 0 || !hasPermission('CUSTOMER_CREATE')}
+                  onClick={() => {
+                    setNewCustomer(true);
+                  }}
+                >
+                  + New
+                </button>
+                <button
+                  className="btn btn-secondary billing-clear-button"
+                  disabled={sourceQuotationId > 0}
+                  onClick={() => {
+                    setNewCustomer(false);
+                    setSelectedCustomer(null);
+                    setSellOnCredit(false);
+                    setCustomerQuery("");
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+            <label className="customer-search-label">
+              Customer Code / Tel / Name
+            </label>
+            <div className="sales-search customer-search">
+              <span>⌕</span>
+              <input
+                value={customerQuery}
+                disabled={sourceQuotationId > 0}
+                onChange={(e) => {
+                  setCustomerQuery(e.target.value);
+                  setSelectedCustomer(null);
+                  setSellOnCredit(false);
+                  setNewCustomer(false);
+                }}
+                placeholder="Search customer by code, name or phone..."
+                aria-label="Search billing customers"
+              />
+            </div>
+            {customerQuery && !selectedCustomer && (
+              <div className="customer-results">
+                {customers
+                  .filter((x) =>
+                    `${x.code} ${x.phone} ${x.name}`
+                      .toLowerCase()
+                      .includes(customerQuery.toLowerCase()),
+                  )
+                  .map((x) => (
+                    <button
+                      key={x.code}
+                      onClick={() => {
+                        setSelectedCustomer(x);
+                        setSellOnCredit(false);
+                        setCustomerQuery(x.code);
+                      }}
+                    >
+                      <span>
+                        <strong>{x.name}</strong>
+                        <small>
+                          {x.code} · {x.phone}
+                        </small>
+                      </span>
+                      <b>+</b>
+                    </button>
+                  ))}
+              </div>
+            )}
+            {selectedCustomer && (
+              <div className="selected-customer">
+                <span>{selectedCustomer.name[0]}</span>
+                <div>
+                  <strong>{selectedCustomer.name}</strong>
+                  <small>
+                    {selectedCustomer.code} · {selectedCustomer.phone}
+                  </small>
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
           <div
             ref={cartSection}
             onKeyDown={navigateCart}
@@ -973,16 +1110,16 @@ export function BillingPage() {
             <div className="sales-card-head">
               <div>
                 <h2>
-                  <span className="section-number">F3</span> Sale items{" "}
+                  <span className="billing-section-icon"><BillingIcon name="items" /></span> Sale items <kbd className="billing-heading-shortcut">F3</kbd>{" "}
                   <span className="code-chip">{cart.length} items</span>
                 </h2>
                 <p>
-                  Arrow keys move around items · Enter moves next · + / −
-                  changes values.
+                  Review items, quantities and discounts. Use arrow keys to move between cart fields.{retailEditable ? " Retail discounts: edit % or Rs; the other updates automatically." : ""}
                 </p>
               </div>
               <button
-                className="btn btn-secondary"
+                ref={clearCartButton}
+                className="btn btn-secondary billing-clear-button"
                 disabled={sourceQuotationId > 0}
                 onClick={() => {
                   setCart([]);
@@ -991,7 +1128,7 @@ export function BillingPage() {
                   setCheckoutKey(crypto.randomUUID());
                 }}
               >
-                Clear cart
+                Clear cart <kbd className="billing-heading-shortcut">Del</kbd>
               </button>
             </div>
             <div className="sales-table-wrap">
@@ -1052,10 +1189,12 @@ export function BillingPage() {
                           min="0"
                           max="100"
                           step="0.01"
-                          value={quotedLine(x)?.discountPercentage || ""}
+                          value={lineDiscountPct(x) || ""}
                           placeholder="0"
-                          disabled
-                          aria-label="Server product discount percentage"
+                          disabled={!retailEditable}
+                          aria-label={`Discount percentage for ${x.name}`}
+                          onFocus={event => event.currentTarget.select()}
+                          onChange={event => update(x.code, "discountPct", Number(event.target.value))}
                         />
                       </td>
                       <td>
@@ -1069,8 +1208,11 @@ export function BillingPage() {
                           step="0.01"
                           value={lineDiscount(x) || ""}
                           placeholder="0.00"
-                          disabled
-                          aria-label="Server product discount amount"
+                          max={lineGross(x)}
+                          disabled={!retailEditable}
+                          aria-label={`Discount amount for ${x.name}`}
+                          onFocus={event => event.currentTarget.select()}
+                          onChange={event => update(x.code, "discountRs", Number(event.target.value))}
                         />
                       </td>
                       <td className="right">{lineGross(x).toLocaleString()}</td>
@@ -1099,116 +1241,34 @@ export function BillingPage() {
               </table>
               {!cart.length && (
                 <div className="empty">
-                  No items in this sale. Select a product above.
+                  <BillingIcon name="box" />
+                  <strong>No items in this sale</strong>
+                  <span>Search and add products above to get started.</span>
                 </div>
               )}
             </div>
           </div>
         </section>
         <aside className="pos-checkout">
-          <div
-            ref={customerSection}
-            onKeyDown={keepEnterInSection}
-            className="card pos-customer"
-          >
-            <div className="pos-panel-title">
-              <h2>
-                <span className="panel-shortcut">F4</span> Customer
-              </h2>
-              <div className="customer-actions">
-                <button
-                  className="btn btn-secondary"
-                  disabled={sourceQuotationId > 0}
-                  onClick={() => {
-                    setNewCustomer(true);
-                    setSelectedCustomer(null);
-                    setSellOnCredit(false);
-                    setCustomerQuery("");
-                  }}
-                >
-                  + New
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  disabled={sourceQuotationId > 0}
-                  onClick={() => {
-                    setNewCustomer(false);
-                    setSelectedCustomer(null);
-                    setSellOnCredit(false);
-                    setCustomerQuery("");
-                  }}
-                >
-                  Clear
-                </button>
+            <div className="card billing-cart-summary">
+              <div className="pos-panel-title"><h2><span className="billing-section-icon"><BillingIcon name="cart" /></span> Cart summary</h2><span className="billing-item-count">{cart.length} items</span></div>
+              <div className="summary-line">
+                <span>Items</span>
+                <b>{cart.reduce((n, x) => n + x.qty, 0)} units</b>
+              </div>
+              <div className="summary-line">
+                <span>Subtotal</span>
+                <b>LKR {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+              </div>
+              <div className="summary-line">
+                <span>Discounts</span>
+                <b>- LKR {discount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+              </div>
+              <div className="summary-total">
+                <span>Invoice total</span>
+                <strong>LKR {total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
               </div>
             </div>
-            <label className="customer-search-label">
-              Customer Code / Tel / Name
-            </label>
-            <div className="sales-search customer-search">
-              <span>⌕</span>
-              <input
-                value={customerQuery}
-                disabled={sourceQuotationId > 0}
-                onChange={(e) => {
-                  setCustomerQuery(e.target.value);
-                  setSelectedCustomer(null);
-                  setSellOnCredit(false);
-                  setNewCustomer(false);
-                }}
-                placeholder="Search customer..."
-              />
-            </div>
-            {customerQuery && !selectedCustomer && (
-              <div className="customer-results">
-                {customers
-                  .filter((x) =>
-                    `${x.code} ${x.phone} ${x.name}`
-                      .toLowerCase()
-                      .includes(customerQuery.toLowerCase()),
-                  )
-                  .map((x) => (
-                    <button
-                      key={x.code}
-                      onClick={() => {
-                        setSelectedCustomer(x);
-                        setSellOnCredit(false);
-                        setCustomerQuery(x.code);
-                      }}
-                    >
-                      <span>
-                        <strong>{x.name}</strong>
-                        <small>
-                          {x.code} · {x.phone}
-                        </small>
-                      </span>
-                      <b>+</b>
-                    </button>
-                  ))}
-              </div>
-            )}
-            {selectedCustomer && (
-              <div className="selected-customer">
-                <span>{selectedCustomer.name[0]}</span>
-                <div>
-                  <strong>{selectedCustomer.name}</strong>
-                  <small>
-                    {selectedCustomer.code} · {selectedCustomer.phone}
-                  </small>
-                </div>
-              </div>
-            )}
-            {newCustomer && (
-              <div className="pos-customer-fields new-customer-fields">
-                <input className="control" placeholder="Customer code" />
-                <input className="control" placeholder="Telephone" />
-                <input
-                  className="control customer-name-field"
-                  placeholder="Customer name"
-                />
-              </div>
-            )}
-          </div>
           <BillingLoyaltyArea customerId={selectedCustomer?.customerId} />
           <div
             ref={paymentSection}
@@ -1216,31 +1276,12 @@ export function BillingPage() {
             className="card pos-payment pos-checkout-card"
           >
             <div className="pos-panel-title">
-              <h2>Checkout</h2>
+              <h2><span className="billing-section-icon"><BillingIcon name="payment" /></span> Payment <kbd className="billing-heading-shortcut">F5</kbd></h2>
               <span
                 className={`checkout-status ${paymentStatus.toLowerCase().replace(" ", "-")}`}
               >
                 {paymentStatus}
               </span>
-            </div>
-            <div className="checkout-summary">
-              <h3>Cart summary</h3>
-              <div className="summary-line">
-                <span>Items</span>
-                <b>{cart.reduce((n, x) => n + x.qty, 0)} units</b>
-              </div>
-              <div className="summary-line">
-                <span>Subtotal</span>
-                <b>LKR {subtotal.toLocaleString()}</b>
-              </div>
-              <div className="summary-line">
-                <span>Discounts</span>
-                <b>- LKR {discount.toLocaleString()}</b>
-              </div>
-              <div className="summary-total">
-                <span>Invoice total</span>
-                <strong>LKR {total.toLocaleString()}</strong>
-              </div>
             </div>
             <div className="checkout-payments-head">
               <h3>Payments</h3>
@@ -1319,7 +1360,7 @@ export function BillingPage() {
             <div ref={paymentMethodSection} className="add-payment-panel">
               <div className="add-payment-title">
                 <h3>
-                  <span className="panel-shortcut">F5</span> Add payment
+                  Add payment
                 </h3>
                 {editingPaymentId && (
                   <button type="button" onClick={clearPaymentDraft}>
@@ -1373,7 +1414,7 @@ export function BillingPage() {
               {currentMethod?.paymentMethodType === "CARD" && (
                 <div className="card-payment-fields">
                   <label>
-                    Card channel
+                    <span className="billing-payment-field-label">Card channel</span>
                     <select
                       data-enter-flow
                       className={
@@ -1407,7 +1448,7 @@ export function BillingPage() {
                     )}
                   </label>
                   <label>
-                    Approval / transaction reference
+                    <span className="billing-payment-field-label">Approval / transaction reference</span>
                     <input
                       data-enter-flow
                       className={
@@ -1481,23 +1522,23 @@ export function BillingPage() {
             <div className="checkout-balance">
               <div>
                 <span>Total tendered</span>
-                <b>LKR {paymentSummary.tendered.toLocaleString()}</b>
+                <b>LKR {paymentSummary.tendered.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
               </div>
               <div>
                 <span>Total collected (net)</span>
-                <b>LKR {paymentSummary.netReceived.toLocaleString()}</b>
+                <b>LKR {paymentSummary.netReceived.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
               </div>
               <div>
                 <span>Applied to invoice</span>
-                <b>LKR {paymentSummary.applied.toLocaleString()}</b>
+                <b>LKR {paymentSummary.applied.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
               </div>
               <div className="remaining">
                 <span>Remaining balance</span>
-                <strong>LKR {paymentSummary.remaining.toLocaleString()}</strong>
+                <strong>LKR {paymentSummary.remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
               </div>
               <div>
                 <span>Cash change</span>
-                <b>LKR {paymentSummary.change.toLocaleString()}</b>
+                <b>LKR {paymentSummary.change.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
               </div>
             </div>
             {creditRequired && (
@@ -1507,7 +1548,7 @@ export function BillingPage() {
                 <div>
                   <strong>Customer credit</strong>
                   <span>
-                    LKR {paymentSummary.remaining.toLocaleString()} will remain
+                    LKR {paymentSummary.remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} will remain
                     outstanding
                     {selectedCustomer
                       ? ` for ${selectedCustomer.name}`
@@ -1537,10 +1578,11 @@ export function BillingPage() {
             <div className="payment-finish">
               <button
                 className="pos-complete"
+                ref={completeSaleButton}
                 disabled={!checkoutReady}
                 onClick={() => submitSale()}
               >
-                ✓ Complete sale
+                ✓ Complete sale <kbd className="billing-heading-shortcut">F6</kbd>
               </button>
             </div>
             {!sourceQuotationId && quoteQuery.isError && (
@@ -1584,6 +1626,12 @@ export function BillingPage() {
           </div>
         </aside>
       </div>
+      {newCustomer && <QuickCreateCustomerDialog onClose={() => setNewCustomer(false)} onCreated={customer => {
+        setSelectedCustomer({ customerId: Number(customer.customerId), code: customer.customerCode, name: customer.customerName, phone: customer.mobile || customer.phone || '' });
+        setCustomerQuery(customer.customerCode);
+        setSellOnCredit(false);
+        setNewCustomer(false);
+      }} />}
       {complete && (
         <div className="modal-bg">
           <div
@@ -1605,7 +1653,7 @@ export function BillingPage() {
               {saleBillReference(completedInvoice)} · {saleType} ·{" "}
               {paymentEntries.map((entry) => entry.name).join(" + ") ||
                 "Unpaid"}{" "}
-              · LKR {total.toLocaleString()}
+              · LKR {total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
             {completedInvoice && (
               <InvoiceReceiptContent invoice={completedInvoice} />
