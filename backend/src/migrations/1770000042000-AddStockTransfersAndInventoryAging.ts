@@ -31,7 +31,7 @@ export class AddStockTransfersAndInventoryAging1770000042000 implements Migratio
       CONSTRAINT fk_stock_transfer_dispatcher FOREIGN KEY (dispatched_by_user_id) REFERENCES tbl_user(user_id),
       CONSTRAINT fk_stock_transfer_receiver FOREIGN KEY (received_completed_by_user_id) REFERENCES tbl_user(user_id),
       CONSTRAINT fk_stock_transfer_canceller FOREIGN KEY (cancelled_by_user_id) REFERENCES tbl_user(user_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await runner.query(`CREATE TABLE IF NOT EXISTS tbl_stock_transfer_line (
       stock_transfer_line_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       stock_transfer_id BIGINT NOT NULL, line_number INT NOT NULL,
@@ -50,7 +50,7 @@ export class AddStockTransfersAndInventoryAging1770000042000 implements Migratio
       CONSTRAINT fk_stock_transfer_line_header FOREIGN KEY (stock_transfer_id) REFERENCES tbl_stock_transfer(stock_transfer_id),
       CONSTRAINT fk_stock_transfer_line_product FOREIGN KEY (product_id) REFERENCES tbl_product(product_id),
       CONSTRAINT fk_stock_transfer_line_unit FOREIGN KEY (unit_id) REFERENCES tbl_unit_of_measure(unit_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await runner.query(`CREATE TABLE IF NOT EXISTS tbl_stock_transfer_age_allocation (
       stock_transfer_age_allocation_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       stock_transfer_line_id BIGINT NOT NULL, origin_aging_date DATE NULL,
@@ -61,7 +61,7 @@ export class AddStockTransfersAndInventoryAging1770000042000 implements Migratio
       updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
       KEY idx_transfer_age_line_date (stock_transfer_line_id, origin_aging_date),
       CONSTRAINT fk_transfer_age_line FOREIGN KEY (stock_transfer_line_id) REFERENCES tbl_stock_transfer_line(stock_transfer_line_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await runner.query(`CREATE TABLE IF NOT EXISTS tbl_stock_transfer_receipt (
       stock_transfer_receipt_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       tenant_id BIGINT NOT NULL, stock_transfer_id BIGINT NOT NULL,
@@ -76,7 +76,7 @@ export class AddStockTransfersAndInventoryAging1770000042000 implements Migratio
       CONSTRAINT fk_stock_transfer_receipt_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant(tenant_id),
       CONSTRAINT fk_stock_transfer_receipt_header FOREIGN KEY (stock_transfer_id) REFERENCES tbl_stock_transfer(stock_transfer_id),
       CONSTRAINT fk_stock_transfer_receipt_user FOREIGN KEY (received_by_user_id) REFERENCES tbl_user(user_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await runner.query(`CREATE TABLE IF NOT EXISTS tbl_stock_transfer_receipt_line (
       stock_transfer_receipt_line_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       stock_transfer_receipt_id BIGINT NOT NULL, stock_transfer_line_id BIGINT NOT NULL,
@@ -88,7 +88,7 @@ export class AddStockTransfersAndInventoryAging1770000042000 implements Migratio
       KEY idx_stock_transfer_receipt_line_transfer (stock_transfer_line_id),
       CONSTRAINT fk_stock_transfer_receipt_line_receipt FOREIGN KEY (stock_transfer_receipt_id) REFERENCES tbl_stock_transfer_receipt(stock_transfer_receipt_id),
       CONSTRAINT fk_stock_transfer_receipt_line_transfer FOREIGN KEY (stock_transfer_line_id) REFERENCES tbl_stock_transfer_line(stock_transfer_line_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await runner.query(`CREATE TABLE IF NOT EXISTS tbl_inventory_aging_snapshot (
       inventory_aging_snapshot_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       tenant_id BIGINT NOT NULL, snapshot_date DATE NOT NULL,
@@ -109,7 +109,7 @@ export class AddStockTransfersAndInventoryAging1770000042000 implements Migratio
       CONSTRAINT fk_inventory_aging_snapshot_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant(tenant_id),
       CONSTRAINT fk_inventory_aging_snapshot_location FOREIGN KEY (location_id) REFERENCES tbl_location(location_id),
       CONSTRAINT fk_inventory_aging_snapshot_product FOREIGN KEY (product_id) REFERENCES tbl_product(product_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     const indexes: Array<{ Key_name: string }> = await runner.query('SHOW INDEX FROM tbl_inventory_ledger WHERE Key_name = ?', ['idx_inventory_ledger_aging']);
     if (!indexes.length) await runner.query('CREATE INDEX idx_inventory_ledger_aging ON tbl_inventory_ledger (tenant_id, movement_type, location_id, product_id, movement_date, inventory_ledger_id)');
   }

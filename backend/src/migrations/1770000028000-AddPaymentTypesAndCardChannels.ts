@@ -11,13 +11,14 @@ export class AddPaymentTypesAndCardChannels1770000028000 implements MigrationInt
       await queryRunner.addColumn('tbl_payment_method', new TableColumn({ name: 'payment_method_type', type: 'enum', enum: ['CASH', 'CARD', 'CHEQUE'], isNullable: true }));
     }
 
-    // Deliberately narrow: “Credit” is not classified because it may mean card or customer debt.
+    // Deliberately narrow: Ã¢â‚¬Å“CreditÃ¢â‚¬Â is not classified because it may mean card or customer debt.
     await queryRunner.query(`UPDATE tbl_payment_method SET payment_method_type = 'CASH' WHERE payment_method_type IS NULL AND UPPER(TRIM(payment_method_name)) = 'CASH'`);
     await queryRunner.query(`UPDATE tbl_payment_method SET payment_method_type = 'CARD' WHERE payment_method_type IS NULL AND UPPER(TRIM(payment_method_name)) IN ('CARD', 'CREDIT CARD', 'DEBIT CARD', 'CREDIT/DEBIT CARD', 'DEBIT/CREDIT CARD')`);
     await queryRunner.query(`UPDATE tbl_payment_method SET payment_method_type = 'CHEQUE' WHERE payment_method_type IS NULL AND UPPER(TRIM(payment_method_name)) IN ('CHEQUE', 'CHECK')`);
 
     if (!(await queryRunner.hasTable('tbl_payment_channel'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_payment_channel',
         columns: [
           { name: 'payment_channel_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },

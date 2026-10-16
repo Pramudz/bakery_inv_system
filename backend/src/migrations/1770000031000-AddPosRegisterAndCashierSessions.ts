@@ -15,6 +15,7 @@ export class AddPosRegisterAndCashierSessions1770000031000 implements MigrationI
 
     if (!(await queryRunner.hasTable('tbl_pos_cash_register'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_cash_register',
         columns: [
           { name: 'pos_cash_register_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },
@@ -42,6 +43,7 @@ export class AddPosRegisterAndCashierSessions1770000031000 implements MigrationI
 
     if (!(await queryRunner.hasTable('tbl_pos_register_session'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_register_session',
         columns: [
           { name: 'pos_register_session_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },
@@ -69,6 +71,7 @@ export class AddPosRegisterAndCashierSessions1770000031000 implements MigrationI
 
     if (!(await queryRunner.hasTable('tbl_pos_cashier_session'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_cashier_session',
         columns: [
           { name: 'pos_cashier_session_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },

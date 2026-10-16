@@ -16,6 +16,7 @@ export class AddProductSupplierUnits1770000013000
     if (!table) {
       await queryRunner.createTable(
         new Table({
+          engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
           name: 'tbl_product_supplier_unit',
           columns: [
             {

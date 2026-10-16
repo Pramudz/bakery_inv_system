@@ -15,7 +15,7 @@ export class AddReferenceMasterImports1770000044000 implements MigrationInterfac
       UNIQUE KEY uq_reference_import_file (tenant_id, master, file_hash),
       KEY ix_reference_import_tenant (tenant_id),
       CONSTRAINT fk_reference_import_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant(tenant_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await runner.query(`CREATE TABLE tbl_supplier_import_ref (
       id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       tenant_id BIGINT NOT NULL,
@@ -25,7 +25,7 @@ export class AddReferenceMasterImports1770000044000 implements MigrationInterfac
       UNIQUE KEY uq_supplier_import_ref (tenant_id, import_ref),
       CONSTRAINT fk_supplier_import_ref_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant(tenant_id),
       CONSTRAINT fk_supplier_import_ref_supplier FOREIGN KEY (supplier_id) REFERENCES tbl_supplier(supplier_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
   }
   async down(runner: QueryRunner): Promise<void> {
     await runner.query('DROP TABLE tbl_supplier_import_ref');

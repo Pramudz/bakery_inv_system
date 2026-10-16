@@ -43,7 +43,7 @@ export class EnhanceSupplierMasterData1770000003000 implements MigrationInterfac
         UNIQUE INDEX uq_supplier_address_active_primary (active_primary_supplier_id),
         CONSTRAINT fk_supplier_address_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant (tenant_id) ON DELETE RESTRICT,
         CONSTRAINT fk_supplier_address_supplier FOREIGN KEY (supplier_id) REFERENCES tbl_supplier (supplier_id) ON DELETE RESTRICT
-      ) ENGINE=InnoDB
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     await queryRunner.query(`
@@ -68,7 +68,7 @@ export class EnhanceSupplierMasterData1770000003000 implements MigrationInterfac
         UNIQUE INDEX uq_supplier_contact_active_primary (active_primary_supplier_id),
         CONSTRAINT fk_supplier_contact_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant (tenant_id) ON DELETE RESTRICT,
         CONSTRAINT fk_supplier_contact_supplier FOREIGN KEY (supplier_id) REFERENCES tbl_supplier (supplier_id) ON DELETE RESTRICT
-      ) ENGINE=InnoDB
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     await queryRunner.query(`

@@ -27,7 +27,7 @@ export class AddQuotations1770000040000 implements MigrationInterface {
       CONSTRAINT fk_quotation_customer FOREIGN KEY (customer_id) REFERENCES tbl_customer(customer_id),
       CONSTRAINT fk_quotation_created_by FOREIGN KEY (created_by_user_id) REFERENCES tbl_user(user_id),
       CONSTRAINT fk_quotation_invoice FOREIGN KEY (converted_invoice_id) REFERENCES tbl_invoice(invoice_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await queryRunner.query(`CREATE TABLE tbl_quotation_line (
       quotation_line_id BIGINT NOT NULL AUTO_INCREMENT, quotation_id BIGINT NOT NULL,
       line_number INT NOT NULL, product_id BIGINT NOT NULL,
@@ -42,7 +42,7 @@ export class AddQuotations1770000040000 implements MigrationInterface {
       CONSTRAINT fk_quotation_line_quotation FOREIGN KEY (quotation_id) REFERENCES tbl_quotation(quotation_id) ON DELETE CASCADE,
       CONSTRAINT fk_quotation_line_product FOREIGN KEY (product_id) REFERENCES tbl_product(product_id),
       CONSTRAINT fk_quotation_line_unit FOREIGN KEY (unit_id) REFERENCES tbl_unit_of_measure(unit_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await queryRunner.query('ALTER TABLE tbl_invoice ADD COLUMN source_quotation_id BIGINT NULL');
     await queryRunner.query('ALTER TABLE tbl_invoice ADD UNIQUE KEY uq_invoice_source_quotation (source_quotation_id)');
     await queryRunner.query('ALTER TABLE tbl_invoice ADD CONSTRAINT fk_invoice_source_quotation FOREIGN KEY (source_quotation_id) REFERENCES tbl_quotation(quotation_id)');

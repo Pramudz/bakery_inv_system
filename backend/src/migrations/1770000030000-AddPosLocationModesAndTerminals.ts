@@ -15,6 +15,7 @@ export class AddPosLocationModesAndTerminals1770000030000 implements MigrationIn
 
     if (!(await queryRunner.hasTable('tbl_pos_location_config'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_location_config',
         columns: [
           { name: 'pos_location_config_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },
@@ -36,6 +37,7 @@ export class AddPosLocationModesAndTerminals1770000030000 implements MigrationIn
 
     if (!(await queryRunner.hasTable('tbl_pos_terminal'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_terminal',
         columns: [
           { name: 'pos_terminal_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },
@@ -59,6 +61,7 @@ export class AddPosLocationModesAndTerminals1770000030000 implements MigrationIn
 
     if (!(await queryRunner.hasTable('tbl_pos_terminal_activation'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_terminal_activation',
         columns: [
           { name: 'pos_terminal_activation_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },
@@ -89,6 +92,7 @@ export class AddPosLocationModesAndTerminals1770000030000 implements MigrationIn
 
     if (!(await queryRunner.hasTable('tbl_pos_terminal_pairing'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_terminal_pairing',
         columns: [
           { name: 'pos_terminal_pairing_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },
