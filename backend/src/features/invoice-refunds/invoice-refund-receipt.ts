@@ -14,6 +14,8 @@ export function snapshotRefundReceipt(refund: InvoiceRefund, invoice: Invoice, h
     issuedAt: refund.issuedAt,
     reason: refund.reason,
     subtotal: refund.subtotal,
+    itemDiscountTotal: refund.details ? refund.details.reduce((sum, line) => sum + Number(line.discountAmount), 0).toFixed(2) : refund.discountTotal,
+    billDiscountTotal: (refund.details ?? []).reduce((sum, line) => sum + Number(line.billDiscountAllocated ?? 0), 0).toFixed(2),
     discountTotal: refund.discountTotal,
     refundTotal: refund.refundTotal,
     originalSale: invoice.billNo == null ? null : {
@@ -25,7 +27,7 @@ export function snapshotRefundReceipt(refund: InvoiceRefund, invoice: Invoice, h
     },
     customer: sale?.customer ?? null,
     details: [...(refund.details ?? [])].sort((a, b) => Number(a.invoiceRefundDetailId) - Number(b.invoiceRefundDetailId)).map((line) => ({
-      lineNumber: line.lineNumber, quantity: line.quantity, unitPrice: line.unitPrice, discountAmount: line.discountAmount,
+      lineNumber: line.lineNumber, quantity: line.quantity, unitPrice: line.unitPrice, discountAmount: line.discountAmount, billDiscountAllocated: line.billDiscountAllocated ?? '0',
       refundAmount: line.refundAmount, product: { sku: line.product.sku, productName: line.product.productName },
     })),
     payments: (refund.payments ?? []).map((payment) => ({

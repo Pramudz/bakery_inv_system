@@ -37,6 +37,14 @@ export type PaymentReceipt = {
   invoice: PendingInvoice;
   paymentMethod: { paymentMethodName: string; paymentMethodType?: 'CASH' | 'CARD' | 'CHEQUE' | null };
   paymentChannel?: { paymentChannelId: number; name: string } | null;
+  receiptSnapshot?: {
+    paymentReceiptNumber: string; issuedAt: string;
+    header: { companyName: string; locationName: string; cashierName: string; timeZone: string };
+    originalSale: { businessDate?: string | null; printedLocationCode?: string | null; printedRegisterCode?: string | null; billNo?: number | null; locationCode?: string | null; registerCode?: string | null };
+    customer: { customerName: string; phone: string | null } | null;
+    paymentMethod: { paymentMethodName: string }; paymentChannel: { name: string } | null;
+    referenceNumber: string | null; originalInvoiceTotal: string; balanceBefore: string; tenderedAmount: string; amount: string; changeAmount: string; balanceAfter: string;
+  } | null;
 };
 
 export type ReceivePaymentInput = {
@@ -55,4 +63,5 @@ export const pendingPaymentsApi = {
   receive: (id: number, data: ReceivePaymentInput) =>
     apiClient.post<Omit<PaymentReceipt, 'invoice' | 'paymentMethod'>>(`/invoices/${id}/payments`, data),
   outcome: (id: number, key: string) => apiClient.get<PaymentReceipt>(`/invoices/${id}/payments/by-key/${encodeURIComponent(key)}`),
+  receipt: (paymentId: number) => apiClient.get<PaymentReceipt>(`/invoices/payment-receipts/${paymentId}`),
 };

@@ -31,7 +31,7 @@ export const SALES_SQL = `
     p.product_id AS productId, events.invoiceLineId, events.refundLineId,
     i.printed_location_code AS printedLocationCode, i.printed_register_code AS printedRegisterCode,
     i.bill_no AS billNo, brand.brand_name AS brand,
-    events.qty, events.refundQty, events.grossSales, events.discount, events.refundValue,
+    events.qty, events.refundQty, events.grossSales, events.itemDiscount, events.billDiscount, events.discount, events.refundValue,
     events.saleCost, events.returnCost, events.costSource, events.billCount,
     CASE WHEN p.is_stock_item = 1 THEN events.costMissing ELSE 0 END AS cogsMissing,
     s.supplier_name AS primarySupplier
@@ -41,7 +41,8 @@ export const SALES_SQL = `
       d.invoice_detail_id AS invoiceLineId, NULL AS refundLineId,
       d.sku_snapshot AS skuSnapshot, d.product_name_snapshot AS productSnapshot,
       NULL AS refund, 'SALE' AS eventType, d.quantity AS qty, 0 AS refundQty,
-      d.gross_total AS grossSales, (d.gross_total - d.net_total) AS discount,
+      d.gross_total AS grossSales, d.discount_amount AS itemDiscount,
+      d.bill_discount_allocated AS billDiscount, (d.gross_total - d.net_total) AS discount,
       0 AS refundValue, COALESCE(d.cogs_amount, ledger.movement_value) AS saleCost,
       0 AS returnCost, CASE WHEN d.cogs_amount IS NOT NULL THEN 'SNAPSHOT'
         WHEN ledger.inventory_ledger_id IS NOT NULL THEN 'LEDGER_FALLBACK' ELSE 'UNAVAILABLE' END AS costSource,
@@ -58,7 +59,7 @@ export const SALES_SQL = `
     SELECT CAST(COALESCE(r.business_date, DATE(r.refund_date)) AS CHAR),
       i.invoice_id, r.location_id, rd.product_id,
       NULL, rd.invoice_refund_detail_id, original_detail.sku_snapshot, original_detail.product_name_snapshot,
-      r.refund_number, 'REFUND', 0, rd.quantity, 0, 0, rd.refund_amount,
+      r.refund_number, 'REFUND', 0, rd.quantity, 0, 0, 0, 0, rd.refund_amount,
       0, CASE WHEN rd.return_to_stock = 0 THEN 0
         ELSE COALESCE(rd.cogs_reversal_amount, return_ledger.movement_value) END,
       CASE WHEN rd.cogs_reversal_amount IS NOT NULL THEN 'SNAPSHOT'
@@ -96,7 +97,7 @@ export const SALES_SQL = `
 
 export type SalesEvent = Record<string, unknown> & {
   eventType: 'SALE' | 'REFUND'; qty: number | string; refundQty: number | string;
-  grossSales: number | string; discount: number | string; refundValue: number | string;
+  grossSales: number | string; itemDiscount?: number | string; billDiscount?: number | string; discount: number | string; refundValue: number | string;
   saleCost: number | string | null; returnCost: number | string | null; billCount: number | string;
   cogsMissing?: number | string;
 };

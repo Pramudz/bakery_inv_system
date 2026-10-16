@@ -172,6 +172,12 @@
 .billing-redesign .pos-checkout > .billing-cart-summary { padding: 12px 14px; }
 .billing-redesign .billing-cart-summary .pos-panel-title { margin-bottom: 6px; }
 .billing-redesign .billing-cart-summary .summary-line { font-size: 12px; line-height: 1.4; padding: 4px 0; }
+.billing-bill-discount { padding: 4px 0 8px; }
+.billing-bill-discount > button { font-size: 11px; padding: 4px 8px; }
+.billing-bill-discount-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 7px; }
+.billing-bill-discount-fields .field { min-width: 0; }
+.billing-bill-discount-fields .control { width: 100%; }
+.billing-bill-discount-fields > button, .billing-bill-discount-fields .error-text { grid-column: 1 / -1; }
 .billing-redesign .summary-total { padding: 11px 13px; background: linear-gradient(110deg, #142e50, #19385e); border-radius: 11px; }
 .billing-redesign .summary-total span { font-size: 10px; }
 .billing-redesign .summary-total strong { font-size: 22px; letter-spacing: -.4px; }

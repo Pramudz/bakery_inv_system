@@ -1,7 +1,7 @@
 export type ReportRow = Record<string, string | number | boolean | null>;
 
 export const MEASURE_COLUMNS = new Set([
-  "qty", "refundQty", "grossSales", "discount", "netSalesBeforeRefund", "netSales", "cogs", "gp", "gpPercent",
+  "qty", "refundQty", "grossSales", "itemDiscount", "billDiscount", "discount", "netSalesBeforeRefund", "netSales", "cogs", "gp", "gpPercent",
   "refundValue", "netQty", "billCount", "cogsMissing", "paymentValue", "stockValue", "unitCost",
   "movementValue", "qtyIn", "qtyOut", "qtyBefore", "qtyAfter", "ageDays", "amount",
   "receivedQty", "lineValue", "openingBalance", "cashMovementValue", "cashierSessionCount",

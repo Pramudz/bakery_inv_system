@@ -8,6 +8,7 @@ export type StoredBillingDraft = {
   selectedCustomer: unknown | null;
   sellOnCredit: boolean;
   paymentEntries: PosPaymentEntry[];
+  billDiscount?: { type: 'PERCENTAGE' | 'FIXED'; value: string };
   savedAt: string;
 };
 

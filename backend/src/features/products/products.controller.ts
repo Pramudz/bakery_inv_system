@@ -8,8 +8,11 @@ import {
   Post,
   Query,
   Put,
+  Res,
   UseGuards,
 } from "@nestjs/common";
+import { Response } from 'express';
+import { once } from 'node:events';
 import { ProductService } from "./products.service";
 import { CreateProductDto } from "./dto/create-products.dto";
 import { UpdateProductDto } from "./dto/update-products.dto";
@@ -22,11 +25,34 @@ import { AddProductImageDto, UpdateProductImageDto } from '../product-images/dto
 import { PublishSellingPricesDto } from './dto/publish-selling-prices.dto';
 import { PublishSupplierPurchasePricesDto } from './dto/publish-supplier-purchase-prices.dto';
 import { UpdateProductAttributesDto, UpdateProductGeneralDto, UpdateProductIdentifiersDto, UpdateProductLocationsDto, UpdateProductSupplierLinksDto, UpdateProductUnitsDto } from './dto/update-product-sections.dto';
+import { ProductMasterExportService } from './product-master-export.service';
 
 @Controller("products")
 @UseGuards(TenantAuthGuard, PermissionGuard)
 export class ProductController {
-  constructor(private readonly service: ProductService) {}
+  constructor(private readonly service: ProductService, private readonly exportService: ProductMasterExportService) {}
+
+  @Get('export/item-master/options')
+  @RequirePermission('PRODUCT_VIEW', 'PRODUCT_MASTER_COST_EXPORT')
+  exportItemMasterOptions(@CurrentUser() user: AuthPrincipal) {
+    return this.exportService.options(user);
+  }
+
+  @Get('export/item-master')
+  @RequirePermission('PRODUCT_VIEW', 'PRODUCT_MASTER_COST_EXPORT')
+  async exportItemMaster(@CurrentUser() user: AuthPrincipal, @Query() query: Record<string, string>, @Res() response: Response) {
+    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    response.setHeader('Content-Disposition', 'attachment; filename="item-master.csv"');
+    try {
+      await this.exportService.export(user, query, async chunk => {
+        if (!response.write(chunk)) await once(response, 'drain');
+      });
+      response.end();
+    } catch (error) {
+      if (response.headersSent) { response.destroy(error as Error); return; }
+      throw error;
+    }
+  }
 
   @Get()
   @RequirePermission("PRODUCT_VIEW")

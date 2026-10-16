@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { productsApi, type SupplierPriceHistoryPage, type SupplierPriceSummary } from "../api/productsApi";
-import { exportItemMasterCsv } from '../itemMasterExport';
+import { itemMasterFilename } from '../itemMasterExport';
 import { downloadFile } from '../../../pages/reportExport';
 import { categoriesApi } from "../../categories/api/categoriesApi";
 import { brandsApi } from "../../brands/api/brandsApi";
@@ -207,7 +207,7 @@ const emptyProduct = (): ProductForm => ({
 });
 
 export function ProductsPage() {
-  const { permissions, tenant } = useAuth();
+  const { permissions, tenant, accessScope, assignedLocations, currentLocationId } = useAuth();
   const tenantDateValue = (date = new Date()) => dateValueInTimeZone(tenant?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, date);
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -247,14 +247,28 @@ export function ProductsPage() {
   const [categoryFilter, setCategoryFilter] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<'TENANT' | 'LOCATION'>('TENANT');
+  const [exportPriceListId, setExportPriceListId] = useState('');
+  const [exportLocationId, setExportLocationId] = useState('');
   const exportItemMaster = async () => {
+    if (exporting) return;
+    const priceListId = exportPriceListId || String(exportOptions.data?.priceLists.find(row => row.isDefault)?.priceListId ?? '');
+    const locationId = exportLocationId;
+    if (!priceListId || (exportScope === 'LOCATION' && (!locationId || !exportOptions.data?.locations.some(row => String(row.locationId) === locationId)))) {
+      setExportError('Select an active price list and, for Location Master, a location.');
+      return;
+    }
     setExporting(true);
     setExportError("");
     try {
-      const csv = await exportItemMasterCsv(productsApi.page, {
+      const blob = await productsApi.exportItemMaster({
+        scope: exportScope, priceListId, locationId: exportScope === 'LOCATION' ? String(locationId) : undefined,
         search: search.trim(), status: statusFilter, categoryId: categoryFilter,
       });
-      downloadFile(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `item-master-${localDateValue()}.csv`);
+      const selectedLocation = exportOptions.data?.locations.find(row => String(row.locationId) === String(locationId));
+      downloadFile(blob, itemMasterFilename(exportScope, exportOptions.data?.businessDate ?? tenantDateValue(), selectedLocation?.code ?? ''));
+      setExportOpen(false);
     } catch (error) {
       setExportError(error instanceof Error ? error.message : 'Unable to export item master.');
     } finally {
@@ -302,6 +316,11 @@ export function ProductsPage() {
   const priceLists = useQuery({
     queryKey: ["price-lists"],
     queryFn: priceListsApi.list,
+  });
+  const exportOptions = useQuery({
+    queryKey: ['item-master-export-options'],
+    queryFn: productsApi.itemMasterExportOptions,
+    enabled: exportOpen,
   });
   const locationsQ = useQuery({
     queryKey: ["locations"],
@@ -1503,10 +1522,11 @@ export function ProductsPage() {
               </option>
             ))}
           </select>
-          {permissions.includes('PRODUCT_VIEW') && (
-            <button className="btn btn-secondary product-list-action" disabled={exporting || products.isLoading}
-              onClick={exportItemMaster} title="Export all products matching the search, status and category filters">
-              {exporting ? 'Exporting…' : 'Export Item Master CSV'}
+          {permissions.includes('PRODUCT_VIEW') && permissions.includes('PRODUCT_MASTER_COST_EXPORT') && (
+            <button className="btn btn-secondary product-list-action" disabled={products.isLoading}
+              onClick={() => { setExportError(''); setExportScope(accessScope === 'TENANT' ? 'TENANT' : 'LOCATION'); setExportPriceListId(''); setExportLocationId(String(currentLocationId ?? assignedLocations[0]?.locationId ?? '')); setExportOpen(true); }}
+              title="Export all products matching the search, status and category filters">
+              Export Item Master CSV
             </button>
           )}
           <button
@@ -1676,6 +1696,39 @@ export function ProductsPage() {
           </div>
         </div>
       </div>
+
+      <Modal open={exportOpen} onClose={() => { if (!exporting) { setExportOpen(false); setExportError(''); } }} title="Export Item Master">
+        <div className="modal-body">
+          <div className="field">
+            <label>Export Scope</label>
+            <div className="form-row">
+              {exportOptions.data?.canTenantExport && <label><input type="radio" name="item-master-scope" checked={exportScope === 'TENANT'} onChange={() => setExportScope('TENANT')} /> Tenant Master</label>}
+              <label><input type="radio" name="item-master-scope" checked={exportScope === 'LOCATION'} onChange={() => setExportScope('LOCATION')} /> Location Master</label>
+            </div>
+          </div>
+          <div className="field">
+            <label>Price List</label>
+            <select className="control" value={exportPriceListId || String(exportOptions.data?.priceLists.find(row => row.isDefault)?.priceListId ?? '')} onChange={event => setExportPriceListId(event.target.value)} disabled={exporting}>
+              <option value="">Select Price List</option>
+              {(exportOptions.data?.priceLists ?? []).map(row => <option key={row.priceListId} value={row.priceListId}>{row.name} ({row.code})</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label>Location</label>
+            <select className="control" value={exportScope === 'LOCATION' ? exportLocationId : ''} onChange={event => setExportLocationId(event.target.value)} disabled={exporting || exportScope === 'TENANT'}>
+              <option value="">Select Location</option>
+              {(exportOptions.data?.locations ?? []).map(row => <option key={row.locationId} value={row.locationId}>{row.name} ({row.code})</option>)}
+            </select>
+          </div>
+          <p>Current prices use the tenant business date: {exportOptions.data?.businessDate ?? 'Loading…'}.</p>
+          {exportOptions.isError && <div className="alert alert-error" role="alert">{exportOptions.error instanceof Error ? exportOptions.error.message : 'Unable to load export options.'}</div>}
+          {exportError && <div className="alert alert-error" role="alert">{exportError}</div>}
+        </div>
+        <div className="modal-actions">
+          <button className="btn btn-secondary" onClick={() => { setExportOpen(false); setExportError(''); }} disabled={exporting}>Cancel</button>
+          <button className="btn btn-primary" onClick={exportItemMaster} disabled={exporting || !exportOptions.data}>{exporting ? 'Exporting…' : 'Export CSV'}</button>
+        </div>
+      </Modal>
 
       <Modal
         open={Boolean(viewing)}

@@ -7,6 +7,8 @@ import { PosTerminal } from '../pos-registers/pos-terminal.entity';
 import { PosPrintJob } from './pos-print-job.entity';
 import { PosPrintProfile } from './pos-print-profile.entity';
 import { Invoice } from '../invoices/invoice.entity';
+import { InvoicePayment } from '../invoices/invoice-payment.entity';
+import { snapshotPaymentCollection } from '../invoices/payment-collection-receipt';
 import { InvoiceRefund } from '../invoice-refunds/invoice-refund.entity';
 import { Tenant } from '../tenants/tenant.entity';
 
@@ -75,7 +77,7 @@ export class PosPrintService {
     return { profile: this.publicProfile(profile), agentToken };
   }
 
-  async enqueue(manager: EntityManager, documentType: 'SALE' | 'REFUND', sourceId: number, tenantId: number, locationId: number, terminalId: number | null, receiptSnapshot: Record<string, any>) {
+  async enqueue(manager: EntityManager, documentType: 'SALE' | 'REFUND' | 'PAYMENT_COLLECTION', sourceId: number, tenantId: number, locationId: number, terminalId: number | null, receiptSnapshot: Record<string, any>) {
     const repo = manager.getRepository(PosPrintProfile);
     const profile = (terminalId ? await repo.findOneBy({ tenantId, locationId, scopeKey: String(terminalId), isActive: true }) : null)
       ?? await repo.findOneBy({ tenantId, locationId, scopeKey: 'LOCATION', isActive: true });
@@ -106,12 +108,14 @@ export class PosPrintService {
     return { items, total, page, pageSize };
   }
 
-  async documentStatus(documentType: 'SALE' | 'REFUND', sourceId: number, user: TenantPrincipal) {
-    const document = documentType === 'SALE'
+  async documentStatus(documentType: 'SALE' | 'REFUND' | 'PAYMENT_COLLECTION', sourceId: number, user: TenantPrincipal) {
+    const document = documentType === 'PAYMENT_COLLECTION'
+      ? await this.dataSource.getRepository(InvoicePayment).findOne({ where: { invoicePaymentId: sourceId, tenantId: user.tenantId }, relations: { invoice: true } })
+      : documentType === 'SALE'
       ? await this.dataSource.getRepository(Invoice).findOneBy({ invoiceId: sourceId, tenantId: user.tenantId })
       : await this.dataSource.getRepository(InvoiceRefund).findOneBy({ invoiceRefundId: sourceId, tenantId: user.tenantId });
-    if (!document) throw new NotFoundException('Receipt document not found.');
-    this.assertLocation(document.locationId, user);
+    if (!document || (documentType === 'PAYMENT_COLLECTION' && !(document as InvoicePayment).collectionKey)) throw new NotFoundException('Receipt document not found.');
+    this.assertLocation(documentType === 'PAYMENT_COLLECTION' ? (document as InvoicePayment).invoice.locationId : (document as Invoice | InvoiceRefund).locationId, user);
     const job = await this.dataSource.getRepository(PosPrintJob).findOne({
       where: { tenantId: user.tenantId, documentType, sourceId },
       order: { posPrintJobId: 'DESC' },
@@ -119,28 +123,45 @@ export class PosPrintService {
     return job ? { jobId: job.posPrintJobId, status: job.status, attempts: job.attempts, lastError: job.lastError, updatedAt: job.updatedAt } : { jobId: null, status: 'NOT_REQUESTED', attempts: 0, lastError: null, updatedAt: null };
   }
 
-  async requestPrint(documentType: 'SALE' | 'REFUND', sourceId: number, user: TenantPrincipal) {
+  async requestPrint(documentType: 'SALE' | 'REFUND' | 'PAYMENT_COLLECTION', sourceId: number, user: TenantPrincipal) {
     return this.dataSource.transaction(async (manager) => {
-      const document = documentType === 'SALE'
+      const document = documentType === 'PAYMENT_COLLECTION'
+        ? await manager.getRepository(InvoicePayment).findOne({ where: { invoicePaymentId: sourceId, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } })
+        : documentType === 'SALE'
         ? await manager.getRepository(Invoice).findOne({ where: { invoiceId: sourceId, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } })
         : await manager.getRepository(InvoiceRefund).findOne({ where: { invoiceRefundId: sourceId, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } });
-      if (!document) throw new NotFoundException('Receipt document not found.');
-      this.assertLocation(document.locationId, user);
-      if (!document.receiptSnapshot) throw new BadRequestException('No archived receipt exists for this document.');
+      if (!document || (documentType === 'PAYMENT_COLLECTION' && !(document as InvoicePayment).collectionKey)) throw new NotFoundException('Receipt document not found.');
+      let locationId: number;
+      let snapshot = document.receiptSnapshot;
+      if (documentType === 'PAYMENT_COLLECTION') {
+        const payment = document as InvoicePayment;
+        const invoice = await manager.getRepository(Invoice).findOneBy({ invoiceId: payment.invoiceId, tenantId: user.tenantId });
+        if (!invoice) throw new NotFoundException('Original invoice not found.');
+        locationId = invoice.locationId;
+        if (!snapshot) {
+          const loaded = await manager.getRepository(InvoicePayment).findOne({ where: { invoicePaymentId: sourceId }, relations: { invoice: { tenant: true, customer: true, location: true }, paymentMethod: true, paymentChannel: true, createdByUser: true } });
+          if (!loaded) throw new NotFoundException('Payment receipt not found.');
+          snapshot = snapshotPaymentCollection(loaded);
+          await manager.getRepository(InvoicePayment).update(sourceId, { receiptSnapshot: snapshot });
+        }
+        if (payment.isReversed) snapshot = { ...snapshot, isReversed: true, reversedAt: payment.reversedAt };
+      } else locationId = (document as Invoice | InvoiceRefund).locationId;
+      this.assertLocation(locationId, user);
+      if (!snapshot) throw new BadRequestException('No archived receipt exists for this document.');
       const repo = manager.getRepository(PosPrintJob);
       const existing = await repo.findOne({ where: { tenantId: user.tenantId, documentType, sourceId }, order: { posPrintJobId: 'DESC' } });
       if (existing && (existing.status === 'PENDING' || existing.status === 'CLAIMED'))
         return { jobId: existing.posPrintJobId, status: existing.status, reprint: existing.receiptSnapshot?.printCopy === true };
       if (existing) {
         const reprint = existing.status === 'PRINTED' || existing.receiptSnapshot?.printCopy === true;
-        if (reprint) await this.auditReprint(manager, documentType, sourceId, user, document.locationId, existing.posPrintJobId);
-        existing.receiptSnapshot = { ...document.receiptSnapshot, printCopy: reprint };
+        if (reprint) await this.auditReprint(manager, documentType, sourceId, user, locationId, existing.posPrintJobId);
+        existing.receiptSnapshot = { ...snapshot, printCopy: reprint };
         existing.status = 'PENDING'; existing.leaseUntil = null; existing.lastError = null;
         await repo.save(existing);
         return { jobId: existing.posPrintJobId, status: 'PENDING', reprint };
       }
-      const job = await this.enqueue(manager, documentType, sourceId, user.tenantId, document.locationId,
-        document.posTerminalId ?? null, document.receiptSnapshot);
+      const job = await this.enqueue(manager, documentType, sourceId, user.tenantId, locationId,
+        document.posTerminalId ?? null, snapshot);
       if (!job) throw new BadRequestException('No active receipt printer is configured for this location.');
       return { jobId: job.posPrintJobId, status: 'PENDING', reprint: false };
     });
@@ -162,7 +183,7 @@ export class PosPrintService {
     });
   }
 
-  async auditReprint(manager: EntityManager, documentType: 'SALE' | 'REFUND', sourceId: number, user: TenantPrincipal, locationId: number, printJobId: number | null = null) {
+  async auditReprint(manager: EntityManager, documentType: 'SALE' | 'REFUND' | 'PAYMENT_COLLECTION', sourceId: number, user: TenantPrincipal, locationId: number, printJobId: number | null = null) {
     this.assertLocation(locationId, user);
     await manager.query(`INSERT INTO tbl_pos_receipt_reprint
       (tenant_id, location_id, document_type, source_id, requested_by_user_id, requested_at, print_job_id)

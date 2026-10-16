@@ -89,9 +89,43 @@ function layout(receipt, width, copy) {
   for (const line of header.locationAddress ?? []) center(line);
   if (header.locationPhone) center(`Tel: ${header.locationPhone}`);
   separator();
-  const title = receipt.documentType === 'REFUND' ? 'REFUND RECEIPT' : receipt.documentType === 'TEST' ? 'TEST PRINT' : 'SALE RECEIPT';
+  const title = receipt.documentType === 'PAYMENT_COLLECTION' ? 'PAYMENT RECEIPT' : receipt.documentType === 'REFUND' ? 'REFUND RECEIPT' : receipt.documentType === 'TEST' ? 'TEST PRINT' : 'SALE RECEIPT';
   center(`${title}${copy ? ' - COPY' : ''}`, { bold: true });
   separator();
+
+  if (receipt.documentType === 'PAYMENT_COLLECTION') {
+    const issued = receipt.issuedAt ? new Date(receipt.issuedAt) : null;
+    const localDate = issued && !Number.isNaN(issued.getTime())
+      ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', timeStyle: 'short', timeZone: header.timeZone ?? 'Asia/Colombo' }).format(issued) : '';
+    field('Receipt No', receipt.paymentReceiptNumber ?? '-');
+    field('Date', localDate);
+    const sale = receipt.originalSale ?? {};
+    const saleRef = sale.billNo != null && sale.businessDate && sale.locationCode && sale.registerCode
+      ? `${date(sale.businessDate)} / ${sale.locationCode} / ${sale.registerCode} / ${String(sale.billNo).padStart(4, '0')}` : sale.invoiceNumber ?? 'Legacy sale';
+    field('Original sale', saleRef);
+    field('Customer', receipt.customer?.customerName ?? 'Walk-in Customer');
+    if (receipt.customer?.phone) field('Phone', receipt.customer.phone);
+    field('Location', header.locationName || header.locationCode || '-');
+    if (header.cashierName) field('Cashier', header.cashierName);
+    field('Payment method', receipt.paymentMethod?.paymentMethodName ?? 'Payment');
+    if (receipt.paymentChannel?.name) field('Channel', receipt.paymentChannel.name);
+    if (receipt.referenceNumber) field('Reference', receipt.referenceNumber);
+    separator();
+    amount('Original total', receipt.originalInvoiceTotal);
+    amount('Previous balance', receipt.balanceBefore);
+    amount('Tendered', receipt.tenderedAmount);
+    amount('Payment applied', receipt.amount);
+    amount('Change given', receipt.changeAmount);
+    separator();
+    amount('Remaining balance', receipt.balanceAfter, { bold: true });
+    rightRow('Status', receipt.isReversed ? 'REVERSED' : Number(receipt.balanceAfter) === 0 ? 'FULLY PAID' : 'PARTIALLY PAID');
+    separator();
+    center('Please keep this receipt with your original invoice.');
+    separator();
+    center('Software by Prosinc :');
+    center('+94 71 776 8726 / +94 71 300 1389');
+    return rows;
+  }
 
   const issued = receipt.issuedAt ? new Date(receipt.issuedAt) : null;
   const localTime = issued && !Number.isNaN(issued.getTime()) ? issued.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: header.timeZone ?? 'Asia/Colombo' }) : '';
@@ -156,6 +190,8 @@ function layout(receipt, width, copy) {
     rightRow('Line count', String(lineCount));
     rightRow('Total Quantity', count(itemCount));
     amount('Subtotal', receipt.subtotal);
+    rightRow('Item discount', `- LKR ${money(receipt.itemDiscountTotal ?? receipt.discountTotal)}`);
+    rightRow(receipt.billDiscountType === 'PERCENTAGE' ? `Bill discount (${receipt.billDiscountValue}%)` : 'Bill discount', `- LKR ${money(receipt.billDiscountTotal)}`);
     rightRow('Total discount', `- LKR ${money(receipt.discountTotal)}`);
     separator();
     amount('Original Total', receipt.grandTotal, { bold: true });
@@ -171,9 +207,11 @@ function layout(receipt, width, copy) {
     }
     const total = Number(receipt.grandTotal ?? 0);
     const paid = Number(receipt.paidAmount ?? 0);
-    rightRow('Payment status', paid >= total && total > 0 ? 'FULL PAID' : paid > 0 ? 'PARTIALLY PAID' : 'NONE PAID');
+    rightRow('Payment status', paid >= total ? 'FULL PAID' : paid > 0 ? 'PARTIALLY PAID' : 'NONE PAID');
   } else if (receipt.documentType === 'REFUND') {
     amount('Subtotal', receipt.subtotal);
+    rightRow('Item discount', `- LKR ${money(receipt.itemDiscountTotal ?? receipt.discountTotal)}`);
+    rightRow('Bill discount', `- LKR ${money(receipt.billDiscountTotal)}`);
     rightRow('Total discount', `- LKR ${money(receipt.discountTotal)}`);
     separator();
     amount('Refund Total', receipt.refundTotal, { bold: true });

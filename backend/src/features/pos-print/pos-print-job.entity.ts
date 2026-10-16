@@ -9,7 +9,7 @@ export class PosPrintJob {
   @Column({ name: 'location_id', type: 'bigint' }) locationId!: number;
   @Column({ name: 'pos_terminal_id', type: 'bigint', nullable: true }) posTerminalId!: number | null;
   @Column({ name: 'pos_print_profile_id', type: 'bigint' }) posPrintProfileId!: number;
-  @Column({ name: 'document_type', type: 'varchar', length: 10 }) documentType!: 'SALE' | 'REFUND' | 'TEST';
+  @Column({ name: 'document_type', type: 'varchar', length: 24 }) documentType!: 'SALE' | 'REFUND' | 'PAYMENT_COLLECTION' | 'TEST';
   @Column({ name: 'source_id', type: 'bigint', nullable: true }) sourceId!: number | null;
   @Column({ name: 'receipt_snapshot', type: 'json' }) receiptSnapshot!: Record<string, any>;
   @Column({ type: 'varchar', length: 20, default: 'PENDING' }) status!: 'PENDING' | 'CLAIMED' | 'PRINTED' | 'FAILED';

@@ -330,6 +330,48 @@ test('edited retail discount saves consistently to invoice, detail and receipt w
   assert.equal(f.savedDetails.length, 1);
 });
 
+test('authorized bill discount changes header, line revenue, payment due and immutable receipt', async () => {
+  const f = fixture();
+  const request: any = { checkoutKey: 'aaaa1111-1111-4111-8111-111111111111', locationId: 3, saleType: 'RETAIL',
+    details: [{ productId: 10, quantity: 2, quotedPriceListItemId: 40, quotedPriceListItemDiscountId: 50, quotedUnitPrice: 100, quotedDiscountAmount: 20 }],
+    billDiscount: { type: 'PERCENTAGE', value: 10 }, payments: [{ paymentMethodId: 1, amount: 162 }] };
+  const invoice = await f.service.create(request, user);
+  assert.equal(invoice.itemDiscountTotal, '20.00');
+  assert.equal(invoice.billDiscountTotal, '18.00');
+  assert.equal(invoice.discountTotal, '38.00');
+  assert.equal(invoice.grandTotal, '162.00');
+  assert.equal(f.savedDetails[0].discountAmount, '20.00');
+  assert.equal(f.savedDetails[0].netBeforeBillDiscount, '180.00');
+  assert.equal(f.savedDetails[0].billDiscountAllocated, '18.00');
+  assert.equal(f.savedDetails[0].netTotal, '162.00');
+  assert.equal((invoice.receiptSnapshot as any).billDiscountTotal, '18.00');
+  assert.equal((await f.service.create(request, user)).invoiceId, invoice.invoiceId);
+  await assert.rejects(f.service.create({ ...request, billDiscount: { type: 'PERCENTAGE', value: 5 } }, user), /checkout key/i);
+});
+
+test('cashier bill discount needs an explicit grant and locked quotation rejects it', async () => {
+  const request: any = { checkoutKey: 'bbbb1111-1111-4111-8111-111111111111', locationId: 3, saleType: 'RETAIL',
+    details: [{ productId: 10, quantity: 2, quotedPriceListItemId: 40, quotedPriceListItemDiscountId: 50, quotedUnitPrice: 100, quotedDiscountAmount: 20 }],
+    billDiscount: { type: 'FIXED', value: 20 }, payments: [{ paymentMethodId: 1, amount: 160 }] };
+  const cashier = { ...user, roleCode: 'CASHIER' };
+  const denied = fixture(false);
+  await assert.rejects(denied.service.create(request, cashier), /SALES_BILL_DISCOUNT_APPLY/i);
+  assert.equal(denied.savedDetails.length, 0);
+  assert.equal((await fixture(true).service.create(request, cashier)).grandTotal, '160.00');
+  await assert.rejects(fixture(true, true).service.create({ ...request, sourceQuotationId: 70, customerId: 9 }, user), /locked quotation conversion/i);
+});
+
+test('fully discounted invoice needs no payment or credit authorization', async () => {
+  const f = fixture(false);
+  const invoice = await f.service.create({ checkoutKey: 'cccc1111-1111-4111-8111-111111111111', locationId: 3, saleType: 'RETAIL',
+    details: [{ productId: 10, quantity: 2, quotedPriceListItemId: 40, quotedPriceListItemDiscountId: 50, quotedUnitPrice: 100, quotedDiscountAmount: 20 }],
+    billDiscount: { type: 'PERCENTAGE', value: 100 }, payments: [] } as any, user);
+  assert.equal(invoice.grandTotal, '0.00');
+  assert.equal(invoice.paymentStatus, 'PAID');
+  assert.equal(invoice.isCreditSale, false);
+  assert.equal(f.savedDetails[0].netTotal, '0.00');
+});
+
 test('quotation conversion rejects manual retail overrides even when legacy amounts match', async () => {
   const f = fixture(true, true);
   await assert.rejects(f.service.create({ checkoutKey: '88888888-8888-4888-8888-888888888888', sourceQuotationId: 70, locationId: 3, customerId: 9, saleType: 'RETAIL', details: [{ productId: 10, quantity: 2, quotedUnitPrice: 100, quotedDiscountAmount: 20, retailDiscount: { type: 'AMOUNT', value: 20 } }], payments: [] } as any, user), /quotation discounts cannot be changed/i);

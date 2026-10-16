@@ -37,6 +37,11 @@ export class AuthorizationCatalogService implements OnModuleInit {
         if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: module.moduleId, code, name: `${resource.replace(/_/g, ' ')} ${action.toLowerCase()}`, isActive: true }));
       }
     }
+    const productModule = byCode.get('PRODUCT')!;
+    if (!await permissions.findOneBy({ code: 'PRODUCT_MASTER_COST_EXPORT' })) await permissions.save(permissions.create({
+      moduleId: productModule.moduleId, code: 'PRODUCT_MASTER_COST_EXPORT', name: 'Export product master with costs',
+      description: 'Allows export of product master purchase prices and inventory valuation within the role access scope.', isActive: true,
+    }));
     const purchasing = byCode.get('PURCHASING')!;
     const purchasingPermissions = ['PURCHASE_ORDER_VIEW','PURCHASE_ORDER_CREATE','PURCHASE_ORDER_UPDATE','PURCHASE_ORDER_APPROVE','PURCHASE_ORDER_CANCEL','GRN_VIEW','GRN_CREATE','GRN_UPDATE','GRN_POST','GRN_CANCEL','GRN_REVERSE'];
     for (const code of purchasingPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: purchasing.moduleId, code, name: code.replace(/_/g,' ').toLowerCase(), isActive: true }));
@@ -50,7 +55,7 @@ export class AuthorizationCatalogService implements OnModuleInit {
     for (const code of inventoryPermissions) if (!await permissions.findOneBy({ code })) await permissions.save(permissions.create({ moduleId: inventory.moduleId, code, name: code.replace(/_/g, ' ').toLowerCase(), isActive: true }));
     const sales = byCode.get('SALES')!;
     const salesPermissions = [
-      'SALES_BILLING', 'SALES_CREDIT_AUTHORIZE', 'SALES_POS_REGISTER_ADMIN', 'SALES_REGISTER_OPEN', 'SALES_REGISTER_CLOSE', 'SALES_REGISTER_VERIFY', 'SALES_REGISTER_PAYOUT', 'SALES_INVOICE_VIEW', 'SALES_PAYMENT_COLLECT',
+      'SALES_BILLING', 'SALES_BILL_DISCOUNT_APPLY', 'SALES_CREDIT_AUTHORIZE', 'SALES_POS_REGISTER_ADMIN', 'SALES_REGISTER_OPEN', 'SALES_REGISTER_CLOSE', 'SALES_REGISTER_VERIFY', 'SALES_REGISTER_PAYOUT', 'SALES_INVOICE_VIEW', 'SALES_PAYMENT_COLLECT',
       'SALES_REFUND_VIEW', 'SALES_REFUND_CREATE',
       'SALES_ADJUSTMENT_VIEW', 'SALES_ADJUSTMENT_CREATE',
       'SALES_PAYMENT_REVERSE', 'SALES_PAYMENT_METHOD_VIEW', 'SALES_PAYMENT_METHOD_MANAGE',

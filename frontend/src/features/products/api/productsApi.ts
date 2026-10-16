@@ -1,4 +1,5 @@
 import { apiClient } from "../../../services/apiClient";
+import { itemMasterExportPath, type ItemMasterExportOptions } from '../itemMasterExport';
 export type Product = Record<string, any>;
 export type ProductPage = {
   items: Product[];
@@ -25,6 +26,8 @@ export type SupplierPriceHistoryPage = {
   totalPages: number;
 };
 export const productsApi = {
+  itemMasterExportOptions: () => apiClient.get<{ businessDate: string; canTenantExport: boolean; priceLists: Array<{ priceListId: string; code: string; name: string; isDefault: boolean }>; locations: Array<{ locationId: string; code: string; name: string }> }>('/products/export/item-master/options'),
+  exportItemMaster: (options: ItemMasterExportOptions) => apiClient.getBlob(itemMasterExportPath(options)),
   locations: () => apiClient.get<Array<{ productId: number | string; locationId: number | string; isActive: boolean; isPurchasable: boolean }>>("/product-locations"),
   list: () => apiClient.get<Product[]>("/products"),
   page: (params: {

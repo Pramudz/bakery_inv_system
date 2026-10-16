@@ -114,7 +114,7 @@ export function RefundsPage() {
     const quantity = quantities[line.invoiceDetailId] ?? 0;
     const ratio = quantity / Number(line.quantity);
     const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
-    return round(sum + (quantity === Number(line.refundableQuantity) ? Number(line.refundableAmount) : round(Number(line.grossTotal) * ratio) - round(Number(line.discountAmount) * ratio)));
+    return round(sum + (quantity === Number(line.refundableQuantity) ? Number(line.refundableAmount) : round(Number(line.netTotal) * ratio)));
   }, 0), [invoice.data, quantities]);
   const remainingLines = (invoice.data?.details ?? []).filter((line: any) => Number(line.refundableQuantity) > 0);
   const fullRefund = mode === 'ITEM' && remainingLines.length > 0 && remainingLines.every((line: any) => quantities[line.invoiceDetailId] === Number(line.refundableQuantity));

@@ -20,10 +20,12 @@ export function invoiceReceiptModel(invoice: Record<string, any>) {
   const issued = new Date(original.issuedAt ?? original.invoiceDate);
   const localTime = Number.isNaN(issued.getTime()) ? '' : issued.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: header?.timeZone ?? 'Asia/Colombo' });
   const receiptDate = printedDate ? `${printedDate} ${localTime}` : Number.isNaN(date.getTime()) ? '' : date.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Colombo' });
-  return { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance: Math.max(0, total - paidTotal), subtotal: Number(original.subtotal), discount: Number(original.discountTotal), method,
+  return { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance: Math.max(0, total - paidTotal), subtotal: Number(original.subtotal), discount: Number(original.discountTotal),
+    itemDiscount: Number(original.itemDiscountTotal ?? original.discountTotal), billDiscount: Number(original.billDiscountTotal ?? 0),
+    billDiscountType: original.billDiscountType ?? null, billDiscountValue: Number(original.billDiscountValue ?? 0), method,
     header, billNo: (original.billNo ?? null) as number | null, locationCode: (original.printedLocationCode ?? null) as string | null, registerCode: (original.printedRegisterCode ?? null) as string | null,
     payments: initialPayments,
-    paymentStatus: paidTotal >= total && total > 0 ? 'Full Paid' : paidTotal > 0 ? 'Partially Paid' : 'None Paid',
+    paymentStatus: paidTotal >= total ? 'Full Paid' : paidTotal > 0 ? 'Partially Paid' : 'None Paid',
     saleType: original.saleType === 'WHOLESALE' ? 'Wholesale' : 'Retail',
     selectedCustomer: original.customer ? { name: original.customer.customerName } : null,
     completedInvoice: original, receiptDate, unitPrice: (line: ReceiptLine) => line.rate, lineNet: (line: ReceiptLine) => line.net,

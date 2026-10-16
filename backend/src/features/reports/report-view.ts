@@ -12,7 +12,7 @@ export const REPORT_FILTER_FIELDS = [
   'register', 'terminal', 'eventType', 'reorderStatus',
 ] as const;
 
-const SALES_MEASURES = ['qty', 'refundQty', 'grossSales', 'discount', 'netSalesBeforeRefund',
+const SALES_MEASURES = ['qty', 'refundQty', 'grossSales', 'itemDiscount', 'billDiscount', 'discount', 'netSalesBeforeRefund',
   'refundValue', 'netSales', 'saleCogs', 'cogsReversal', 'cogs', 'gp', 'netQty'] as const;
 const PAYMENT_MEASURES = ['paymentValue', 'paymentCount'] as const;
 const POSITION_MEASURES = ['qty', 'stockValue', 'incomingTransitQty', 'incomingTransitValue',

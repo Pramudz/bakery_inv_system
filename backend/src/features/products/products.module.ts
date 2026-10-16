@@ -6,6 +6,7 @@ import { ProductService } from './products.service';
 import { NumberSequencesModule } from '../number-sequences/number-sequences.module';
 import { ProductImage } from '../product-images/product-image.entity';
 import { PriceListItemDiscountModule } from '../price-list-item-discounts/price-list-item-discounts.module';
+import { ProductMasterExportService } from './product-master-export.service';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { PriceListItemDiscountModule } from '../price-list-item-discounts/price-
     PriceListItemDiscountModule,
   ],
   controllers: [ProductController],
-  providers: [ProductService],
+  providers: [ProductService, ProductMasterExportService],
   exports: [ProductService],
 })
 export class ProductModule {}

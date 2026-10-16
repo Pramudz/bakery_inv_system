@@ -1,13 +1,13 @@
 import { invoiceReceiptModel } from './invoiceReceiptModel';
 
 export function downloadInvoiceReceipt(invoice: Record<string, any>, copy = false) {
-    const { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, receiptDate, unitPrice, lineNet, header, billNo, locationCode, registerCode, payments } = invoiceReceiptModel(invoice);
+    const { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance, subtotal, discount, itemDiscount, billDiscount, billDiscountType, billDiscountValue, method, paymentStatus, saleType, selectedCustomer, receiptDate, unitPrice, lineNet, header, billNo, locationCode, registerCode, payments } = invoiceReceiptModel(invoice);
     const paidAmount = paidTotal,
       change = changeTotal;
     const escapePdf = (value: string) =>
       value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
     const pageWidth = 226.77,
-      pageHeight = 540 + cart.length * 33 + payments.length * 15;
+      pageHeight = 568 + cart.length * 33 + payments.length * 15;
     let y = pageHeight - 24;
     const commands: string[] = [];
     const text = (
@@ -107,6 +107,8 @@ export function downloadInvoiceReceipt(invoice: Record<string, any>, copy = fals
     };
     summary("Items count", String(cart.reduce((n, x) => n + x.qty, 0)));
     summary("Subtotal", `LKR ${subtotal.toFixed(2)}`);
+    summary("Item discount", `- LKR ${itemDiscount.toFixed(2)}`);
+    summary(billDiscountType === 'PERCENTAGE' ? `Bill discount (${billDiscountValue}%)` : 'Bill discount', `- LKR ${billDiscount.toFixed(2)}`);
     summary("Total discount", `- LKR ${discount.toFixed(2)}`);
     rule();
     y -= 13;

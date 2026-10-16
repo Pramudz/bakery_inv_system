@@ -1,22 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { exportItemMasterCsv } from '../features/products/itemMasterExport.ts';
+import { itemMasterExportPath, itemMasterFilename } from '../features/products/itemMasterExport.ts';
 
-test('exports every matching page with filters and master fields', async () => {
-  const calls = [];
-  const csv = await exportItemMasterCsv(async params => {
-    calls.push(params);
-    return { items: [{ sku: `SKU${params.page}`, productName: 'Cake, "special"', category: { categoryName: 'Bakery' }, brand: null, baseUnit: { name: 'Piece' }, isActive: params.page === 1 }], totalPages: 2 };
-  }, { search: 'Cake', status: '', categoryId: '3' });
-  assert.deepEqual(calls, [1, 2].map(page => ({ page, limit: 100, search: 'Cake', status: '', categoryId: '3' })));
-  assert.match(csv, /SKU1/);
-  assert.match(csv, /SKU2/);
-  assert.match(csv, /"Cake, ""special""","Bakery","","Piece","Active"/);
-  assert.match(csv, /"Inactive"/);
+test('item master export passes filters and scope to the backend', () => {
+  const path = itemMasterExportPath({ scope: 'LOCATION', priceListId: '5', locationId: '8', search: 'Cake & tea', status: 'inactive', categoryId: '3' });
+  const url = new URL(path, 'http://localhost');
+  assert.equal(url.pathname, '/products/export/item-master');
+  assert.deepEqual(Object.fromEntries(url.searchParams), { scope: 'LOCATION', priceListId: '5', search: 'Cake & tea', status: 'inactive', categoryId: '3', locationId: '8' });
+  assert.equal(itemMasterFilename('LOCATION', '2026-10-17', 'W 01/2'), 'item-master-location-W_01_2-2026-10-17.csv');
 });
 
-test('empty results produce headers and failed pages reject the export', async () => {
-  const csv = await exportItemMasterCsv(async () => ({ items: [], totalPages: 1 }), { search: '', status: '', categoryId: '' });
-  assert.equal(csv, '\uFEFF"SKU","Item Name","Category","Brand","Base Unit","Status"');
-  await assert.rejects(exportItemMasterCsv(async () => { throw new Error('Unavailable'); }, { search: '', status: '', categoryId: '' }), /Unavailable/);
+test('tenant export omits a retained location selection', () => {
+  const path = itemMasterExportPath({ scope: 'TENANT', priceListId: '5', locationId: '8', search: '', status: '', categoryId: '' });
+  assert.equal(new URL(path, 'http://localhost').searchParams.has('locationId'), false);
+  assert.equal(itemMasterFilename('TENANT', '2026-10-17'), 'item-master-tenant-2026-10-17.csv');
 });

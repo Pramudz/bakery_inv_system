@@ -1,19 +1,22 @@
-import { reportCsv } from '../../pages/reportExport.ts';
-import type { Product } from './api/productsApi';
+export type ItemMasterExportOptions = {
+  scope: 'TENANT' | 'LOCATION';
+  priceListId: string;
+  locationId?: string;
+  search: string;
+  status: string;
+  categoryId: string;
+};
 
-type Filters = { search: string; status: string; categoryId: string };
-type FetchPage = (params: Filters & { page: number; limit: number }) => Promise<{ items: Product[]; totalPages: number }>;
+export function itemMasterExportPath(options: ItemMasterExportOptions): string {
+  const params = new URLSearchParams({
+    scope: options.scope, priceListId: options.priceListId, search: options.search,
+    status: options.status, categoryId: options.categoryId,
+  });
+  if (options.scope === 'LOCATION' && options.locationId) params.set('locationId', options.locationId);
+  return `/products/export/item-master?${params}`;
+}
 
-export async function exportItemMasterCsv(fetchPage: FetchPage, filters: Filters): Promise<string> {
-  const rows: string[][] = [];
-  let totalPages = 1;
-  for (let page = 1; page <= totalPages; page++) {
-    const result = await fetchPage({ ...filters, page, limit: 100 });
-    totalPages = result.totalPages;
-    for (const product of result.items) {
-      rows.push([product.sku ?? '', product.productName ?? '', product.category?.categoryName ?? '',
-        product.brand?.brandName ?? '', product.baseUnit?.name ?? '', product.isActive ? 'Active' : 'Inactive']);
-    }
-  }
-  return reportCsv(['SKU', 'Item Name', 'Category', 'Brand', 'Base Unit', 'Status'], rows);
+export function itemMasterFilename(scope: 'TENANT' | 'LOCATION', businessDate: string, locationCode = '') {
+  const code = locationCode.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return scope === 'TENANT' ? `item-master-tenant-${businessDate}.csv` : `item-master-location-${code}-${businessDate}.csv`;
 }

@@ -12,7 +12,7 @@ export function columnsFor(report: ColumnReportDefinition, view: ReportView,
   granularity: ReportGranularity, groupBy: string, rows: ReportRow[]) {
   const period = granularity === 'AGGREGATED' || view === 'DOCUMENT_DETAIL' || !report.dated || report.replenishment
     ? [] : ['periodKey'];
-  const sales = ['qty', 'refundQty', 'netQty', 'grossSales', 'discount', 'netSalesBeforeRefund',
+  const sales = ['qty', 'refundQty', 'netQty', 'grossSales', 'itemDiscount', 'billDiscount', 'discount', 'netSalesBeforeRefund',
     'refundValue', 'netSales', 'saleCogs', 'cogsReversal', 'cogs', 'gp', 'gpPercent'];
   let fields: string[];
   if (['sales-analysis', 'credit-sales'].includes(report.id)) fields = view === 'DOCUMENT_DETAIL'

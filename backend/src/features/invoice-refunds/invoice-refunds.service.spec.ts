@@ -27,6 +27,7 @@ function fixture(paidAmount = '20') {
     unitPrice: '10', discountPercentage: '0', productId: 8, product: { productName: 'Bread', isStockItem: false },
   }] };
   const refunds: any[] = [{ invoiceRefundId: 9, invoiceId: '1', tenantId: 1, locationId: 3, status: 'COMPLETED', refundTotal: '20', payments: [{ invoiceRefundPaymentId: 7, amount: '5' }] }];
+  const refundDetails: any[] = [];
   const activePayments: any[] = Number(paidAmount) > 0 ? [{ invoicePaymentId: 4, invoiceId: '1', paymentMethodId: 1, paymentMethodTypeSnapshot: PaymentMethodType.CASH, paymentMethod: { paymentMethodType: PaymentMethodType.CASH }, invoice, amount: paidAmount, tenderedAmount: paidAmount, changeAmount: '0', isReversed: false, collectionKey: null }] : [];
   const reversals: any[] = [{ paymentReversalId: 50, invoicePaymentId: 4, invoicePayment: activePayments[0] }];
   const cashMovements: any[] = [];
@@ -60,14 +61,14 @@ function fixture(paidAmount = '20') {
     : entity === InvoicePaymentReversal ? { findOne: async ({ where }: any) => where.paymentReversalId ? reversals.find((row) => Number(row.paymentReversalId) === Number(where.paymentReversalId)) ?? null : null, create: (value: any) => value, save: async (value: any) => ({ paymentReversalId: 50, ...value }) }
     : entity === PosCashMovement ? { findOneBy: async (where: any) => cashMovements.find((row) => Object.entries(where).every(([key, value]) => row[key] === value)) ?? null, create: (value: any) => value, save: async (value: any) => { const saved = { posCashMovementId: cashMovements.length + 1, ...value }; cashMovements.push(saved); return saved; } }
     : entity === InvoiceRefundPayment ? { create: (value: any) => value, save: async (value: any) => { const saved = { invoiceRefundPaymentId: 20 + cashMovements.length, ...value }; refunds.find((row) => row.invoiceRefundId === value.invoiceRefundId)?.payments.push(saved); return saved; } }
-    : entity === InvoiceRefundDetail ? { createQueryBuilder: () => query, create: (value: any) => value, save: async (value: any) => value }
+    : entity === InvoiceRefundDetail ? { createQueryBuilder: () => query, create: (value: any) => value, save: async (value: any) => { refundDetails.push(value); return value; } }
     : entity === InventoryLedger ? { find: async () => [], create: (value: any) => value, save: async (value: any) => value }
     : entity === PaymentMethod ? { findOneBy: async () => ({ paymentMethodId: 1, paymentMethodName: 'Cash', paymentMethodType: PaymentMethodType.CASH }) }
     : { create: (value: any) => value, save: async (value: any) => value, findOneBy: async () => null } };
   const service = new InvoiceRefundsService({
     ...manager, manager, transaction: (isolation: any, run?: any) => (run ?? isolation)(manager),
   } as any, { requireCashierSession: async () => ({ terminal: { posTerminalId: 21, terminalCode: 'POS1' }, config: { registerMode: 'TERMINAL_REGISTER' }, register: { receiptCode: null }, registerSession: { posRegisterSessionId: 22 }, cashierSession: { posCashierSessionId: 23 } }), requireOpenMasterRegisterSession: async () => ({ registerSession: { posRegisterSessionId: 88 } }) } as any);
-  return { service, invoice, activePayments, cashMovements, refunds, reversals, query, user: { tenantId: 1, userId: 1, accessScope: 'TENANT', assignedLocationIds: [] } as any };
+  return { service, invoice, activePayments, cashMovements, refunds, refundDetails, reversals, query, user: { tenantId: 1, userId: 1, accessScope: 'TENANT', assignedLocationIds: [] } as any };
 }
 
 test('refundable quantities include prior refunds when MySQL returns string IDs', async () => {
@@ -136,6 +137,27 @@ test('returning only some remaining items keeps the invoice partially refunded',
   }, user);
   assert.equal(invoice.invoiceStatus, 'PARTIALLY_REFUNDED');
   assert.equal(invoice.balanceAmount, '5.00');
+});
+
+test('multiple partial refunds use discounted line revenue and final return absorbs cents', async () => {
+  const f = fixture();
+  const line = f.invoice.details[0];
+  Object.assign(line, { grossTotal: '50.00', discountAmount: '5.00', billDiscountAllocated: '5.00', netTotal: '40.00', discountPercentage: '10.0000' });
+  Object.assign(f.invoice, { grandTotal: '40.00', itemDiscountTotal: '5.00', billDiscountTotal: '5.00', discountTotal: '10.00' });
+  f.refunds[0].refundTotal = '16.00';
+  f.query.getRawMany = async () => {
+    const qty = 2 + f.refundDetails.reduce((sum, detail) => sum + Number(detail.quantity), 0);
+    const amount = 16 + f.refundDetails.reduce((sum, detail) => sum + Number(detail.refundAmount), 0);
+    const item = 2 + f.refundDetails.reduce((sum, detail) => sum + Number(detail.discountAmount), 0);
+    const bill = 2 + f.refundDetails.reduce((sum, detail) => sum + Number(detail.billDiscountAllocated), 0);
+    return [{ invoiceDetailId: '12', quantity: String(qty), amount: String(amount), gross: String(amount + item + bill), item: String(item), bill: String(bill) }];
+  };
+  await f.service.create({ refundKey: '11111111-1111-4111-8111-111111111111', invoiceId: 1, reason: 'First return', details: [{ invoiceDetailId: 12, quantity: 1, returnToStock: false }] }, f.user);
+  await f.service.create({ refundKey: '22222222-2222-4222-8222-222222222222', invoiceId: 1, reason: 'Final return', details: [{ invoiceDetailId: 12, quantity: 2, returnToStock: false }] }, f.user);
+  assert.deepEqual(f.refundDetails.map((detail) => detail.refundAmount), ['8.00', '16.00']);
+  assert.deepEqual(f.refundDetails.map((detail) => detail.billDiscountAllocated), ['1.00', '2.00']);
+  assert.equal(f.refundDetails.reduce((sum, detail) => sum + Number(detail.refundAmount), 0) + 16, 40);
+  assert.equal(f.invoice.invoiceStatus, 'FULLY_REFUNDED');
 });
 
 test('an unpaid invoice can be fully returned without a cash payout', async () => {

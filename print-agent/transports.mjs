@@ -35,7 +35,7 @@ export async function windowsQueuePrint(printer, bytes) {
 
 export async function filePrint(printer, bytes) {
   await mkdir(printer.target, { recursive: true });
-  const kind = ['SALE', 'REFUND', 'TEST'].includes(printer.documentType) ? printer.documentType.toLowerCase() : 'receipt';
+  const kind = ['SALE', 'REFUND', 'TEST', 'PAYMENT_COLLECTION'].includes(printer.documentType) ? printer.documentType.toLowerCase() : 'receipt';
   const path = join(printer.target, `${kind}-${randomUUID()}.bin`);
   await writeFile(path, bytes, { flag: 'wx' });
   return path;
