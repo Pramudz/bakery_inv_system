@@ -23,7 +23,7 @@ export class AddProductImages1770000006000 implements MigrationInterface {
         INDEX idx_product_image_product (product_id),
         CONSTRAINT fk_product_image_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant(tenant_id) ON DELETE RESTRICT,
         CONSTRAINT fk_product_image_product FOREIGN KEY (product_id) REFERENCES tbl_product(product_id) ON DELETE CASCADE
-      ) ENGINE=InnoDB
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
   }
 

@@ -17,7 +17,7 @@ export class AddProductBulkImports1770000045000 implements MigrationInterface {
       UNIQUE KEY uq_product_import_file (tenant_id, import_type, dataset_id, file_hash),
       KEY ix_product_import_history (tenant_id, created_at),
       CONSTRAINT fk_product_import_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant(tenant_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await runner.query(`CREATE TABLE tbl_product_import_ref (
       id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       tenant_id BIGINT NOT NULL,
@@ -32,7 +32,7 @@ export class AddProductBulkImports1770000045000 implements MigrationInterface {
       CONSTRAINT fk_product_import_ref_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant(tenant_id),
       CONSTRAINT fk_product_import_ref_product FOREIGN KEY (product_id) REFERENCES tbl_product(product_id),
       CONSTRAINT fk_product_import_ref_batch FOREIGN KEY (batch_id) REFERENCES tbl_product_import_batch(batch_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
   }
   async down(runner: QueryRunner): Promise<void> {
     await runner.query('DROP TABLE tbl_product_import_ref');

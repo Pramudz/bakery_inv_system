@@ -5,6 +5,8 @@ const path = require('node:path');
 const appRoot = path.resolve(__dirname, '..');
 const migrationDir = path.join(appRoot, 'backend/dist/migrations');
 const schemaDir = fs.existsSync(path.join(appRoot, 'schema')) ? path.join(appRoot, 'schema') : path.join(appRoot, 'backend/schema');
+const requiredCharset = 'utf8mb4';
+const requiredCollation = 'utf8mb4_0900_ai_ci';
 
 function manifest() {
   const baselineFiles = fs.readdirSync(schemaDir).filter(name => /^baseline-\d+\.sql$/.test(name));
@@ -57,8 +59,9 @@ function validateVersion(version, type) {
   if (!parts) throw new Error(`Unrecognized database server version: ${version}`);
   const major = Number(parts[1]);
   const minor = Number(parts[2]);
-  if (maria ? (major < 11 || (major === 11 && minor < 4)) : major < 8) {
-    throw new Error(`${version} is below the release's supported ${maria ? 'MariaDB 11.4' : 'MySQL 8.0'} minimum`);
+  const patch = Number(version.match(/^\d+\.\d+\.(\d+)/)?.[1] || 0);
+  if (maria ? (major < 11 || (major === 11 && (minor < 4 || (minor === 4 && patch < 5)))) : major < 8) {
+    throw new Error(`${version} is below the release's supported ${maria ? 'MariaDB 11.4.5' : 'MySQL 8.0'} minimum`);
   }
 }
 
@@ -86,20 +89,36 @@ async function checkDatabaseState(mode = 'inspect', options = {}) {
     if (server.selectedDatabase !== config.database) throw new Error(`Connected to ${server.selectedDatabase}; expected ${config.database}`);
     validateVersion(server.version, config.type);
     const [[schema]] = await connection.query('SELECT DEFAULT_CHARACTER_SET_NAME AS charset, DEFAULT_COLLATION_NAME AS collation FROM information_schema.schemata WHERE SCHEMA_NAME = ?', [config.database]);
-    if (!schema || schema.charset !== 'utf8mb4') throw new Error(`Database ${config.database} must use utf8mb4; found ${schema?.charset || 'unknown'}`);
+    if (!schema || schema.charset !== requiredCharset || schema.collation !== requiredCollation) {
+      throw new Error(`Database ${config.database} default must be CHARACTER SET ${requiredCharset} COLLATE ${requiredCollation}; found ${schema?.charset || 'unknown'} / ${schema?.collation || 'unknown'}. Correct the database default before a fresh baseline import or further migrations; review existing tables separately.`);
+    }
     for (const collation of release.collations) {
       const [rows] = await connection.query('SHOW COLLATION LIKE ?', [collation]);
-      if (!rows.some(row => row.Collation === collation)) throw new Error(`Required collation ${collation} is unavailable on ${server.version}`);
+      if (!rows.some(row => row.Collation === collation && row.Charset === requiredCharset)) {
+        throw new Error(`Required collation ${collation} for ${requiredCharset} is unavailable on ${server.version}`);
+      }
     }
-    const [tableRows] = await connection.query('SELECT TABLE_NAME AS name, TABLE_COLLATION AS collation FROM information_schema.tables WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = ?', [config.database, 'BASE TABLE']);
+    // A real expression also catches a server that lists an alias but cannot use it.
+    const [[probe]] = await connection.query("SELECT _utf8mb4'a' COLLATE utf8mb4_0900_ai_ci = _utf8mb4'A' COLLATE utf8mb4_0900_ai_ci AS supported");
+    if (Number(probe?.supported) !== 1) throw new Error(`${requiredCollation} comparison did not behave as a case-insensitive collation on ${server.version}`);
+    const [tableRows] = await connection.query('SELECT t.TABLE_NAME AS name, t.TABLE_COLLATION AS collation, c.CHARACTER_SET_NAME AS charset FROM information_schema.tables t LEFT JOIN information_schema.collations c ON c.COLLATION_NAME = t.TABLE_COLLATION WHERE t.TABLE_SCHEMA = ? AND t.TABLE_TYPE = ?', [config.database, 'BASE TABLE']);
     const tables = new Set(tableRows.map(row => row.name));
     if (tables.size === 0) {
       if (mode !== 'inspect' && mode !== 'empty') throw new Error('Database is empty; import the release baseline and apply migrations before initialization or startup');
       return { state: 'empty', pending: release.compiled.length, database: config.database, version: server.version };
     }
     if (mode === 'empty') throw new Error(`Database is not empty (${tables.size} tables); refusing fresh-install path`);
-    const incompatibleTable = tableRows.find(row => row.name.startsWith('tbl_') && !String(row.collation || '').startsWith('utf8mb4_'));
-    if (incompatibleTable) throw new Error(`Application table ${incompatibleTable.name} has incompatible collation ${incompatibleTable.collation || 'unknown'}`);
+    const incompatibleTables = tableRows.filter(row => row.charset !== requiredCharset || row.collation !== requiredCollation);
+    if (incompatibleTables.length) {
+      const examples = incompatibleTables.slice(0, 8).map(row => `${row.name} (${row.charset || 'unknown'} / ${row.collation || 'unknown'})`).join(', ');
+      throw new Error(`${incompatibleTables.length} database table(s) require ${requiredCharset} / ${requiredCollation}; found ${examples}${incompatibleTables.length > 8 ? ', ...' : ''}. Read-only validation cannot convert existing customer tables.`);
+    }
+    const [columnRows] = await connection.query("SELECT c.TABLE_NAME AS tableName, c.COLUMN_NAME AS columnName, c.CHARACTER_SET_NAME AS charset, c.COLLATION_NAME AS collation FROM information_schema.columns c JOIN information_schema.tables t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_TYPE = 'BASE TABLE' WHERE c.TABLE_SCHEMA = ? AND c.COLLATION_NAME IS NOT NULL", [config.database]);
+    const incompatibleColumns = columnRows.filter(row => row.charset !== requiredCharset || row.collation !== requiredCollation);
+    if (incompatibleColumns.length) {
+      const examples = incompatibleColumns.slice(0, 8).map(row => `${row.tableName}.${row.columnName} (${row.charset || 'unknown'} / ${row.collation || 'unknown'})`).join(', ');
+      throw new Error(`${incompatibleColumns.length} character column(s) require ${requiredCharset} / ${requiredCollation}; found ${examples}${incompatibleColumns.length > 8 ? ', ...' : ''}. Review column definitions before any conversion.`);
+    }
     if (!tables.has('migrations')) throw new Error('Existing database has tables but no migrations ledger; manual review is required');
     const [ledger] = await connection.query('SELECT timestamp, name FROM migrations ORDER BY timestamp, name');
     if (!ledger.length) throw new Error('Existing database has an empty migrations ledger; manual review is required');

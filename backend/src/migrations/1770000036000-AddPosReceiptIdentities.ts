@@ -35,7 +35,7 @@ export class AddPosReceiptIdentities1770000036000 implements MigrationInterface 
       register_code varchar(50) NOT NULL,
       last_number int unsigned NOT NULL DEFAULT 0,
       PRIMARY KEY (kind, tenant_id, business_date, location_code, register_code)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await q.query(`ALTER TABLE tbl_pos_cash_register ADD COLUMN receipt_code varchar(50) NULL`);
     await q.query(`UPDATE tbl_pos_cash_register SET receipt_code = 'MASTER' WHERE register_mode = 'MASTER_REGISTER'`);
   }

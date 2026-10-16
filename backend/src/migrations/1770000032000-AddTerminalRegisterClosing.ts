@@ -39,6 +39,7 @@ export class AddTerminalRegisterClosing1770000032000 implements MigrationInterfa
 
     if (!(await queryRunner.hasTable('tbl_pos_cash_movement'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_cash_movement',
         columns: [
           { name: 'pos_cash_movement_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },
@@ -67,6 +68,7 @@ export class AddTerminalRegisterClosing1770000032000 implements MigrationInterfa
 
     if (!(await queryRunner.hasTable('tbl_pos_cash_reconciliation'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_cash_reconciliation',
         columns: [
           { name: 'pos_cash_reconciliation_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },

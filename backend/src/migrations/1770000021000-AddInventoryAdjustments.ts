@@ -20,7 +20,7 @@ export class AddInventoryAdjustments1770000021000 implements MigrationInterface 
         PRIMARY KEY (inventory_adjustment_reason_id),
         UNIQUE KEY uq_inventory_adjustment_reason_tenant_code (tenant_id, code),
         CONSTRAINT fk_inventory_adjustment_reason_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant(tenant_id) ON DELETE CASCADE
-      ) ENGINE=InnoDB
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
     await runner.query(`
       CREATE TABLE IF NOT EXISTS tbl_inventory_adjustment (
@@ -52,7 +52,7 @@ export class AddInventoryAdjustments1770000021000 implements MigrationInterface 
         CONSTRAINT fk_inventory_adjustment_created_user FOREIGN KEY (created_by_user_id) REFERENCES tbl_user(user_id) ON DELETE RESTRICT,
         CONSTRAINT fk_inventory_adjustment_posted_user FOREIGN KEY (posted_by_user_id) REFERENCES tbl_user(user_id) ON DELETE SET NULL,
         CONSTRAINT fk_inventory_adjustment_cancelled_user FOREIGN KEY (cancelled_by_user_id) REFERENCES tbl_user(user_id) ON DELETE SET NULL
-      ) ENGINE=InnoDB
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
     await runner.query(`
       CREATE TABLE IF NOT EXISTS tbl_inventory_adjustment_line (
@@ -73,7 +73,7 @@ export class AddInventoryAdjustments1770000021000 implements MigrationInterface 
         CONSTRAINT fk_inventory_adjustment_line_header FOREIGN KEY (inventory_adjustment_id) REFERENCES tbl_inventory_adjustment(inventory_adjustment_id) ON DELETE CASCADE,
         CONSTRAINT fk_inventory_adjustment_line_product FOREIGN KEY (product_id) REFERENCES tbl_product(product_id) ON DELETE RESTRICT,
         CONSTRAINT fk_inventory_adjustment_line_product_unit FOREIGN KEY (product_unit_id) REFERENCES tbl_product_unit(product_unit_id) ON DELETE RESTRICT
-      ) ENGINE=InnoDB
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
 
     if (!(await runner.hasColumn('tbl_inventory_ledger', 'inventory_adjustment_reason_id')))

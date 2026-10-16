@@ -8,7 +8,8 @@ const root = path.resolve(__dirname, '..');
 const buildRoot = path.join(root, 'build');
 const target = path.join(buildRoot, 'deployment-package');
 const allowDirty = process.argv.includes('--allow-dirty');
-if (process.argv.slice(2).some(arg => arg !== '--allow-dirty')) throw new Error('Usage: node scripts/package-deployment.cjs [--allow-dirty]');
+const validateOnly = process.argv.includes('--validate-only');
+if (process.argv.slice(2).some(arg => !['--allow-dirty', '--validate-only'].includes(arg))) throw new Error('Usage: node scripts/package-deployment.cjs [--allow-dirty] [--validate-only]');
 
 function run(command, args, cwd = root) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', stdio: 'pipe' });
@@ -49,6 +50,8 @@ function filesUnder(directory, relative = '') {
 }
 
 function main() {
+  // Check source DDL before a build can become a release package.
+  require('./migration-collation-guard.cjs').checkRelease();
   const commit = run('git', ['rev-parse', '--verify', 'HEAD']);
   const changes = run('git', ['status', '--porcelain', '--untracked-files=all', '--', 'backend', 'frontend', 'server.js', 'scripts', 'docs/deployment']);
   if (changes && !allowDirty) throw new Error('Release inputs contain uncommitted changes. Commit and rebuild for a production archive; --allow-dirty is for local validation only.');
@@ -96,9 +99,13 @@ function main() {
       crypto.createHash('sha256').update(fs.readFileSync(path.join(stage, name))).digest('hex')]));
     const release = { application: 'prosinc-erp', version: backend.version, commit, dirty: Boolean(changes), builtAt: new Date().toISOString(), migrations: migrations.compiled.at(-1), files };
     fs.writeFileSync(path.join(stage, 'release.json'), `${JSON.stringify(release, null, 2)}\n`);
-    if (fs.existsSync(target)) fs.rmSync(target, { recursive: true });
-    fs.renameSync(stage, target);
-    console.log(`Staged ${Object.keys(files).length} files in ${target} (${commit.slice(0, 12)}${changes ? ', dirty' : ''})`);
+    if (validateOnly) {
+      console.log(`Validated ${Object.keys(files).length} release files without replacing ${target} (${commit.slice(0, 12)}${changes ? ', dirty' : ''})`);
+    } else {
+      if (fs.existsSync(target)) fs.rmSync(target, { recursive: true });
+      fs.renameSync(stage, target);
+      console.log(`Staged ${Object.keys(files).length} files in ${target} (${commit.slice(0, 12)}${changes ? ', dirty' : ''})`);
+    }
   } finally {
     if (fs.existsSync(stage)) fs.rmSync(stage, { recursive: true, force: true });
   }

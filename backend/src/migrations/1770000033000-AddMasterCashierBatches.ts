@@ -27,6 +27,7 @@ export class AddMasterCashierBatches1770000033000 implements MigrationInterface 
 
     if (!(await queryRunner.hasTable('tbl_pos_cash_reconciliation_payment'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_cash_reconciliation_payment',
         columns: [
           { name: 'pos_cash_reconciliation_payment_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },

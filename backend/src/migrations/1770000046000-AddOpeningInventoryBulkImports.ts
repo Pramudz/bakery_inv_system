@@ -20,7 +20,7 @@ export class AddOpeningInventoryBulkImports1770000046000 implements MigrationInt
       CONSTRAINT fk_opening_import_tenant FOREIGN KEY (tenant_id) REFERENCES tbl_tenant(tenant_id),
       CONSTRAINT fk_opening_import_creator FOREIGN KEY (created_by_user_id) REFERENCES tbl_user(user_id),
       CONSTRAINT fk_opening_import_confirmer FOREIGN KEY (confirmed_by_user_id) REFERENCES tbl_user(user_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await runner.query(`CREATE TABLE tbl_inventory_opening_claim (
       inventory_opening_claim_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
       tenant_id BIGINT NOT NULL,
@@ -40,7 +40,7 @@ export class AddOpeningInventoryBulkImports1770000046000 implements MigrationInt
       CONSTRAINT fk_inventory_opening_adjustment FOREIGN KEY (source_adjustment_id) REFERENCES tbl_inventory_adjustment(inventory_adjustment_id),
       CONSTRAINT fk_inventory_opening_line FOREIGN KEY (source_adjustment_line_id) REFERENCES tbl_inventory_adjustment_line(inventory_adjustment_line_id),
       CONSTRAINT fk_inventory_opening_actor FOREIGN KEY (created_by_user_id) REFERENCES tbl_user(user_id)
-    ) ENGINE=InnoDB`);
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
     await runner.query('CREATE INDEX ix_inventory_ledger_opening_history ON tbl_inventory_ledger (tenant_id, product_id, location_id, inventory_ledger_id)');
     await runner.query('CREATE INDEX ix_inventory_age_opening_history ON tbl_inventory_age_layer (tenant_id, product_id, location_id, inventory_age_layer_id)');
   }

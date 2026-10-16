@@ -3,6 +3,7 @@ import { MigrationInterface, QueryRunner, Table, TableForeignKey, TableIndex } f
 export class AddPriceListItemDiscounts1770000017000 implements MigrationInterface {
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.createTable(new Table({
+      engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
       name: 'tbl_price_list_item_discount',
       columns: [
         { name: 'price_list_item_discount_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },

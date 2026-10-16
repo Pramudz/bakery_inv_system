@@ -24,6 +24,7 @@ export class AddMasterRegisterClosing1770000034000 implements MigrationInterface
 
     if (!(await queryRunner.hasTable('tbl_pos_master_reconciliation'))) {
       await queryRunner.createTable(new Table({
+        engine: 'InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci',
         name: 'tbl_pos_master_reconciliation',
         columns: [
           { name: 'pos_master_reconciliation_id', type: 'bigint', isPrimary: true, isGenerated: true, generationStrategy: 'increment' },

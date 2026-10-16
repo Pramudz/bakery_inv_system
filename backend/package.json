@@ -11,7 +11,7 @@
     "db:bootstrap": "npm run build && node scripts/bootstrap-database.cjs",
     "migration:show": "npm run build && typeorm migration:show -d dist/data-source.js",
     "migration:run": "npm run build && typeorm migration:run -d dist/data-source.js",
-    "test": "npm run build && node --test dist/features/**/*.spec.js",
+    "test": "npm run build && node --test dist/features/**/*.spec.js && node --test ../scripts/db-check.test.cjs ../scripts/migration-collation-guard.test.cjs",
     "test:sales:mysql": "npm run build && node --test dist/features/invoices/invoice-checkout-idempotency.mysql.js",
     "test:pos-receipts:mysql": "npm run build && node --test dist/features/invoices/pos-receipts.mysql.js",
     "test:pos-master-batches:mysql": "npm run build && node --test dist/features/pos-registers/pos-master-batches.mysql.js",

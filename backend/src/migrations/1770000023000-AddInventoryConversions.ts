@@ -32,7 +32,7 @@ export class AddInventoryConversions1770000023000 implements MigrationInterface 
         CONSTRAINT fk_inventory_conversion_created_user FOREIGN KEY (created_by_user_id) REFERENCES tbl_user(user_id) ON DELETE RESTRICT,
         CONSTRAINT fk_inventory_conversion_posted_user FOREIGN KEY (posted_by_user_id) REFERENCES tbl_user(user_id) ON DELETE SET NULL,
         CONSTRAINT fk_inventory_conversion_cancelled_user FOREIGN KEY (cancelled_by_user_id) REFERENCES tbl_user(user_id) ON DELETE SET NULL
-      ) ENGINE=InnoDB
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
     await runner.query(`
       CREATE TABLE IF NOT EXISTS tbl_inventory_conversion_line (
@@ -63,7 +63,7 @@ export class AddInventoryConversions1770000023000 implements MigrationInterface 
         CONSTRAINT fk_inventory_conversion_line_header FOREIGN KEY (inventory_conversion_id) REFERENCES tbl_inventory_conversion(inventory_conversion_id) ON DELETE CASCADE,
         CONSTRAINT fk_inventory_conversion_line_product FOREIGN KEY (product_id) REFERENCES tbl_product(product_id) ON DELETE RESTRICT,
         CONSTRAINT fk_inventory_conversion_line_product_unit FOREIGN KEY (product_unit_id) REFERENCES tbl_product_unit(product_unit_id) ON DELETE RESTRICT
-      ) ENGINE=InnoDB
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
     `);
   }
 
