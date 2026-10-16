@@ -11,6 +11,11 @@ function validateCredentials(env) {
   return { username, password };
 }
 
+async function ensureNoPlatformAdministrator(dataSource) {
+  const [existing] = await dataSource.query('SELECT COUNT(*) AS count FROM tbl_platform_user');
+  if (Number(existing?.count) !== 0) throw new Error('Platform administrator already exists; no credentials were changed');
+}
+
 async function main() {
   const credentials = validateCredentials(process.env);
   await checkDatabaseState('init-ready'); // Confirms target, complete migrations, and zero platform/tenant users.
@@ -23,8 +28,7 @@ async function main() {
   try {
     const dataSource = app.get(DataSource);
     // The Nest context seeds the global authorization catalog on module initialization.
-    const [[existing]] = await dataSource.query('SELECT COUNT(*) AS count FROM tbl_platform_user');
-    if (Number(existing.count) !== 0) throw new Error('Platform administrator already exists; no credentials were changed');
+    await ensureNoPlatformAdministrator(dataSource);
     const platform = await app.get(AuthService).bootstrap(credentials);
     console.log(`Created Platform Administrator ${platform.platformUser.platformUserId}; create tenants through Platform Administration`);
   } finally {
@@ -33,4 +37,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { validateCredentials, main };
+module.exports = { validateCredentials, ensureNoPlatformAdministrator, main };

@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { manifest, checkDatabaseState, validateLedger } = require('./db-check.cjs');
-const { validateCredentials } = require('./initialize-platform.cjs');
+const { validateCredentials, ensureNoPlatformAdministrator } = require('./initialize-platform.cjs');
 const { prepareFreshDatabase } = require('../backend/scripts/bootstrap-database.cjs');
 
 const release = manifest();
@@ -179,4 +179,13 @@ test('current existing installation passes read-only validation but refuses init
 test('initial administrator requires the existing strong password policy', () => {
   assert.throws(() => validateCredentials({ INIT_PLATFORM_USERNAME: 'admin', INIT_PLATFORM_PASSWORD: 'weak' }), /strong/);
   assert.deepEqual(validateCredentials({ INIT_PLATFORM_USERNAME: ' admin ', INIT_PLATFORM_PASSWORD: 'StrongPassword9!' }), { username: 'admin', password: 'StrongPassword9!' });
+});
+
+test('one-time platform check accepts TypeORM query rows and refuses an existing administrator', async () => {
+  const query = async sql => {
+    assert.equal(sql, 'SELECT COUNT(*) AS count FROM tbl_platform_user');
+    return [{ count: 0 }];
+  };
+  await assert.doesNotReject(ensureNoPlatformAdministrator({ query }));
+  await assert.rejects(ensureNoPlatformAdministrator({ query: async () => [{ count: 1 }] }), /already exists/);
 });
