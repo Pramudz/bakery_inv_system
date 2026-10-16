@@ -42,7 +42,7 @@ The implementation uses the same logical model for the requested MVP slice. Phys
 ## Run
 
 ### 1. Create the MySQL database
-The application can create/update TABLES with TypeORM `synchronize=true`, but MySQL itself still needs the database/schema to exist.
+Create the database/schema before starting the application. Production schema changes use reviewed TypeORM migrations; runtime synchronization is disabled.
 
 Create:
 `erp_dev`
@@ -74,6 +74,8 @@ Use:
 `DB_SYNCHRONIZE=false`
 
 and TypeORM migrations for production. Do not use synchronize=true in production.
+
+For the reusable Namecheap/cPanel release, fresh installation, upgrades, backups, and rollback, see [Prosinc ERP deployment](docs/deployment/prosinc-erp-namecheap.md).
 
 ## Important multi-tenant rule
 For the MVP, tenant-owned master data accepts `tenantId` in create requests and list filters. Once JWT authentication is added, tenant context MUST come from the authenticated user/session and the backend must enforce tenant isolation. The frontend must never be the security boundary.
