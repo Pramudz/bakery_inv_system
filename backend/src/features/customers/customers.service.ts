@@ -34,6 +34,7 @@ export class CustomerService {
       query.andWhere(
         `(LOWER(customer.customerCode) LIKE LOWER(:search)
           OR LOWER(customer.customerName) LIKE LOWER(:search)
+          OR LOWER(customer.nic) LIKE LOWER(:search)
           OR LOWER(customer.contactName) LIKE LOWER(:search)
           OR LOWER(customer.phone) LIKE LOWER(:search)
           OR LOWER(customer.mobile) LIKE LOWER(:search)

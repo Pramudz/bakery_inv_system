@@ -1,3 +1,4 @@
+import type { RetailDiscount } from "../pages/retailCartEditing";
 import { apiClient } from '../../../services/apiClient';
 
 export type InvoiceCatalogProduct = {
@@ -24,6 +25,7 @@ export type InvoiceQuoteLine = {
   discountValue: string | null;
   quantity: number;
   unitPrice: number;
+  pricingUnitPrice?: number;
   discountPerUnit: number;
   discountPercentage: number;
   grossTotal: number;
@@ -48,13 +50,14 @@ export type CreateInvoiceInput = {
   locationId: number;
   customerId?: number;
   saleType: 'RETAIL' | 'WHOLESALE';
-  details: { productId: number; quantity: number; unitPrice?: number; discountPercentage?: number; discountAmount?: number; quotedPriceListItemId?: number; quotedPriceListItemDiscountId?: number; quotedUnitPrice?: number; quotedDiscountAmount?: number }[];
+  details: { productId: number; quantity: number; unitPrice?: number; retailDiscount?: RetailDiscount; discountPercentage?: number; discountAmount?: number; quotedPriceListItemId?: number; quotedPriceListItemDiscountId?: number; quotedUnitPrice?: number; quotedPricingUnitPrice?: number; quotedDiscountAmount?: number }[];
   payments: { paymentMethodId: number; amount: number; paymentChannelId?: number; referenceNumber?: string }[];
   sellOnCredit?: boolean;
   acceptPriceChanges?: boolean;
 };
 
 export const invoicesApi = {
+  billingShortcuts: (locationId: number) => apiClient.get<{ productIds: number[]; categories: string[]; periodDays: number }>(`/invoices/billing-shortcuts?locationId=${locationId}`),
   list: () => apiClient.get<any[]>('/invoices'),
   history: (params: { page: number; limit: number; search: string; recordType: string; status: string }) => apiClient.get<{ items: { key: string; type: string; date: string; invoice: any; payment: any | null }[]; total: number; page: number; limit: number; stats: { todaySales: number; todayCount: number; paidCount: number; creditCount: number; outstanding: number; refundedCount: number } }>(`/invoices/history?${new URLSearchParams(Object.fromEntries(Object.entries(params).map(([key, value]) => [key, String(value)])))}`),
   get: (id: number) => apiClient.get<any>(`/invoices/${id}`),
@@ -62,7 +65,7 @@ export const invoicesApi = {
   refundable: (id: number) => apiClient.get<any>(`/invoices/${id}/refundable`),
   billingLocations: () => apiClient.get<{ locationId: number; code: string; name: string; isActive: boolean }[]>('/invoices/locations'),
   catalog: (locationId: number, saleType: 'RETAIL' | 'WHOLESALE') => apiClient.get<InvoiceCatalogProduct[]>(`/invoices/catalog?locationId=${locationId}&saleType=${saleType}`),
-  quote: (data: { locationId: number; saleType: 'RETAIL' | 'WHOLESALE'; details: { productId: number; quantity: number }[] }) => apiClient.post<InvoiceQuote>('/invoices/quote', data),
+  quote: (data: { locationId: number; saleType: 'RETAIL' | 'WHOLESALE'; details: { productId: number; quantity: number; retailDiscount?: RetailDiscount }[] }) => apiClient.post<InvoiceQuote>('/invoices/quote', data),
   create: (data: CreateInvoiceInput) => apiClient.post<Record<string, any>>('/invoices', data),
   reversePayment: (invoiceId: number, paymentId: number, data: Record<string, unknown>) => apiClient.post<any>(`/invoices/${invoiceId}/payments/${paymentId}/reverse`, data),
 };

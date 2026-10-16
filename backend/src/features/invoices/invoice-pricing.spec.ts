@@ -1,3 +1,4 @@
+import { applyRetailDiscount } from './retail-discount';
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -94,10 +95,10 @@ function fixture(grantCredit = true, fromQuotation = false, currentUnitPrice = 1
     transaction: (work: any) => work(manager),
   };
   let pricingCalls = 0;
-  const pricing: any = { quoteWithManager: async () => {
+  const pricing: any = { quoteWithManager: async (_manager: any, _tenant: number, _location: number, saleType: any, details: any[]) => {
     pricingCalls += 1;
-    const line = { ...currentLine, unitPrice: currentUnitPrice, grossTotal: currentUnitPrice * 2, netTotal: currentUnitPrice * 2 - 20 };
-    return { quotedAt: new Date().toISOString(), locationId: 3, saleType: 'RETAIL', priceList: { priceListId: 30 }, lines: [line], subtotal: line.grossTotal, discountTotal: 20, grandTotal: line.netTotal };
+    const line = applyRetailDiscount({ ...currentLine, unitPrice: Math.round(currentUnitPrice * 100) / 100, pricingUnitPrice: currentUnitPrice, grossTotal: Math.round(currentUnitPrice * 2 * 100) / 100, netTotal: Math.round(currentUnitPrice * 2 * 100) / 100 - 20 }, saleType, details[0]?.retailDiscount);
+    return { quotedAt: new Date().toISOString(), locationId: 3, saleType: 'RETAIL', priceList: { priceListId: 30 }, lines: [line], subtotal: line.grossTotal, discountTotal: line.discountAmount, grandTotal: line.netTotal };
   } };
   return { service: new InvoicesService(dataSource, pricing, { requireCashierSession: async () => activePosSession } as any), savedDetails, get quotation() { return savedQuotation; }, get pricingCalls() { return pricingCalls; } };
 }
@@ -307,4 +308,43 @@ test('sales endpoints require the dedicated billing, history, collection and ref
   }
   assert.equal(Reflect.getMetadata(REQUIRE_PERMISSION, PaymentMethodsController.prototype.findAll), 'SALES_PAYMENT_METHOD_VIEW');
   assert.equal(Reflect.getMetadata(REQUIRE_PERMISSION, PaymentMethodsController.prototype.create), 'SALES_PAYMENT_METHOD_MANAGE');
+});
+
+
+test('edited retail discount saves consistently to invoice, detail and receipt while browser prices stay ignored', async () => {
+  const f = fixture();
+  const request: any = {
+    checkoutKey: '77777777-7777-4777-8777-777777777777', locationId: 3, customerId: 9, saleType: 'RETAIL', sellOnCredit: true,
+    details: [{ productId: 10, quantity: 2, unitPrice: 1, discountAmount: 199, retailDiscount: { type: 'AMOUNT', value: 35 }, quotedPriceListItemId: 40, quotedUnitPrice: 100, quotedDiscountAmount: 35 }], payments: [],
+  };
+  const invoice = await f.service.create(request, user);
+  assert.equal(invoice.discountTotal, '35.00');
+  assert.equal(invoice.grandTotal, '165.00');
+  assert.equal(f.savedDetails[0].unitPrice, '100.00');
+  assert.equal(f.savedDetails[0].discountAmount, '35.00');
+  assert.equal(f.savedDetails[0].discountPercentage, '17.5000');
+  assert.equal((invoice.receiptSnapshot as any).details[0].discountAmount, '35.00');
+  assert.equal((invoice.receiptSnapshot as any).details[0].pricingSnapshot.discountType, 'MANUAL_AMOUNT');
+  assert.equal((await f.service.create(request, user)).invoiceId, invoice.invoiceId);
+  await assert.rejects(f.service.create({ ...request, details: [{ ...request.details[0], retailDiscount: { type: 'AMOUNT', value: 40 } }] }, user));
+  assert.equal(f.savedDetails.length, 1);
+});
+
+test('quotation conversion rejects manual retail overrides even when legacy amounts match', async () => {
+  const f = fixture(true, true);
+  await assert.rejects(f.service.create({ checkoutKey: '88888888-8888-4888-8888-888888888888', sourceQuotationId: 70, locationId: 3, customerId: 9, saleType: 'RETAIL', details: [{ productId: 10, quantity: 2, quotedUnitPrice: 100, quotedDiscountAmount: 20, retailDiscount: { type: 'AMOUNT', value: 20 } }], payments: [] } as any, user), /quotation discounts cannot be changed/i);
+});
+
+test('checkout DTO validates nested retail discount requests', () => {
+  const base = { checkoutKey: '99999999-9999-4999-8999-999999999999', locationId: 3, saleType: 'RETAIL' };
+  const dto = (override: unknown) => plainToInstance(CreateInvoiceDto, { ...base, details: [{ productId: 10, quantity: 2, retailDiscount: override }] });
+  assert.equal(validateSync(dto({type:'PERCENTAGE',value:10})).length, 0);
+  assert.ok(validateSync(dto({type:'OTHER',value:10})).length > 0);
+  assert.ok(validateSync(dto({type:'AMOUNT',value:-1})).length > 0);
+});
+
+
+test('checkout detects four-decimal price changes even when displayed unit prices round to the same cent', async () => {
+  const f = fixture(true, false, 100.3344);
+  await assert.rejects(f.service.create({ checkoutKey: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', locationId: 3, customerId: 9, saleType: 'RETAIL', sellOnCredit: true, details: [{productId:10,quantity:2,quotedPriceListItemId:40,quotedPriceListItemDiscountId:50,quotedUnitPrice:100.33,quotedPricingUnitPrice:100.3333,quotedDiscountAmount:20}],payments:[] } as any, user), (error: any) => error.getResponse().code === 'PRICE_CHANGED');
 });

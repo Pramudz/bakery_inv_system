@@ -32,9 +32,10 @@ export const productsApi = {
     limit: number;
     search: string;
     status: string;
+    categoryId?: string;
   }) =>
     apiClient.get<ProductPage>(
-      `/products?page=${params.page}&limit=${params.limit}&search=${encodeURIComponent(params.search)}&status=${params.status}`,
+      `/products?page=${params.page}&limit=${params.limit}&search=${encodeURIComponent(params.search)}&status=${params.status}&categoryId=${encodeURIComponent(params.categoryId ?? '')}`,
     ),
   get: (id: number) => apiClient.get<Product>(`/products/${id}`),
   sellingPriceSummary: (productId: number) =>

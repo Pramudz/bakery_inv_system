@@ -49,6 +49,7 @@ button {
   padding: 4px 10px 18px;
 }
 .brand-mark {
+  flex-shrink: 0;
   width: 38px;
   height: 38px;
   border-radius: 11px;
@@ -63,8 +64,8 @@ button {
 .brand b {
   display: block;
   color: #fff;
-  font-size: 17px;
-  letter-spacing: 0.2px;
+  font-size: 16px;
+  letter-spacing: 0;
 }
 .brand b span {
   color: #70a4ff;
@@ -259,6 +260,15 @@ button {
   font-size: 12px;
   font-weight: 700;
   transition: 0.15s;
+}
+.product-list-action {
+  width: 190px;
+  min-height: 36px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
 }
 .btn-primary {
   background: #2563eb;
@@ -2270,6 +2280,7 @@ button {
 }
 
 .login-brand-mark {
+  flex-shrink: 0;
   width: 42px;
   height: 42px;
   border-radius: 11px;
@@ -3740,7 +3751,8 @@ body:has(.inventory-adjustments-page) .sidebar-toggle { display: none; }
 .dashboard-chart-heading > a { flex-shrink: 0; color: #365d91; text-decoration: none; font-size: 11px; font-weight: 600; padding-top: 3px; }
 .dashboard-chart-heading > a:hover { text-decoration: underline; }
 .dashboard-chart-card > .report-chart-card { border: 0; box-shadow: none; border-radius: 0; margin: 0; padding: 0; background: transparent; }
-.dashboard-chart-card .report-donut-layout { grid-template-columns: minmax(140px, 190px) minmax(0, 1fr); gap: 20px; }
+.dashboard-chart-card .report-donut-layout { grid-template-columns: minmax(0, 1fr); justify-items: center; align-items: center; gap: 18px; padding: 12px 0; }
+.dashboard-chart-card .report-chart-legend { width: min(340px, 100%); margin: 0 auto; }
 .dashboard-chart-card .report-donut { width: 170px; height: 170px; }
 .dashboard-chart-card .report-bars { gap: 12px; }
 .dashboard-chart-card .report-bar-row { grid-template-columns: minmax(110px, 155px) minmax(0, 1fr); gap: 12px; }

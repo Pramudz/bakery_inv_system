@@ -1,7 +1,9 @@
+import { RetailDiscountDto } from './retail-discount.dto';
 import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsPositive, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
 
 export class CreateInvoiceDetailDto {
+  @IsOptional() @ValidateNested() @Type(() => RetailDiscountDto) retailDiscount?: RetailDiscountDto;
   @Type(() => Number) @IsInt() @IsPositive() productId!: number;
   @Type(() => Number) @IsNumber() @IsPositive() quantity!: number;
   // Legacy browser amounts are accepted for compatibility but never used as authority.
@@ -12,6 +14,7 @@ export class CreateInvoiceDetailDto {
   @IsOptional() @Type(() => Number) @IsInt() @IsPositive() quotedPriceListItemId?: number;
   @IsOptional() @Type(() => Number) @IsInt() @IsPositive() quotedPriceListItemDiscountId?: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) quotedUnitPrice?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) quotedPricingUnitPrice?: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(0) quotedDiscountAmount?: number;
 }
 

@@ -6,12 +6,12 @@ import { useAuth } from "../../auth/AuthContext";
 import { type Customer, type CustomerInput, customersApi } from "../api/customersApi";
 
 const emptyForm = (): CustomerInput => ({
-  customerCode: "", customerName: "", isActive: true, contactName: "", phone: "", mobile: "", email: "",
+  customerCode: "", customerName: "", isActive: true, nic: "", mobile: "", email: "",
   addressLine1: "", addressLine2: "", city: "", districtOrState: "",
 });
 const toForm = (customer: Customer): CustomerInput => ({
   customerCode: customer.customerCode, customerName: customer.customerName, isActive: customer.isActive,
-  contactName: customer.contactName ?? "", phone: customer.phone ?? "", mobile: customer.mobile ?? "", email: customer.email ?? "",
+  nic: customer.nic ?? "", mobile: customer.mobile ?? "", email: customer.email ?? "",
   addressLine1: customer.addressLine1 ?? "", addressLine2: customer.addressLine2 ?? "", city: customer.city ?? "",
   districtOrState: customer.districtOrState ?? "",
 });
@@ -176,8 +176,8 @@ export function CustomersPage() {
         <form onSubmit={submit}>
           <div className="modal-body customer-form-body">
             {loadingEdit ? <div className="empty">Loading customer...</div> : <>
-              <section className="form-section"><h3>General</h3><div className="form-grid"><Field label="Code" value={form.customerCode} onChange={(value) => change("customerCode", value.toUpperCase())} disabled={Boolean(editing)} required placeholder="Enter customer code" /><Field label="Name" value={form.customerName} onChange={(value) => change("customerName", value)} required /><label className="check"><input type="checkbox" checked={form.isActive} onChange={(event) => change("isActive", event.target.checked)} /> Active</label></div></section>
-              <section className="form-section"><h3>Contact</h3><div className="form-grid"><Field label="Contact name" value={form.contactName} onChange={(value) => change("contactName", value)} /><Field label="Phone" value={form.phone} onChange={(value) => change("phone", value)} /><Field label="Mobile" value={form.mobile} onChange={(value) => change("mobile", value)} /><Field label="Email" type="email" value={form.email} onChange={(value) => change("email", value)} /></div></section>
+              <section className="form-section"><h3>General</h3><div className="form-grid"><Field label="Code" value={form.customerCode} onChange={(value) => change("customerCode", value.toUpperCase())} disabled={Boolean(editing)} required placeholder="Enter Customer Mobile Number" /><Field label="Name" value={form.customerName} onChange={(value) => change("customerName", value)} required /><Field label="NIC" value={form.nic} onChange={(value) => change("nic", value.toUpperCase())} placeholder="Enter Customer NIC" hint="Optional" /><label className="check"><input type="checkbox" checked={form.isActive} onChange={(event) => change("isActive", event.target.checked)} /> Active</label></div></section>
+              <section className="form-section"><h3>Contact</h3><div className="form-grid"><Field label="Mobile" value={form.mobile} onChange={(value) => change("mobile", value)} /><Field label="Email" type="email" value={form.email} onChange={(value) => change("email", value)} /></div></section>
               <section className="form-section"><h3>Address</h3><div className="form-grid"><Field label="Address line 1" value={form.addressLine1} onChange={(value) => change("addressLine1", value)} /><Field label="Address line 2" value={form.addressLine2} onChange={(value) => change("addressLine2", value)} /><Field label="City" value={form.city} onChange={(value) => change("city", value)} /><Field label="District / State" value={form.districtOrState} onChange={(value) => change("districtOrState", value)} /></div></section>
               {fieldErrors.map((error) => <div className="error-text" key={error}>{error}</div>)}
               {apiError && <div className="error-box">{apiError}</div>}

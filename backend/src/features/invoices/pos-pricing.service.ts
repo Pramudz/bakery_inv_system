@@ -1,3 +1,5 @@
+import { applyRetailDiscount } from './retail-discount';
+import type { RetailDiscount } from './retail-discount';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { PriceListItemDiscountService } from '../price-list-item-discounts/price-list-item-discounts.service';
@@ -19,9 +21,12 @@ export type PosSaleType = 'RETAIL' | 'WHOLESALE';
 export interface PosPriceLineRequest {
   productId: number;
   quantity: number;
+  retailDiscount?: RetailDiscount;
 }
 
 export interface PosPriceLine {
+  pricingUnitPrice?: number;
+  retailDiscount?: RetailDiscount;
   productId: number;
   sourceQuotationLineId?: number | null;
   quotedSkuSnapshot?: string;
@@ -76,7 +81,7 @@ export class PosPricingService {
     const priceList = await this.priceList(manager, tenantId, saleType);
     const lines: PosPriceLine[] = [];
     for (const request of details) {
-      lines.push(await this.line(manager, tenantId, locationId, priceList, request, at));
+      lines.push(applyRetailDiscount(await this.line(manager, tenantId, locationId, priceList, request, at), saleType, request.retailDiscount));
     }
     const subtotal = money(lines.reduce((sum, line) => sum + line.grossTotal, 0));
     const discountTotal = money(lines.reduce((sum, line) => sum + line.discountAmount, 0));
@@ -150,6 +155,7 @@ export class PosPricingService {
       discountValue: resolved.discount?.value ?? null,
       quantity,
       unitPrice: money(unitPrice),
+      pricingUnitPrice: unitPrice,
       discountPerUnit: money(discountPerUnit),
       discountPercentage: resolved.discount?.type === 'PERCENTAGE'
         ? Number(resolved.discount.value)

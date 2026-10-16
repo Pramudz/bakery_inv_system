@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { productsApi, type SupplierPriceHistoryPage, type SupplierPriceSummary } from "../api/productsApi";
+import { exportItemMasterCsv } from '../itemMasterExport';
+import { downloadFile } from '../../../pages/reportExport';
 import { categoriesApi } from "../../categories/api/categoriesApi";
 import { brandsApi } from "../../brands/api/brandsApi";
 import { unitsApi } from "../../units/api/unitsApi";
@@ -242,6 +244,23 @@ export function ProductsPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [statusFilter, setStatusFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const exportItemMaster = async () => {
+    setExporting(true);
+    setExportError("");
+    try {
+      const csv = await exportItemMasterCsv(productsApi.page, {
+        search: search.trim(), status: statusFilter, categoryId: categoryFilter,
+      });
+      downloadFile(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `item-master-${localDateValue()}.csv`);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'Unable to export item master.');
+    } finally {
+      setExporting(false);
+    }
+  };
   const [viewing, setViewing] = useState<any>(null);
   const [viewSupplierSummary, setViewSupplierSummary] = useState<SupplierPriceSummary[]>([]);
   const [viewSupplierSummaryLoading, setViewSupplierSummaryLoading] = useState(false);
@@ -260,13 +279,14 @@ export function ProductsPage() {
   const [initialPriceDraft, setInitialPriceDraft] = useState<InitialPriceDraft | null>(null);
 
   const products = useQuery({
-    queryKey: ["products", page, limit, debouncedSearch, statusFilter],
+    queryKey: ["products", page, limit, debouncedSearch, statusFilter, categoryFilter],
     queryFn: () =>
       productsApi.page({
         page,
         limit,
         search: debouncedSearch,
         status: statusFilter,
+        categoryId: categoryFilter,
       }),
   });
   const categories = useQuery({
@@ -1451,6 +1471,7 @@ export function ProductsPage() {
         {products.error && (
           <div className="error-box">{(products.error as Error).message}</div>
         )}
+        {exportError && <div className="alert alert-error" role="alert">{exportError}</div>}
         <div className="toolbar">
           <div className="search-wrap">
             <span>⌕</span>
@@ -1473,8 +1494,23 @@ export function ProductsPage() {
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
+          <select className="control" aria-label="Filter products by category" value={categoryFilter}
+            onChange={(event) => { setCategoryFilter(event.target.value); setPage(1); }}>
+            <option value="">All Categories</option>
+            {(categories.data ?? []).map((category: any) => (
+              <option key={category.categoryId} value={category.categoryId}>
+                {category.categoryName} ({category.categoryCode})
+              </option>
+            ))}
+          </select>
+          {permissions.includes('PRODUCT_VIEW') && (
+            <button className="btn btn-secondary product-list-action" disabled={exporting || products.isLoading}
+              onClick={exportItemMaster} title="Export all products matching the search, status and category filters">
+              {exporting ? 'Exporting…' : 'Export Item Master CSV'}
+            </button>
+          )}
           <button
-            className="btn btn-secondary"
+            className="btn btn-secondary product-list-action"
             onClick={() => products.refetch()}
           >
             ↻ Refresh

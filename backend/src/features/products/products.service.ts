@@ -137,7 +137,11 @@ export class ProductService {
     limit: number,
     search: string,
     status: string,
+    categoryId?: number,
   ) {
+    if (categoryId !== undefined && (!Number.isSafeInteger(categoryId) || categoryId <= 0)) {
+      throw new BadRequestException('Category ID must be a positive integer.');
+    }
     const safePage = Math.max(1, Number.isFinite(page) ? page : 1);
     const safeLimit = [20, 50, 100].includes(limit) ? limit : 20;
     const query = this.repo
@@ -166,6 +170,8 @@ export class ProductService {
           identifierSearch: `%${search.trim().toUpperCase()}%`,
         },
       );
+    if (categoryId !== undefined)
+      query.andWhere("product.categoryId = :categoryId", { categoryId });
     if (status === "active")
       query.andWhere("product.isActive = :active", { active: true });
     if (status === "inactive")

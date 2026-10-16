@@ -4,6 +4,8 @@ import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength } from 
 export class CreateCustomerDto {
   @IsString() @IsNotEmpty() @MaxLength(50) customerCode!: string;
   @IsString() @IsNotEmpty() @MaxLength(200) customerName!: string;
+  @Transform(({ value }) => typeof value === 'string' ? value.trim().toUpperCase() || null : value)
+  @IsOptional() @IsString() @MaxLength(20) nic?: string | null;
   @IsOptional() @IsString() @MaxLength(150) contactName?: string;
   @IsOptional() @IsString() @MaxLength(30) phone?: string;
   @Transform(({ value }) => value === '' ? null : value) @IsOptional() @IsEmail() @MaxLength(150) email?: string;

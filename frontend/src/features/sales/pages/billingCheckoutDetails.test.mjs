@@ -25,3 +25,10 @@ test("quotation conversion omits price-list IDs and keeps saved price", () => {
   assert.equal(detail.quotedUnitPrice, 200);
   assert.equal(detail.discountAmount, 0);
 });
+
+
+test("retail checkout carries the explicit override but quotation checkout never does", () => {
+  const override = { type: "AMOUNT", value: 35 };
+  assert.deepEqual(billingCheckoutDetail(25, 2, 200, price, 0, override).retailDiscount, override);
+  assert.equal(Object.hasOwn(billingCheckoutDetail(25, 2, 200, price, 70, override), "retailDiscount"), false);
+});

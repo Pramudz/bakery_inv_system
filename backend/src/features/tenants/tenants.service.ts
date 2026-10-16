@@ -163,7 +163,7 @@ export class TenantsService {
   }
 
   async update(id: number, dto: UpdateTenantDto) {
-    if ('timeZone' in dto)
+    if (dto.timeZone !== undefined)
       throw new BadRequestException('Tenant timezone cannot be changed through normal tenant administration.');
     await this.findOne(id);
 
@@ -181,7 +181,7 @@ export class TenantsService {
   }
 
   async updateMyTenant(tenantId: number, dto: UpdateMyTenantDto) {
-    if ('timeZone' in dto)
+    if (dto.timeZone !== undefined)
       throw new BadRequestException('Tenant timezone cannot be changed from My Tenant.');
     await this.findOne(tenantId);
     await this.repo.update(tenantId, this.cleanPayload(dto));
@@ -219,6 +219,7 @@ export class TenantsService {
     delete payload.initialAdminPassword;
     for (const key of Object.keys(payload)) {
       const value = payload[key];
+      if (value === undefined) { delete payload[key]; continue; }
       if (typeof value === 'string') payload[key] = value.trim() || null;
     }
     if (typeof payload.code === 'string') payload.code = payload.code.toUpperCase();
