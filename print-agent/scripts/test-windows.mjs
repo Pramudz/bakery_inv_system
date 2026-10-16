@@ -25,7 +25,7 @@ for (const result of [node, packaged]) {
 }
 console.log('Node and Windows EXE self-tests passed; receipt bytes match.');
 
-async function exercise(command, prefix, name) {
+async function exercise(command, prefix, name, documentType = 'SALE') {
   const directory = join(root, 'dist', 'test-runs', `${name}-${randomUUID()}`);
   const output = join(directory, 'output');
   await mkdir(output, { recursive: true });
@@ -33,9 +33,13 @@ async function exercise(command, prefix, name) {
   let claims = 0;
   let complete;
   const completed = new Promise((resolveCompletion) => { complete = resolveCompletion; });
-  const receipt = { documentType: 'SALE', billNo: 1, header: { companyName: 'Bakery' },
+  const saleReceipt = { documentType: 'SALE', billNo: 1, header: { companyName: 'Bakery' },
     details: [{ quantity: 1, unitPrice: 100, discountAmount: 0, netTotal: 100,
       product: { productName: 'Test item' } }], grandTotal: 100 };
+  const receipt = documentType === 'SALE' ? saleReceipt : { documentType: 'PAYMENT_COLLECTION',
+    paymentReceiptNumber: 'PAY-000007', issuedAt: '2026-10-08T00:04:00.000Z',
+    header: { companyName: 'Bakery', timeZone: 'Asia/Colombo' }, originalInvoiceTotal: '100',
+    balanceBefore: '100', tenderedAmount: '50', amount: '50', changeAmount: '0', balanceAfter: '50' };
   const server = createServer((request, response) => {
     assert.equal(request.headers['x-pos-print-agent-token'], token);
     response.setHeader('content-type', 'application/json');
@@ -67,7 +71,7 @@ async function exercise(command, prefix, name) {
     })]);
     assert.deepEqual(result, { attempt: 1, success: true });
     assert.deepEqual(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')), ['7:1']);
-    assert.ok((await readdir(output)).some((file) => file.startsWith('sale-') && file.endsWith('.bin')));
+    assert.ok((await readdir(output)).some((file) => file.startsWith(`${documentType.toLowerCase()}-`) && file.endsWith('.bin')));
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 150));
     assert.match(await readFile(join(directory, 'agent.log'), 'utf8'), /Print job 7 accepted by printer transport/);
   } finally {
@@ -79,4 +83,6 @@ async function exercise(command, prefix, name) {
 
 await exercise(process.execPath, [join(root, 'agent.mjs')], 'node');
 await exercise(exe, [], 'exe');
+await exercise(process.execPath, [join(root, 'agent.mjs')], 'node-collection', 'PAYMENT_COLLECTION');
+await exercise(exe, [], 'exe-collection', 'PAYMENT_COLLECTION');
 console.log('Node and Windows EXE polling, file transport, acknowledgment, state, and log tests passed.');

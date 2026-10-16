@@ -36,6 +36,25 @@ test('sales summary, item detail, document detail and full export reconcile from
   assert.equal(materializeReport(rows, 'sales-analysis', 'DOCUMENT_DETAIL', 'DAILY', '', {}, 1, 1, true).rows.length, 3);
 });
 
+test('allocated bill discounts reconcile across SKU, category, brand and time periods', () => {
+  const rows = [
+    { reportDate: '2026-10-08', invoice: 'I10', invoiceLineId: 1, location: 'Main', locationId: 1, sku: 'A', product: 'A', categoryLevel1: 'Food', brand: 'Local', grossSales: 500, itemDiscount: 50, billDiscount: 45, discount: 95, saleCost: 200 },
+    { reportDate: '2026-10-08', invoice: 'I10', invoiceLineId: 2, location: 'Main', locationId: 1, sku: 'B', product: 'B', categoryLevel1: 'Food', brand: 'Local', grossSales: 300, itemDiscount: 0, billDiscount: 30, discount: 30, saleCost: 100 },
+    { reportDate: '2026-10-08', invoice: 'I10', invoiceLineId: 3, location: 'Main', locationId: 1, sku: 'C', product: 'C', categoryLevel1: 'Food', brand: 'Local', grossSales: 200, itemDiscount: 0, billDiscount: 20, discount: 20, saleCost: 80 },
+  ].map((row) => salesEventRow({ ...row, eventType: 'SALE', qty: 1, refundQty: 0, refundValue: 0, returnCost: 0, billCount: 1, cogsMissing: 0 }));
+  for (const groupBy of ['sku', 'categoryLevel1', 'brand']) for (const period of ['AGGREGATED', 'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'] as const) {
+    const result = materializeReport(rows, 'sales-analysis', 'SUMMARY', period, groupBy, {}, 1, 50, true).rows;
+    const total = (field: string) => result.reduce((sum, row) => sum + Number(row[field] ?? 0), 0);
+    assert.equal(total('grossSales'), 1000);
+    assert.equal(total('itemDiscount'), 50);
+    assert.equal(total('billDiscount'), 95);
+    assert.equal(total('discount'), 145);
+    assert.equal(total('netSales'), 855);
+    assert.equal(total('cogs'), 380);
+    assert.equal(total('gp'), 475);
+  }
+});
+
 test('unavailable historical cost makes grouped COGS and GP unavailable', () => {
   const missing = salesEventRow({ reportDate: '2026-10-08', eventType: 'SALE', invoice: 'I3', location: 'Main',
     sku: 'CAKE', product: 'Cake', qty: 1, refundQty: 0, grossSales: 100, discount: 0,

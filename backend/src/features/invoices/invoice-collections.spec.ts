@@ -32,9 +32,18 @@ function fixture(overrides = {}, serializeTransactions = false) {
     };
     if (entity === InvoicePayment) return {
       findOneBy: async (where: any) => payments.find((row) => matches(row, where)) ?? null,
-      findOne: async ({ where }: any) => payments.find((row) => row.collectionKey === where.collectionKey && (where.invoiceId === undefined || Number(row.invoiceId) === Number(where.invoiceId))) ?? null,
+      findOne: async ({ where, relations }: any) => {
+        const row = payments.find((payment) => Number(payment.tenantId) === Number(where.tenantId ?? payment.tenantId)
+          && (where.invoicePaymentId !== undefined
+            ? Number(payment.invoicePaymentId) === Number(where.invoicePaymentId) && (!where.collectionKey || Boolean(payment.collectionKey))
+            : payment.collectionKey === where.collectionKey && (where.invoiceId === undefined || Number(payment.invoiceId) === Number(where.invoiceId))));
+        return row && relations ? { ...row, invoice: { ...invoice, tenant: { name: 'Test Bakery', timeZone: 'Asia/Colombo' }, customer: null, location: { name: 'Shop' } },
+          paymentMethod: { paymentMethodName: row.paymentMethodId === 1 ? 'Cash' : row.paymentMethodId === 2 ? 'Card' : 'Cheque' },
+          paymentChannel: row.paymentChannelId ? { name: 'Bank' } : null, createdByUser: { username: 'cashier' } } : row ?? null;
+      },
       create: (row: any) => row,
       save: async (row: any) => { const saved = { ...row, invoicePaymentId: payments.length + 1 }; payments.push(saved); return saved; },
+      update: async (id: number, values: any) => Object.assign(payments.find((row) => row.invoicePaymentId === id), values),
     };
     if (entity === Customer) return { findOneBy: async (where: any) => Number(where.customerId) === 11 && Number(where.tenantId) === 1 ? { customerId: 11, tenantId: 1 } : null };
     if (entity === PaymentMethod) return { findOneBy: async (where: any) => {
@@ -73,6 +82,21 @@ test('later partial payment reduces balance and preserves invoice total', async 
   assert.equal(result.posRegisterSessionId, 22);
   assert.equal(result.posCashierSessionId, 23);
   assert.equal(f.payments.length, 1);
+});
+
+test('saved collection receipt survives retrieval, keeps historical balances, and enforces location access', async () => {
+  const f = fixture();
+  const saved = await f.receive();
+  const receipt = await f.service.collectionReceipt(saved.invoicePaymentId, user);
+  assert.equal(receipt.receiptSnapshot.balanceBefore, '3000.00');
+  assert.equal(receipt.receiptSnapshot.balanceAfter, '1000.00');
+  assert.equal(receipt.receiptSnapshot.customer, null);
+  await f.receive({ ...request, amount: 1000, collectionKey: 'be49edbc-a597-4a38-8cde-5629c0fe2019' });
+  assert.equal((await f.service.collectionReceipt(saved.invoicePaymentId, user)).receiptSnapshot.balanceAfter, '1000.00');
+  f.payments[0].isReversed = true;
+  assert.equal((await f.service.collectionReceipt(saved.invoicePaymentId, user)).isReversed, true);
+  await assert.rejects(f.service.collectionReceipt(saved.invoicePaymentId, { ...user, accessScope: 'LOCATION', assignedLocationIds: [99] }), /location/i);
+  await assert.rejects(f.service.collectionReceipt(saved.invoicePaymentId, { ...user, tenantId: 2 }), /not found/i);
 });
 
 test('settles an unpaid invoice in full', async () => {

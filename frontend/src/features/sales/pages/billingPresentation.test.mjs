@@ -157,6 +157,18 @@ test('billing shows real register context, catalog category chips, separate summ
     await act(async () => document.querySelector('.billing-quick-items-list button').click());
     for (let i = 0; i < 3; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
     assert.match(document.querySelector('.pos-cart tbody').textContent, /Ceylon Tea/);
+    const summary = document.querySelector('.billing-cart-summary');
+    assert.match(summary.textContent, /Item discounts.*Bill discount.*Invoice total/s);
+    await act(async () => summary.querySelector('.billing-bill-discount > button').click());
+    await act(async () => {
+      const input = summary.querySelector('.billing-bill-discount-fields input');
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(input, '10');
+      input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    });
+    assert.match(summary.querySelector('.summary-total').textContent, /90\.00/);
+    assert.equal(document.querySelector('.pos-payment .billing-bill-discount'), null);
+    await act(async () => summary.querySelector('.billing-bill-discount-fields > button').click());
+    assert.match(summary.querySelector('.summary-total').textContent, /100\.00/);
     document.querySelector('[aria-label="Search billing products"]').focus();
     await act(async () => window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Delete', bubbles: true })));
     assert.match(document.querySelector('.pos-cart tbody').textContent, /Ceylon Tea/, 'Delete while typing preserves the cart');

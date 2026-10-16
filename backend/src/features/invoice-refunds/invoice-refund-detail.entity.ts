@@ -19,6 +19,7 @@ export class InvoiceRefundDetail extends AuditEntity {
   @Column({ name: 'unit_price', type: 'decimal', precision: 18, scale: 2 }) unitPrice!: string;
   @Column({ name: 'discount_percentage', type: 'decimal', precision: 7, scale: 4, default: 0 }) discountPercentage!: string;
   @Column({ name: 'discount_amount', type: 'decimal', precision: 18, scale: 2, default: 0 }) discountAmount!: string;
+  @Column({ name: 'bill_discount_allocated', type: 'decimal', precision: 18, scale: 2, default: 0 }) billDiscountAllocated!: string;
   @Column({ name: 'refund_amount', type: 'decimal', precision: 18, scale: 2 }) refundAmount!: string;
   @Column({ name: 'return_to_stock', default: true }) returnToStock!: boolean;
   @Column({ name: 'original_unit_cost_snapshot', type: 'decimal', precision: 18, scale: 4, nullable: true }) originalUnitCostSnapshot!: string | null;

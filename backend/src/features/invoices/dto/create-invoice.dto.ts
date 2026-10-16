@@ -25,6 +25,11 @@ export class CreateInvoicePaymentDto {
   @IsOptional() @Type(() => Number) @IsInt() @IsPositive() paymentChannelId?: number;
 }
 
+export class BillDiscountDto {
+  @IsIn(['PERCENTAGE', 'FIXED']) type!: 'PERCENTAGE' | 'FIXED';
+  @Type(() => Number) @IsNumber() @Min(0) value!: number;
+}
+
 export class CreateInvoiceDto {
   @IsUUID('4') checkoutKey!: string;
   @IsOptional() @Type(() => Number) @IsInt() @IsPositive() sourceQuotationId?: number;
@@ -35,4 +40,5 @@ export class CreateInvoiceDto {
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => CreateInvoicePaymentDto) payments?: CreateInvoicePaymentDto[];
   @IsOptional() @IsBoolean() sellOnCredit?: boolean;
   @IsOptional() @IsBoolean() acceptPriceChanges?: boolean;
+  @IsOptional() @ValidateNested() @Type(() => BillDiscountDto) billDiscount?: BillDiscountDto;
 }

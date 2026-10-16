@@ -44,4 +44,5 @@ export class InvoicePayment extends AuditEntity {
   @Column({ name: 'collection_key', type: 'varchar', length: 36, nullable: true }) collectionKey!: string | null;
   @Column({ name: 'balance_before', type: 'decimal', precision: 18, scale: 2, nullable: true }) balanceBefore!: string | null;
   @Column({ name: 'balance_after', type: 'decimal', precision: 18, scale: 2, nullable: true }) balanceAfter!: string | null;
+  @Column({ name: 'receipt_snapshot', type: 'json', nullable: true }) receiptSnapshot!: Record<string, any> | null;
 }

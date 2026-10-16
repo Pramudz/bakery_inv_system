@@ -98,6 +98,9 @@ export function BillingPage() {
   const [locationId, setLocationId] = useState(0);
   const [checkoutKey, setCheckoutKey] = useState<string>(() => crypto.randomUUID());
   const [paymentEntries, setPaymentEntries] = useState<PosPaymentEntry[]>([]);
+  const [billDiscount, setBillDiscount] = useState<{ type: 'PERCENTAGE' | 'FIXED'; value: string }>({ type: 'PERCENTAGE', value: '0' });
+  const [billDiscountOpen, setBillDiscountOpen] = useState(false);
+  const [paymentReviewRequired, setPaymentReviewRequired] = useState(false);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [complete, setComplete] = useState(false);
   const [completedInvoice, setCompletedInvoice] = useState<Record<
@@ -160,6 +163,8 @@ export function BillingPage() {
     setSelectedCustomer((draft?.selectedCustomer as CustomerOption | null | undefined) ?? null);
     setSellOnCredit(draft?.sellOnCredit ?? false);
     setPaymentEntries(draft?.paymentEntries ?? []);
+    setBillDiscount(draft?.billDiscount ?? { type: 'PERCENTAGE', value: '0' });
+    setPaymentReviewRequired(Boolean(draft?.billDiscount && draft.paymentEntries.length));
     setCheckoutKey(draft?.checkoutKey ?? crypto.randomUUID());
     clearPaymentDraft();
   }, [draftKey, sourceQuotationId]);
@@ -167,8 +172,8 @@ export function BillingPage() {
     if (sourceQuotationId || !draftKey || hydratedDraftKey.current !== draftKey) return;
     if (skipDraftWrite.current) { skipDraftWrite.current = false; return; }
     if (complete) { removeBillingDraft(localStorage, draftKey); return; }
-    writeBillingDraft(localStorage, draftKey, { checkoutKey, saleType, cart, selectedCustomer, sellOnCredit, paymentEntries });
-  }, [draftKey, checkoutKey, saleType, cart, selectedCustomer, sellOnCredit, paymentEntries, complete, sourceQuotationId]);
+    writeBillingDraft(localStorage, draftKey, { checkoutKey, saleType, cart, selectedCustomer, sellOnCredit, paymentEntries, billDiscount });
+  }, [draftKey, checkoutKey, saleType, cart, selectedCustomer, sellOnCredit, paymentEntries, billDiscount, complete, sourceQuotationId]);
   useEffect(() => {
     if (!conversion) return;
     setLocationId(Number(conversion.locationId));
@@ -183,6 +188,7 @@ export function BillingPage() {
     setCart(conversion.lines.map(line => ({ productId: Number(line.productId), code: line.productCodeSnapshot, name: line.productNameSnapshot, category: '', retailPrice: Number(line.unitPrice), wholesalePrice: Number(line.unitPrice), stock: Number.MAX_SAFE_INTEGER, qty: Number(line.quantity), discountPct: Number(line.discountPercent), discountRs: Number(line.discountAmount) })));
     setCheckoutKey(crypto.randomUUID());
     setPaymentEntries([]);
+    setBillDiscount({ type: 'PERCENTAGE', value: '0' });
   }, [conversion]);
   const lastPricing = useRef(new Map<string, InvoiceQuoteLine>());
   const retailEditable = saleType === "Retail" && !sourceQuotationId;
@@ -289,7 +295,15 @@ export function BillingPage() {
     retailEditable ? Math.max(0, lineGross(x) - lineDiscount(x)) : quotedLine(x)?.netTotal ?? Math.max(0, lineGross(x) - lineDiscount(x));
   const subtotal = retailEditable ? Math.round(cart.reduce((n, x) => n + lineGross(x), 0) * 100) / 100 : activeQuote?.subtotal ?? cart.reduce((n, x) => n + lineGross(x), 0);
   const discount = Math.round((retailEditable ? cart.reduce((n, x) => n + lineDiscount(x), 0) : activeQuote?.discountTotal ?? cart.reduce((n, x) => n + lineDiscount(x), 0)) * 100) / 100;
-  const total = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+  const beforeBillDiscount = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+  const billValue = Number(billDiscount.value || 0);
+  const billDiscountError = !Number.isFinite(billValue) || billValue < 0 || !/^\d*(?:\.\d{0,4})?$/.test(billDiscount.value)
+    ? 'Enter a valid non-negative discount with at most four decimal places.'
+    : billDiscount.type === 'PERCENTAGE' && billValue > 100 ? 'Percentage cannot exceed 100%.'
+    : billDiscount.type === 'FIXED' && (!/^\d*(?:\.\d{0,2})?$/.test(billDiscount.value) || billValue > beforeBillDiscount) ? 'Fixed discount must be at most the amount after item discounts, with two decimal places.'
+    : '';
+  const billDiscountAmount = billDiscountError ? 0 : Math.round((billDiscount.type === 'PERCENTAGE' ? beforeBillDiscount * billValue / 100 : billValue) * 100) / 100;
+  const total = Math.max(0, Math.round((beforeBillDiscount - billDiscountAmount) * 100) / 100);
   const currentMethod = paymentMethods.find(
     (x) => x.paymentMethodId === paymentMethodId,
   );
@@ -306,7 +320,7 @@ export function BillingPage() {
     (row) => Number(row.paymentChannelId) === Number(paymentChannelId),
   );
   const paymentStatus =
-    paymentSummary.remaining <= 0 && total > 0
+    paymentSummary.remaining <= 0 && (total > 0 || cart.length > 0)
       ? "Paid"
       : paymentSummary.applied > 0
         ? "Partially paid"
@@ -314,6 +328,7 @@ export function BillingPage() {
   const hasPermission = (code: string) =>
     role?.code === "TENANT_ADMIN" || permissions.includes(code);
   const canAuthorizeCredit = hasPermission("SALES_CREDIT_AUTHORIZE");
+  const canApplyBillDiscount = hasPermission('SALES_BILL_DISCOUNT_APPLY') && !sourceQuotationId;
   const sessionReady = sessionQuery.data?.canBill === true;
   const creditRequired = paymentSummary.remaining > 0;
   const creditReady =
@@ -346,6 +361,7 @@ export function BillingPage() {
           referenceNumber: x.referenceNumber,
         })),
         sellOnCredit: creditRequired && sellOnCredit,
+        billDiscount: billDiscountAmount > 0 ? { type: billDiscount.type, value: billValue } : undefined,
         acceptPriceChanges,
       }),
     onSuccess: (invoice) => {
@@ -377,7 +393,7 @@ export function BillingPage() {
     hasActiveQuote: Boolean(activeQuote),
     creditReady,
     sessionReady,
-    paymentEntryPending: Boolean(editingPaymentId || paid.trim() || paymentSequenceError),
+    paymentEntryPending: Boolean(editingPaymentId || paid.trim() || paymentSequenceError || billDiscountError || paymentReviewRequired || (billDiscountAmount > 0 && !canApplyBillDiscount)),
   });
   const clearPaymentDraft = () => {
     setPaid("");
@@ -461,6 +477,8 @@ export function BillingPage() {
     options: { acceptPriceChanges?: boolean; quote?: InvoiceQuote } = {},
   ) => {
     if ((!sourceQuotationId && (quoteQuery.isFetching || quoteQuery.isError || !activeQuote)) || submitGuard.current || invoiceMutation.isPending || (sourceQuotationId > 0 && !conversion)) return;
+    if (billDiscountError || (billDiscountAmount > 0 && !canApplyBillDiscount)) { setPaymentValidation({ form: billDiscountError || 'Your role cannot apply a bill discount.' }); return; }
+    if (paymentReviewRequired) { setPaymentValidation({ form: 'Review the entered payments after changing the bill discount.' }); return; }
     if (editingPaymentId || paid.trim()) {
       setPaymentValidation({
         form: "Add or cancel the payment being edited before completing the sale.",
@@ -747,6 +765,8 @@ export function BillingPage() {
     setPaymentReference("");
     setPaymentValidation({});
     setPaymentEntries([]);
+    setBillDiscount({ type: 'PERCENTAGE', value: '0' });
+    setPaymentReviewRequired(false);
     setEditingPaymentId(null);
     setCompletedInvoice(null);
     setTimeout(() => focusFirst(productSection.current), 0);
@@ -1123,6 +1143,8 @@ export function BillingPage() {
                 disabled={sourceQuotationId > 0}
                 onClick={() => {
                   setCart([]);
+                  setBillDiscount({ type: 'PERCENTAGE', value: '0' });
+                  setPaymentReviewRequired(false);
                   clearPaymentDraft();
                   setPaymentEntries([]);
                   setCheckoutKey(crypto.randomUUID());
@@ -1227,7 +1249,11 @@ export function BillingPage() {
                           data-cart-column="3"
                           className="sales-more cart-remove"
                           onClick={() => {
-                            setCart((v) => v.filter((y) => y.code !== x.code));
+                            setCart((v) => {
+                              const next = v.filter((y) => y.code !== x.code);
+                              if (!next.length) { setBillDiscount({ type: 'PERCENTAGE', value: '0' }); setPaymentReviewRequired(false); }
+                              return next;
+                            });
                             clearPaymentDraft();
                             setPaymentEntries([]);
                           }}
@@ -1261,9 +1287,23 @@ export function BillingPage() {
                 <b>LKR {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
               </div>
               <div className="summary-line">
-                <span>Discounts</span>
+                <span>Item discounts</span>
                 <b>- LKR {discount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
               </div>
+              <div className="summary-line">
+                <span>Bill discount{billDiscount.type === 'PERCENTAGE' && billDiscountAmount > 0 ? ` (${billValue}%)` : ''}</span>
+                <b>- LKR {billDiscountAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+              </div>
+              {canApplyBillDiscount ? <div className="billing-bill-discount">
+                <button type="button" className="btn btn-secondary" aria-expanded={billDiscountOpen} onClick={() => setBillDiscountOpen(!billDiscountOpen)}>{billDiscountOpen ? 'Hide bill discount' : 'Edit bill discount'}</button>
+                {billDiscountOpen && <div className="billing-bill-discount-fields">
+                  <label className="field"><span>Type</span><select className="control" value={billDiscount.type} onChange={(event) => { setBillDiscount({ type: event.target.value as 'PERCENTAGE' | 'FIXED', value: '0' }); setPaymentReviewRequired(paymentEntries.length > 0); }}><option value="PERCENTAGE">Percentage (%)</option><option value="FIXED">Fixed amount (LKR)</option></select></label>
+                  <label className="field"><span>{billDiscount.type === 'PERCENTAGE' ? 'Percentage' : 'Amount (LKR)'}</span><input className="control" type="number" min="0" max={billDiscount.type === 'PERCENTAGE' ? 100 : beforeBillDiscount} step={billDiscount.type === 'PERCENTAGE' ? '0.0001' : '0.01'} value={billDiscount.value} onChange={(event) => { setBillDiscount({ ...billDiscount, value: event.target.value }); setPaymentReviewRequired(paymentEntries.length > 0); }} /></label>
+                  {billDiscountError && <small className="error-text" role="alert">{billDiscountError}</small>}
+                  <button type="button" className="btn btn-secondary" onClick={() => { setBillDiscount({ type: 'PERCENTAGE', value: '0' }); setPaymentReviewRequired(paymentEntries.length > 0); }}>Remove discount</button>
+                </div>}
+              </div> : <small>Bill discount is read only for this role.{billDiscountAmount > 0 ? ' An authorized cashier must review this draft before checkout.' : ''}</small>}
+              {paymentReviewRequired && <div className="error-box" role="status">Bill discount changed. Review payment amounts and methods before checkout.<button type="button" className="btn btn-secondary" disabled={Boolean(paymentSequenceError || billDiscountError)} onClick={() => setPaymentReviewRequired(false)}>I reviewed payments</button></div>}
               <div className="summary-total">
                 <span>Invoice total</span>
                 <strong>LKR {total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>

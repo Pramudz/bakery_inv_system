@@ -22,6 +22,27 @@ const refund = {
 };
 const printer = { paperWidth: 80, encoding: 'CP437', cutEnabled: true };
 
+test('later collection receipt renders saved balances at 58 and 80 mm without sale items', () => {
+  const collection = {
+    documentType: 'PAYMENT_COLLECTION', paymentReceiptNumber: 'PAY-000123', issuedAt: '2026-10-08T00:04:00.000Z',
+    header: sale.header, originalSale: { businessDate: sale.businessDate, locationCode: '105', registerCode: 'POS-01', billNo: 1 },
+    customer: { customerName: 'Customer One', phone: '0712345678' }, paymentMethod: { paymentMethodName: 'CARD' },
+    paymentChannel: { name: 'VISA' }, referenceNumber: 'APPROVAL-7', originalInvoiceTotal: '1000',
+    balanceBefore: '400', tenderedAmount: '200', amount: '200', changeAmount: '0', balanceAfter: '200',
+  };
+  for (const width of [58, 80]) {
+    const lines = receiptLines(collection, width);
+    assert.ok(lines.every((line) => line.length <= RECEIPT_COLUMNS[width]));
+    assert.ok(lines.join('\n').includes('PAY-000123'));
+    assert.ok(lines.join('\n').includes('Previous balance'));
+    assert.ok(lines.join('\n').includes('PARTIALLY PAID'));
+    assert.ok(!lines.join('\n').includes('S/N CODE'));
+    const bytes = renderEscPos(collection, { ...printer, paperWidth: width });
+    assert.ok(bytes.length > 100);
+  }
+  assert.ok(receiptLines({ ...collection, isReversed: true }, 80).join('\n').includes('REVERSED'));
+});
+
 // These are exactly the commands emitted by receipt.mjs; leave printable text intact.
 function stripEscPos(bytes) {
   const text = [];

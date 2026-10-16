@@ -14,6 +14,8 @@ import { InvoicePayment } from './invoice-payment.entity';
 import { Invoice } from './invoice.entity';
 import { ReceiveInvoicePaymentDto } from './dto/receive-invoice-payment.dto';
 import { snapshotInvoiceReceipt } from './invoice-receipt';
+import { snapshotPaymentCollection } from './payment-collection-receipt';
+import { applyBillDiscount } from './bill-discount';
 import { PosPriceLine, PosPricingService, PosSaleType } from './pos-pricing.service';
 import { QuoteInvoiceDto } from './dto/quote-invoice.dto';
 import { createHash } from 'node:crypto';
@@ -150,7 +152,14 @@ export class InvoicesService {
       invoice.balanceAmount = after.toFixed(2);
       invoice.paymentStatus = after === 0 ? 'PAID' : 'PARTIALLY_PAID';
       await invoiceRepo.save(invoice);
-      return payment;
+      const archived = await repo.findOne({
+        where: { invoicePaymentId: payment.invoicePaymentId },
+        relations: { invoice: { tenant: true, customer: true, location: true }, paymentMethod: true, paymentChannel: true, createdByUser: true },
+      });
+      if (!archived) throw new Error('Saved collection could not be loaded for its receipt snapshot');
+      archived.receiptSnapshot = snapshotPaymentCollection(archived);
+      await repo.update(payment.invoicePaymentId, { receiptSnapshot: archived.receiptSnapshot });
+      return archived;
     });
     } catch (error) {
       const driverError = error as { driverError?: { code?: string; sqlMessage?: string; message?: string }; code?: string; message?: string };
@@ -161,7 +170,7 @@ export class InvoicesService {
       if (!existing) throw error;
       if (Number(existing.invoiceId) !== Number(id)) throw new ConflictException('This collection key was already used for another invoice.');
       this.assertCollectionRetry(existing, dto, user);
-      return existing;
+      return this.collectionReceipt(existing.invoicePaymentId, user);
     }
   }
 
@@ -174,7 +183,17 @@ export class InvoicesService {
       relations: { invoice: { customer: true, location: true }, paymentMethod: true, paymentChannel: true },
     });
     if (!payment) throw new NotFoundException('Collection outcome not found.');
-    return payment;
+    return this.collectionReceipt(payment.invoicePaymentId, user);
+  }
+
+  async collectionReceipt(paymentId: number, user: TenantPrincipal) {
+    const payment = await this.dataSource.getRepository(InvoicePayment).findOne({
+      where: { invoicePaymentId: paymentId, tenantId: user.tenantId, collectionKey: Not(IsNull()) },
+      relations: { invoice: { tenant: true, customer: true, location: true }, paymentMethod: true, paymentChannel: true, createdByUser: true },
+    });
+    if (!payment?.invoice) throw new NotFoundException('Payment receipt not found.');
+    this.assertLocationAccess(payment.invoice.locationId, user);
+    return { ...payment, receiptSnapshot: payment.receiptSnapshot ?? snapshotPaymentCollection(payment) };
   }
 
   private assertCollectionRetry(existing: InvoicePayment, dto: ReceiveInvoicePaymentDto, user: TenantPrincipal) {
@@ -338,6 +357,7 @@ export class InvoicesService {
       const activeSession = await this.posSessions.requireCashierSession(manager, credential, user, dto.locationId, true);
       let sourceQuotation: Quotation | null = null;
       if (dto.sourceQuotationId) {
+        if (dto.billDiscount && dto.billDiscount.value !== 0) throw new ConflictException('Bill discounts cannot be applied during locked quotation conversion.');
         await this.assertQuotationConversionPermission(manager, user);
         sourceQuotation = await manager.getRepository(Quotation).findOne({ where: { quotationId: dto.sourceQuotationId, tenantId: user.tenantId }, lock: { mode: 'pessimistic_write' } });
         if (!sourceQuotation) throw new NotFoundException('Quotation not found.');
@@ -373,8 +393,10 @@ export class InvoicesService {
       }
       const preparedDetails = quote.lines;
       const subtotal = quote.subtotal;
-      const discountTotal = quote.discountTotal;
-      const grandTotal = quote.grandTotal;
+      const bill = applyBillDiscount(preparedDetails.map((line) => line.netTotal), dto.billDiscount);
+      if (bill.discount > 0) await this.assertBillDiscountAuthorization(manager, user);
+      const discountTotal = money(quote.discountTotal + bill.discount);
+      const grandTotal = money(quote.grandTotal - bill.discount);
       const preparedPayments = await this.paymentProcessing.prepare(manager, user.tenantId, dto.payments ?? [], grandTotal);
       const tenderedAmount = money(preparedPayments.reduce((sum, payment) => sum + payment.tendered, 0));
       const paidAmount = money(preparedPayments.reduce((sum, payment) => sum + payment.applied, 0));
@@ -403,13 +425,19 @@ export class InvoicesService {
         saleType: dto.saleType,
         subtotal: subtotal.toFixed(2),
         discountTotal: discountTotal.toFixed(2),
+        itemDiscountTotal: quote.discountTotal.toFixed(2),
+        billDiscountType: bill.discount > 0 ? dto.billDiscount!.type : null,
+        billDiscountValue: bill.discount > 0 ? dto.billDiscount!.value.toFixed(4) : '0.0000',
+        billDiscountTotal: bill.discount.toFixed(2),
+        billDiscountAppliedByUserId: bill.discount > 0 ? user.userId : null,
+        billDiscountAppliedAt: bill.discount > 0 ? new Date() : null,
         taxTotal: '0.00',
         grandTotal: grandTotal.toFixed(2),
         paidAmount: paidAmount.toFixed(2),
         tenderedAmount: tenderedAmount.toFixed(2),
         changeAmount: changeAmount.toFixed(2),
         balanceAmount: balanceAmount.toFixed(2),
-        paymentStatus: paidAmount === 0 ? 'UNPAID' : paidAmount < grandTotal ? 'PARTIALLY_PAID' : 'PAID',
+        paymentStatus: grandTotal === 0 || paidAmount >= grandTotal ? 'PAID' : paidAmount === 0 ? 'UNPAID' : 'PARTIALLY_PAID',
         invoiceStatus: 'COMPLETED',
         isCreditSale,
         creditAuthorizedByUserId: isCreditSale ? user.userId : null,
@@ -432,12 +460,14 @@ export class InvoicesService {
           productNameSnapshot: line.quotedProductNameSnapshot ?? product.productName,
           unitId, unitCodeSnapshot: line.quotedUnitCodeSnapshot ?? unit.code, unitNameSnapshot: line.quotedUnitNameSnapshot ?? unit.name,
           quantity: String(line.quantity), unitPrice: line.unitPrice.toFixed(2),
-          discountPercentage: line.discountPercentage.toFixed(4), discountAmount: line.discountAmount.toFixed(2), grossTotal: line.grossTotal.toFixed(2), netTotal: line.netTotal.toFixed(2),
+          discountPercentage: line.discountPercentage.toFixed(4), discountAmount: line.discountAmount.toFixed(2), grossTotal: line.grossTotal.toFixed(2),
+          netBeforeBillDiscount: line.netTotal.toFixed(2), billDiscountAllocated: bill.allocation[index].toFixed(2),
+          netTotal: money(line.netTotal - bill.allocation[index]).toFixed(2),
           unitCostSnapshot: product.isStockItem ? null : '0.0000', cogsAmount: product.isStockItem ? null : '0.0000',
           priceSource: sourceQuotation ? 'QUOTATION' : 'PRICE_LIST',
           sourcePriceListItemId: sourceQuotation ? null : line.priceListItemId,
           sourceQuotationLineId: sourceQuotation ? line.sourceQuotationLineId ?? null : null,
-          taxableAmount: line.netTotal.toFixed(2), taxAmount: '0.00', taxRateSnapshot: '0.0000', taxInclusive: false, taxCodeSnapshot: null,
+          taxableAmount: money(line.netTotal - bill.allocation[index]).toFixed(2), taxAmount: '0.00', taxRateSnapshot: '0.0000', taxInclusive: false, taxCodeSnapshot: null,
         }));
         if (product.isStockItem) stockDetails.push(detail);
       }
@@ -604,6 +634,7 @@ export class InvoicesService {
       details,
       payments,
       sellOnCredit: Boolean(dto.sellOnCredit),
+      ...(dto.billDiscount ? { billDiscount: { type: dto.billDiscount.type, value: Number(dto.billDiscount.value) } } : {}),
       sourceQuotationId: dto.sourceQuotationId ? Number(dto.sourceQuotationId) : null,
     })).digest('hex');
   }
@@ -675,6 +706,16 @@ export class InvoicesService {
     if (!enabled) throw new ForbiddenException('The Sales module is not enabled for this tenant.');
     const grant = await manager.getRepository(RolePermission).findOneBy({ roleId: user.roleId, permissionId: permission.permissionId });
     if (!grant) throw new ForbiddenException('SALES_CREDIT_AUTHORIZE permission is required to sell on credit.');
+  }
+
+  private async assertBillDiscountAuthorization(manager: EntityManager, user: TenantPrincipal) {
+    const permission = await manager.getRepository(Permission).findOneBy({ code: 'SALES_BILL_DISCOUNT_APPLY', isActive: true });
+    if (!permission) throw new ForbiddenException('Bill discount authorization is unavailable.');
+    const enabled = await manager.getRepository(TenantModule).findOneBy({ tenantId: user.tenantId, moduleId: permission.moduleId, isEnabled: true });
+    if (!enabled) throw new ForbiddenException('The Sales module is not enabled for this tenant.');
+    if (user.roleCode === 'TENANT_ADMIN') return;
+    const grant = await manager.getRepository(RolePermission).findOneBy({ roleId: user.roleId, permissionId: permission.permissionId });
+    if (!grant) throw new ForbiddenException('SALES_BILL_DISCOUNT_APPLY permission is required.');
   }
 
   private async issueStock(manager: EntityManager, invoice: Invoice, detail: InvoiceDetail, user: TenantPrincipal) {

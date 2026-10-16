@@ -23,6 +23,8 @@ export class InvoiceDetail extends AuditEntity {
   @Column({ name: 'discount_amount', type: 'decimal', precision: 18, scale: 2, default: 0 }) discountAmount!: string;
   @Column({ name: 'gross_total', type: 'decimal', precision: 18, scale: 2 }) grossTotal!: string;
   @Column({ name: 'net_total', type: 'decimal', precision: 18, scale: 2 }) netTotal!: string;
+  @Column({ name: 'net_before_bill_discount', type: 'decimal', precision: 18, scale: 2, default: 0 }) netBeforeBillDiscount!: string;
+  @Column({ name: 'bill_discount_allocated', type: 'decimal', precision: 18, scale: 2, default: 0 }) billDiscountAllocated!: string;
   @Column({ name: 'unit_cost_snapshot', type: 'decimal', precision: 18, scale: 4, nullable: true }) unitCostSnapshot!: string | null;
   @Column({ name: 'cogs_amount', type: 'decimal', precision: 18, scale: 4, nullable: true }) cogsAmount!: string | null;
   @Column({ name: 'price_source', type: 'varchar', length: 20, nullable: true }) priceSource!: 'PRICE_LIST' | 'QUOTATION' | null;

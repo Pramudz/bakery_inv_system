@@ -54,6 +54,7 @@ export type CreateInvoiceInput = {
   payments: { paymentMethodId: number; amount: number; paymentChannelId?: number; referenceNumber?: string }[];
   sellOnCredit?: boolean;
   acceptPriceChanges?: boolean;
+  billDiscount?: { type: 'PERCENTAGE' | 'FIXED'; value: number };
 };
 
 export const invoicesApi = {

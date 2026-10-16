@@ -27,6 +27,16 @@ export class PosPrintAdminController {
 @UseGuards(TenantAuthGuard, PermissionGuard)
 export class PosPrintDocumentController {
   constructor(private readonly service: PosPrintService) {}
+  @Post('PAYMENT_COLLECTION/:sourceId/print')
+  @RequirePermission('SALES_PAYMENT_COLLECT')
+  printCollection(@Param('sourceId', ParseIntPipe) sourceId: number, @CurrentUser() user: TenantPrincipal) {
+    return this.service.requestPrint('PAYMENT_COLLECTION', sourceId, user);
+  }
+  @Get('PAYMENT_COLLECTION/:sourceId/status')
+  @RequirePermission('SALES_PAYMENT_COLLECT')
+  collectionStatus(@Param('sourceId', ParseIntPipe) sourceId: number, @CurrentUser() user: TenantPrincipal) {
+    return this.service.documentStatus('PAYMENT_COLLECTION', sourceId, user);
+  }
   @Post(':documentType/:sourceId/print')
   @RequireAnyPermission('SALES_BILLING', 'SALES_INVOICE_VIEW', 'SALES_REFUND_CREATE', 'SALES_REFUND_VIEW')
   print(@Param('documentType') documentType: string, @Param('sourceId', ParseIntPipe) sourceId: number, @CurrentUser() user: TenantPrincipal) {

@@ -464,7 +464,7 @@ export class ReportsService {
 
   private measureNames(reportId: string, domain: string) {
     if (reportId === 'payment-methods' || reportId === 'payment-analysis') return ['paymentValue', 'paymentCount'];
-    if (domain === 'sales') return ['qty', 'refundQty', 'grossSales', 'discount', 'netSalesBeforeRefund', 'refundValue', 'netSales', 'cogs', 'gp', 'gpPercent', 'netQty', 'billCount', 'cogsMissing'];
+    if (domain === 'sales') return ['qty', 'refundQty', 'grossSales', 'itemDiscount', 'billDiscount', 'discount', 'netSalesBeforeRefund', 'refundValue', 'netSales', 'cogs', 'gp', 'gpPercent', 'netQty', 'billCount', 'cogsMissing'];
     if (domain === 'refunds') return ['qty', 'refundValue'];
     if (domain === 'inventory') return ['qty', 'stockValue', 'movementValue'];
     if (domain === 'purchasing') return ['qty', 'receivedQty', 'lineValue'];

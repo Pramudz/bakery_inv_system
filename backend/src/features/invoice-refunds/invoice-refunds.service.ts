@@ -167,6 +167,9 @@ export class InvoiceRefundsService {
       const saleCostByLine = new Map(saleLedgers.map(row => [Number(row.sourceDocumentLineId), row.unitCost]));
       const previous = await this.refundedQuantities(invoice.details.map((line) => line.invoiceDetailId), manager);
       const previousAmounts = await this.refundedAmounts(invoice.details.map((line) => line.invoiceDetailId), manager);
+      const previousBreakdown = Number(invoice.billDiscountTotal ?? 0) > 0
+        ? await this.refundedBreakdown(invoice.details.map((line) => line.invoiceDetailId), manager)
+        : new Map<number, { gross: number; item: number; bill: number }>();
       const prepared = dto.details.map((request) => {
         const line = originalLines.find((x) => Number(x.invoiceDetailId) === request.invoiceDetailId)!;
         const stockItem = line.product.isStockItem;
@@ -182,17 +185,37 @@ export class InvoiceRefundsService {
         const ratio = request.quantity / Number(line.quantity);
         let gross = money(Number(line.grossTotal) * ratio);
         let discount = money(Number(line.discountAmount) * ratio);
+        let billDiscount = money(Number(line.billDiscountAllocated ?? 0) * ratio);
+        const prior = previousBreakdown.get(Number(line.invoiceDetailId)) ?? { gross: 0, item: 0, bill: 0 };
         const remainingAmount = money(Math.max(0, Number(line.netTotal) - (previousAmounts.get(Number(line.invoiceDetailId)) ?? 0)));
-        const total = request.quantity === refundable ? remainingAmount : money(gross - discount);
+        let total = request.quantity === refundable ? remainingAmount : Number(line.billDiscountAllocated ?? 0) > 0
+          ? money(Number(line.netTotal) * ratio) : money(gross - discount);
+        if (request.quantity !== refundable && Number(line.billDiscountAllocated ?? 0) > 0) {
+          const remainingGross = money(Number(line.grossTotal) - prior.gross);
+          const remainingItem = money(Number(line.discountAmount) - prior.item);
+          const remainingBill = money(Number(line.billDiscountAllocated) - prior.bill);
+          gross = Math.min(gross, remainingGross);
+          total = Math.min(remainingAmount, gross, Math.max(total, money(gross - remainingItem - remainingBill)));
+          const discountNeeded = money(gross - total);
+          discount = Math.min(discountNeeded, remainingItem, Math.max(money(discountNeeded - remainingBill), discount));
+          billDiscount = money(discountNeeded - discount);
+        }
         if (total > remainingAmount) throw new BadRequestException(`Refund amount exceeds the remaining value for ${line.product.productName}.`);
         if (request.quantity === refundable) {
-          gross = Math.max(gross, total);
-          discount = money(gross - total);
+          if (Number(line.billDiscountAllocated ?? 0) > 0) {
+            gross = money(Number(line.grossTotal) - prior.gross);
+            discount = money(Number(line.discountAmount) - prior.item);
+            billDiscount = money(gross - discount - total);
+            if (billDiscount < 0 || billDiscount > Number(line.billDiscountAllocated) - prior.bill + 0.01) throw new ConflictException('Refund discount allocation no longer reconciles with the original sale.');
+          } else {
+            gross = Math.max(gross, total);
+            discount = money(gross - total);
+          }
         }
-        return { request, line, gross, discount, total, originalUnitCost, cogsReversal, returnToStock };
+        return { request, line, gross, discount, billDiscount, total, originalUnitCost, cogsReversal, returnToStock };
       });
       const subtotal = money(prepared.reduce((sum, x) => sum + x.gross, 0));
-      const discountTotal = money(prepared.reduce((sum, x) => sum + x.discount, 0));
+      const discountTotal = money(prepared.reduce((sum, x) => sum + x.discount + x.billDiscount, 0));
       const refundTotal = money(prepared.reduce((sum, x) => sum + x.total, 0));
       for (const payment of dto.payments ?? []) {
         if (!Number.isFinite(payment.amount) || payment.amount <= 0 || money(payment.amount) !== payment.amount) {
@@ -224,6 +247,7 @@ export class InvoiceRefundsService {
           invoiceRefundId: refund.invoiceRefundId, lineNumber: index + 1, invoiceDetailId: item.line.invoiceDetailId,
           productId: item.line.productId, quantity: String(item.request.quantity), unitPrice: item.line.unitPrice,
           discountPercentage: item.line.discountPercentage, discountAmount: item.discount.toFixed(2),
+          billDiscountAllocated: item.billDiscount.toFixed(2),
           refundAmount: item.total.toFixed(2), returnToStock: item.returnToStock,
           originalUnitCostSnapshot: item.originalUnitCost, cogsReversalAmount: item.cogsReversal,
           refundTaxableAmount: item.total.toFixed(2), taxRefundAmount: '0.00', taxRateSnapshot: '0.0000',
@@ -473,6 +497,17 @@ export class InvoiceRefundsService {
       .groupBy('detail.invoiceDetailId')
       .getRawMany();
     return new Map(rows.map((row) => [Number(row.invoiceDetailId), money(Number(row.amount ?? 0))]));
+  }
+  private async refundedBreakdown(ids: number[], manager: EntityManager) {
+    if (!ids.length) return new Map<number, { gross: number; item: number; bill: number }>();
+    const rows = await manager.getRepository(InvoiceRefundDetail).createQueryBuilder('detail')
+      .innerJoin('detail.invoiceRefund', 'refund', 'refund.status = :status', { status: 'COMPLETED' })
+      .select('detail.invoiceDetailId', 'invoiceDetailId')
+      .addSelect('SUM(detail.refundAmount + detail.discountAmount + detail.billDiscountAllocated)', 'gross')
+      .addSelect('SUM(detail.discountAmount)', 'item')
+      .addSelect('SUM(detail.billDiscountAllocated)', 'bill')
+      .where({ invoiceDetailId: In(ids) }).groupBy('detail.invoiceDetailId').getRawMany();
+    return new Map(rows.map((row) => [Number(row.invoiceDetailId), { gross: money(Number(row.gross ?? 0)), item: money(Number(row.item ?? 0)), bill: money(Number(row.bill ?? 0)) }]));
   }
   private async restoreStock(manager: EntityManager, invoice: Invoice, detail: InvoiceRefundDetail, user: TenantPrincipal) {
     const repo = manager.getRepository(InventoryBalance);

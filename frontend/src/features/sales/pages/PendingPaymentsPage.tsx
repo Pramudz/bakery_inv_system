@@ -7,7 +7,7 @@ import { paymentMethodsApi } from '../api/paymentMethodsApi';
 import { SalesBadge, SalesStat } from './SalesUi';
 import './pending-payments.css';
 import './sales-history.css';
-import { PaymentReceiptContent, receiptNumber } from './PaymentReceipt';
+import { PaymentReceiptPanel, receiptNumber } from './PaymentReceipt';
 import { paymentChannelsApi } from '../api/paymentChannelsApi';
 import { saleBillReference } from './saleBillReference';
 import { ApiError } from '../../../services/apiClient';
@@ -28,7 +28,7 @@ export function PendingPaymentsPage() {
   const [status, setStatus] = useState('ALL');
   const [tab, setTab] = useState<'pending' | 'history'>('pending');
   const [selected, setSelected] = useState<PendingInvoice | null>(null);
-  const [receipt, setReceipt] = useState<PaymentReceipt | null>(null);
+  const [receipt, setReceipt] = useState<number | null>(null);
   const [amount, setAmount] = useState('');
   const [methodId, setMethodId] = useState('');
   const [reference, setReference] = useState('');
@@ -78,7 +78,7 @@ export function PendingPaymentsPage() {
     }
     clearRecoveryIntent(localStorage, intent);
     reloadIntents();
-    setReceipt(payment);
+    setReceipt(Number(payment.invoicePaymentId));
     setSelected(null);
     setRecoveryMessage('Completed transaction recovered. No new payment was posted.');
     refresh();
@@ -231,7 +231,7 @@ export function PendingPaymentsPage() {
           </tr>)}</tbody></table></div> :
         <div className="sales-table-wrap"><table className="table"><thead><tr><th>Receipt / date</th><th>Invoice</th><th>Customer</th><th>Method</th><th className="right">Received</th><th>Status</th><th /></tr></thead>
           <tbody>{history.isPending ? <tr><td colSpan={7}>Loading payment history…</td></tr> : !receipts.length ? <tr><td colSpan={7} className="pending-empty">No payment receipts {query ? 'match your search' : 'recorded yet'}.</td></tr> : pagedReceipts.map((payment) => <tr key={payment.invoicePaymentId}>
-            <td><strong className="sales-id">{receiptNumber(payment.invoicePaymentId)}</strong><small className="refund-code">{new Date(payment.paidAt).toLocaleString()}</small></td><td>{saleBillReference(payment.invoice)}</td><td>{customerName(payment.invoice)}</td><td>{payment.paymentMethod.paymentMethodName}{payment.paymentChannel && <small className="refund-code">{payment.paymentChannel.name}</small>}</td><td className="right">LKR {money(payment.amount)}</td><td><SalesBadge status={payment.isReversed ? 'Reversed' : 'Received'} /></td><td className="right"><button className="btn btn-edit-soft" onClick={() => setReceipt(payment)}>View / Print</button></td>
+            <td><strong className="sales-id">{receiptNumber(payment.invoicePaymentId)}</strong><small className="refund-code">{new Date(payment.paidAt).toLocaleString()}</small></td><td>{saleBillReference(payment.invoice)}</td><td>{customerName(payment.invoice)}</td><td>{payment.paymentMethod.paymentMethodName}{payment.paymentChannel && <small className="refund-code">{payment.paymentChannel.name}</small>}</td><td className="right">LKR {money(payment.amount)}</td><td><SalesBadge status={payment.isReversed ? 'Reversed' : 'Received'} /></td><td className="right"><button className="btn btn-edit-soft" onClick={() => setReceipt(Number(payment.invoicePaymentId))}>View / Print</button></td>
           </tr>)}</tbody></table></div>}
       {!loadError && <>
       <div className="toolbar sales-history-pagination">
@@ -252,7 +252,7 @@ export function PendingPaymentsPage() {
       <p className="pending-note">Amounts are in LKR. Partially refunded invoices use their recalculated balance. Historical anonymous unpaid invoices remain visible but read-only.</p>
     </div>
     {createPortal(<dialog ref={dialog} className="pending-dialog" aria-labelledby="pending-dialog-title" onCancel={(event) => { event.preventDefault(); close(); }}>
-      <div className="modal-head"><div><h2 id="pending-dialog-title">{receipt ? 'Payment Receipt' : 'Receive Payment'}</h2><p>{receipt ? receiptNumber(receipt.invoicePaymentId) : saleBillReference(selected)}</p></div><button className="icon-btn" aria-label="Close" disabled={receive.isPending} onClick={close}>×</button></div>
+      <div className="modal-head"><div><h2 id="pending-dialog-title">{receipt !== null ? 'Payment Receipt' : 'Receive Payment'}</h2><p>{receipt !== null ? receiptNumber(receipt) : saleBillReference(selected)}</p></div><button className="icon-btn" aria-label="Close" disabled={receive.isPending} onClick={close}>×</button></div>
       {selected && <form onSubmit={submit}>
         <div className="modal-body">
           <p><strong>{customerName(selected)}</strong> · {selected.location?.name}</p>
@@ -271,10 +271,7 @@ export function PendingPaymentsPage() {
           {(validation || receive.isError) && <div className="error-box" role="alert">{validation || receive.error?.message}</div>}
         </div><div className="modal-foot"><button className="btn btn-secondary" type="button" disabled={receive.isPending} onClick={close}>Cancel</button><button className="btn btn-primary" disabled={receive.isPending || methods.isPending || !activeMethods.length}>{receive.isPending ? 'Saving…' : 'Save & View Receipt'}</button></div>
       </form>}
-      {receipt && <>
-        <PaymentReceiptContent receipt={receipt} />
-        <div className="modal-foot"><button className="btn btn-secondary" onClick={close}>Close</button><button className="btn btn-primary" onClick={() => window.print()}>Print Receipt</button></div>
-      </>}
+      {receipt !== null && <PaymentReceiptPanel paymentId={receipt} onClose={close} />}
     </dialog>, document.body)}
   </div>;
 }

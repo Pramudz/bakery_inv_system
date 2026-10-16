@@ -2,7 +2,7 @@ import { invoiceReceiptModel } from './invoiceReceiptModel';
 import './invoice-receipt.css';
 
 export function InvoiceReceiptContent({ invoice, copy = false }: { invoice: Record<string, any>; copy?: boolean }) {
-  const { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance, subtotal, discount, method, paymentStatus, saleType, selectedCustomer, receiptDate, unitPrice, lineNet, header, billNo, locationCode, registerCode, payments } = invoiceReceiptModel(invoice);
+  const { cart, paidTotal, tenderedTotal, changeTotal, total, outstandingBalance, subtotal, discount, itemDiscount, billDiscount, billDiscountType, billDiscountValue, method, paymentStatus, saleType, selectedCustomer, receiptDate, unitPrice, lineNet, header, billNo, locationCode, registerCode, payments } = invoiceReceiptModel(invoice);
   return (<div className="receipt-preview">
               <div className="receipt-business">
                 <h3>{header?.companyName ?? 'Sale receipt'}</h3>
@@ -81,6 +81,11 @@ export function InvoiceReceiptContent({ invoice, copy = false }: { invoice: Reco
                   <span>Subtotal</span>
                   <b>LKR {subtotal.toLocaleString()}</b>
                 </div>
+                <div>
+                  <span>Item discount</span>
+                  <b>- LKR {itemDiscount.toLocaleString()}</b>
+                </div>
+                <div><span>Bill discount{billDiscountType === 'PERCENTAGE' ? ` (${billDiscountValue}%)` : ''}</span><b>- LKR {billDiscount.toLocaleString()}</b></div>
                 <div>
                   <span>Total discount</span>
                   <b>- LKR {discount.toLocaleString()}</b>
