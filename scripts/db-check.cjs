@@ -77,6 +77,12 @@ function validateLedger(actual, expected) {
   return expected.length - actual.length;
 }
 
+function hasJsonValidationCheck(column, checks) {
+  const name = column.columnName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const clause = new RegExp(`^\\s*\\(*\\s*json_valid\\s*\\(\\s*(?:\`${name}\`|"${name}"|${name})\\s*\\)\\s*\\)*\\s*$`, 'i');
+  return checks.some(check => check.tableName === column.tableName && clause.test(String(check.checkClause || '')));
+}
+
 async function checkDatabaseState(mode = 'inspect', options = {}) {
   if (!['inspect', 'empty', 'current', 'init-ready'].includes(mode)) throw new Error('Mode must be inspect, empty, current or init-ready');
   const env = options.env || process.env;
@@ -113,8 +119,16 @@ async function checkDatabaseState(mode = 'inspect', options = {}) {
       const examples = incompatibleTables.slice(0, 8).map(row => `${row.name} (${row.charset || 'unknown'} / ${row.collation || 'unknown'})`).join(', ');
       throw new Error(`${incompatibleTables.length} database table(s) require ${requiredCharset} / ${requiredCollation}; found ${examples}${incompatibleTables.length > 8 ? ', ...' : ''}. Read-only validation cannot convert existing customer tables.`);
     }
-    const [columnRows] = await connection.query("SELECT c.TABLE_NAME AS tableName, c.COLUMN_NAME AS columnName, c.CHARACTER_SET_NAME AS charset, c.COLLATION_NAME AS collation FROM information_schema.columns c JOIN information_schema.tables t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_TYPE = 'BASE TABLE' WHERE c.TABLE_SCHEMA = ? AND c.COLLATION_NAME IS NOT NULL", [config.database]);
-    const incompatibleColumns = columnRows.filter(row => row.charset !== requiredCharset || row.collation !== requiredCollation);
+    const [columnRows] = await connection.query("SELECT c.TABLE_NAME AS tableName, c.COLUMN_NAME AS columnName, c.DATA_TYPE AS dataType, c.CHARACTER_SET_NAME AS charset, c.COLLATION_NAME AS collation FROM information_schema.columns c JOIN information_schema.tables t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_TYPE = 'BASE TABLE' WHERE c.TABLE_SCHEMA = ? AND c.COLLATION_NAME IS NOT NULL", [config.database]);
+    const mariaJsonCandidates = config.type === 'mariadb' ? columnRows.filter(row =>
+      row.charset === requiredCharset && row.collation === 'utf8mb4_bin' && String(row.dataType).toLowerCase() === 'longtext') : [];
+    const [jsonChecks] = mariaJsonCandidates.length ? await connection.query('SELECT TABLE_NAME AS tableName, CHECK_CLAUSE AS checkClause FROM information_schema.check_constraints WHERE CONSTRAINT_SCHEMA = ?', [config.database]) : [[]];
+    const incompatibleColumns = columnRows.filter(row => {
+      if (row.charset === requiredCharset && row.collation === requiredCollation) return false;
+      if (row.charset !== requiredCharset || row.collation !== 'utf8mb4_bin') return true;
+      if (config.type === 'mysql' && String(row.dataType).toLowerCase() === 'json') return false;
+      return !(config.type === 'mariadb' && String(row.dataType).toLowerCase() === 'longtext' && hasJsonValidationCheck(row, jsonChecks));
+    });
     if (incompatibleColumns.length) {
       const examples = incompatibleColumns.slice(0, 8).map(row => `${row.tableName}.${row.columnName} (${row.charset || 'unknown'} / ${row.collation || 'unknown'})`).join(', ');
       throw new Error(`${incompatibleColumns.length} character column(s) require ${requiredCharset} / ${requiredCollation}; found ${examples}${incompatibleColumns.length > 8 ? ', ...' : ''}. Review column definitions before any conversion.`);

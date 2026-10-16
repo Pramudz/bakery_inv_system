@@ -7,7 +7,7 @@ const { prepareFreshDatabase } = require('../backend/scripts/bootstrap-database.
 const release = manifest();
 const env = { DB_TYPE: 'mysql', DB_HOST: 'localhost', DB_USERNAME: 'tester', DB_PASSWORD: 'test-only', DB_DATABASE: 'customer_db', INIT_DB_CONFIRM: 'customer_db' };
 
-function database({ ledger = release.compiled, tables = ['migrations', 'tbl_platform_user', 'tbl_tenant', 'tbl_user'], counts = {}, version = '8.0.42', selectedDatabase = 'customer_db', databaseCharset = 'utf8mb4', databaseCollation = 'utf8mb4_0900_ai_ci', tableCollation = 'utf8mb4_0900_ai_ci', tableCharset = 'utf8mb4', columns = [], collationAvailable = true, probeSupported = 1 } = {}) {
+function database({ ledger = release.compiled, tables = ['migrations', 'tbl_platform_user', 'tbl_tenant', 'tbl_user'], counts = {}, version = '8.0.42', selectedDatabase = 'customer_db', databaseCharset = 'utf8mb4', databaseCollation = 'utf8mb4_0900_ai_ci', tableCollation = 'utf8mb4_0900_ai_ci', tableCharset = 'utf8mb4', columns = [], checks = [], collationAvailable = true, probeSupported = 1 } = {}) {
   const statements = [];
   let ended = false;
   const connection = {
@@ -19,6 +19,7 @@ function database({ ledger = release.compiled, tables = ['migrations', 'tbl_plat
       if (sql.startsWith('SHOW COLLATION')) return [collationAvailable ? [{ Collation: 'utf8mb4_0900_ai_ci', Charset: 'utf8mb4' }] : []];
       if (sql.includes('AS supported')) return [[{ supported: probeSupported }]];
       if (sql.includes('information_schema.columns')) return [columns];
+      if (sql.includes('information_schema.check_constraints')) return [checks];
       if (sql.includes('information_schema.tables')) return [tables.map(name => ({ name, collation: typeof tableCollation === 'object' ? tableCollation[name] || 'utf8mb4_0900_ai_ci' : tableCollation, charset: typeof tableCharset === 'object' ? tableCharset[name] || 'utf8mb4' : tableCharset }))];
       if (sql.includes('FROM migrations')) return [ledger];
       const table = sql.match(/FROM (tbl_\w+)/)?.[1];
@@ -62,8 +63,47 @@ test('mixed application table collations are diagnosed with table names', async 
 });
 
 test('a character column with a different collation is diagnosed', async () => {
-  const fake = database({ columns: [{ tableName: 'tbl_user', columnName: 'name', charset: 'latin1', collation: 'latin1_swedish_ci' }] });
+  const fake = database({ columns: [{ tableName: 'tbl_user', columnName: 'name', dataType: 'varchar', charset: 'latin1', collation: 'latin1_swedish_ci' }] });
   await assert.rejects(checkDatabaseState('inspect', { env, release, connect: fake.connect }), /tbl_user.name \(latin1 \/ latin1_swedish_ci\)/);
+});
+
+test('MariaDB JSON alias with its exact JSON_VALID check passes baseline inspection', async () => {
+  const fake = database({
+    version: '11.4.13-MariaDB', tables: release.baselineTables, ledger: release.baseline,
+    columns: [{ tableName: 'tbl_inventory_ledger', columnName: 'age_layer_relief', dataType: 'longtext', charset: 'utf8mb4', collation: 'utf8mb4_bin' }],
+    checks: [{ tableName: 'tbl_inventory_ledger', checkClause: 'json_valid(`age_layer_relief`)' }],
+  });
+  const result = await checkDatabaseState('inspect', { env: { ...env, DB_TYPE: 'mariadb' }, release, connect: fake.connect });
+  assert.equal(result.state, 'upgrade');
+  assert.equal(result.applied, 24);
+  assert.equal(result.pending, 27);
+  assert.ok(fake.statements.some(sql => sql.includes('information_schema.check_constraints')));
+  assert.ok(fake.statements.every(sql => /^(SELECT|SHOW)\b/i.test(sql)));
+});
+
+test('MariaDB binary LONGTEXT without an exact JSON_VALID check remains incompatible', async () => {
+  const column = { tableName: 'tbl_inventory_ledger', columnName: 'age_layer_relief', dataType: 'longtext', charset: 'utf8mb4', collation: 'utf8mb4_bin' };
+  for (const checks of [[], [{ tableName: 'tbl_other', checkClause: 'json_valid(`age_layer_relief`)' }], [{ tableName: 'tbl_inventory_ledger', checkClause: 'json_valid(`other_column`)' }], [{ tableName: 'tbl_inventory_ledger', checkClause: 'json_valid(`age_layer_relief`) OR 1' }]]) {
+    const fake = database({ version: '11.4.13-MariaDB', columns: [column], checks });
+    await assert.rejects(checkDatabaseState('inspect', { env: { ...env, DB_TYPE: 'mariadb' }, release, connect: fake.connect }), /age_layer_relief \(utf8mb4 \/ utf8mb4_bin\)/);
+  }
+});
+
+test('ordinary VARCHAR and TEXT with utf8mb4_bin remain incompatible', async () => {
+  for (const dataType of ['varchar', 'text']) {
+    const fake = database({
+      version: '11.4.13-MariaDB',
+      columns: [{ tableName: 'tbl_user', columnName: 'name', dataType, charset: 'utf8mb4', collation: 'utf8mb4_bin' }],
+      checks: [{ tableName: 'tbl_user', checkClause: 'json_valid(`name`)' }],
+    });
+    await assert.rejects(checkDatabaseState('inspect', { env: { ...env, DB_TYPE: 'mariadb' }, release, connect: fake.connect }), /tbl_user.name \(utf8mb4 \/ utf8mb4_bin\)/);
+  }
+});
+
+test('MySQL native JSON metadata needs no MariaDB check lookup', async () => {
+  const fake = database({ columns: [{ tableName: 'tbl_inventory_ledger', columnName: 'age_layer_relief', dataType: 'json', charset: 'utf8mb4', collation: 'utf8mb4_bin' }] });
+  assert.equal((await checkDatabaseState('inspect', { env, release, connect: fake.connect })).state, 'current');
+  assert.ok(!fake.statements.some(sql => sql.includes('information_schema.check_constraints')));
 });
 
 test('required collation must be available and work on the target server', async () => {
